@@ -8,7 +8,8 @@ metadata:
     {{- include "rise.labels" . | nindent 4 }}
 spec:
   generateSelector: true
-  resyncPeriodSeconds: {{ .Values.metacontroller.resyncPeriodSeconds | default 5 }}
+  ignoreStatusChanges: true
+  resyncPeriodSeconds: {{ .Values.metacontroller.resyncPeriodSeconds | default 30 }}
   parentResource:
     apiVersion: rise.dev/v1alpha1
     resource: riseprojects

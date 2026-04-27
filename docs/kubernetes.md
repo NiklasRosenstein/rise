@@ -376,7 +376,7 @@ All resources are labeled for management and selection:
 
 ```yaml
 labels:
-  rise.dev/managed-by: "rise"
+  app.kubernetes.io/managed-by: "rise"
   rise.dev/project: "my-app"
   rise.dev/environment: "production"        # present when deployment has an environment
   rise.dev/deployment-group: "default"
@@ -590,7 +590,7 @@ kind: Namespace
 metadata:
   name: rise-my-app
   labels:
-    rise.dev/managed-by: "rise"
+    app.kubernetes.io/managed-by: "rise"
     rise.dev/project: "my-app"
 ```
 
@@ -696,7 +696,7 @@ metadata:
   name: my-app-20251207-143022
   namespace: rise-my-app
   labels:
-    rise.dev/managed-by: "rise"
+    app.kubernetes.io/managed-by: "rise"
     rise.dev/project: "my-app"
     rise.dev/environment: "production"
     rise.dev/deployment-group: "default"
@@ -741,7 +741,7 @@ metadata:
   name: default
   namespace: rise-my-app
   labels:
-    rise.dev/managed-by: "rise"
+    app.kubernetes.io/managed-by: "rise"
     rise.dev/project: "my-app"
     rise.dev/environment: "production"
 spec:
@@ -769,7 +769,7 @@ metadata:
   name: default
   namespace: rise-my-app
   labels:
-    rise.dev/managed-by: "rise"
+    app.kubernetes.io/managed-by: "rise"
     rise.dev/project: "my-app"
     rise.dev/environment: "production"
   annotations:

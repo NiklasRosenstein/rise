@@ -24,6 +24,7 @@ use crate::db::models::{Deployment, DeploymentStatus, Project, TerminationReason
 use crate::db::{
     deployments as db_deployments, environments as db_environments, projects as db_projects,
 };
+use crate::server::deployment::crd;
 use crate::server::deployment::resource_builder::{
     ResourceBuilder, ANNOTATION_LAST_REFRESH, IMAGE_PULL_SECRET_NAME,
     IRRECOVERABLE_CONTAINER_REASONS, LABEL_DEPLOYMENT_ID,
@@ -68,6 +69,8 @@ pub struct ObservedChildren {
 pub struct SyncResponse {
     pub status: serde_json::Value,
     pub children: Vec<serde_json::Value>,
+    #[serde(skip_serializing_if = "Option::is_none", rename = "resyncAfterSeconds")]
+    pub resync_after_seconds: Option<f64>,
 }
 
 /// Metacontroller finalize request (same shape as sync)
@@ -116,6 +119,7 @@ pub async fn handle_sync(
                 Json(SyncResponse {
                     status: serde_json::json!({"error": "missing parent name"}),
                     children: vec![],
+                    resync_after_seconds: Some(300.0),
                 }),
             );
         }
@@ -133,6 +137,7 @@ pub async fn handle_sync(
                         "lastSyncTime": Utc::now().to_rfc3339(),
                     }),
                     children: vec![],
+                    resync_after_seconds: Some(300.0),
                 }),
             )
         }
@@ -148,13 +153,20 @@ async fn process_sync(
     let project = match db_projects::find_by_name(&state.db_pool, project_name).await? {
         Some(p) => p,
         None => {
-            warn!(project = %project_name, "Project not found in DB, returning empty children");
+            warn!(project = %project_name, "Project not found in DB, deleting orphaned RiseProject CRD");
+            // Auto-delete the orphaned CRD so Metacontroller stops syncing it
+            if let Some(ref kube_client) = state.kube_client {
+                if let Err(e) = crd::delete_rise_project(kube_client, project_name).await {
+                    error!(project = %project_name, "Failed to delete orphaned RiseProject CRD: {:?}", e);
+                }
+            }
             return Ok(SyncResponse {
                 status: serde_json::json!({
                     "error": "project not found",
                     "lastSyncTime": Utc::now().to_rfc3339(),
                 }),
                 children: vec![],
+                resync_after_seconds: Some(300.0),
             });
         }
     };
@@ -182,6 +194,7 @@ async fn process_sync(
                     "lastSyncTime": Utc::now().to_rfc3339(),
                 }),
                 children: vec![],
+                resync_after_seconds: Some(300.0),
             });
         }
     };
@@ -196,6 +209,7 @@ async fn process_sync(
                     "lastSyncTime": Utc::now().to_rfc3339(),
                 }),
                 children: vec![],
+                resync_after_seconds: Some(300.0),
             });
         }
     };
@@ -215,6 +229,7 @@ async fn process_sync(
             "lastSyncTime": Utc::now().to_rfc3339(),
         }),
         children,
+        resync_after_seconds: None,
     })
 }
 
@@ -374,7 +389,12 @@ async fn check_deployment_health_from_observed(
     project: &Project,
     observed: &ObservedChildren,
 ) -> anyhow::Result<()> {
-    let k8s_deploy_name = format!("{}-{}", project.name, deployment.deployment_id);
+    // Metacontroller keys namespaced children of cluster-scoped parents as "namespace/name"
+    let namespace = ResourceBuilder::namespace_name(project);
+    let k8s_deploy_name = format!(
+        "{}/{}-{}",
+        namespace, project.name, deployment.deployment_id
+    );
 
     let observed_deploy = match observed.deployments.get(&k8s_deploy_name) {
         Some(d) => d,
@@ -402,17 +422,46 @@ async fn check_deployment_health_from_observed(
         .and_then(|s| s.ready_replicas)
         .unwrap_or(0);
 
-    // Check for pod-level errors by querying kube-rs directly
+    // Check for pod-level errors and collect full pod status via kube-rs
     // (Metacontroller only gives us the Deployment, not individual pods)
-    let (has_pod_error, pod_error_msg) =
-        check_pod_errors_via_kube(state, project, deployment).await;
+    let pod_check =
+        check_pod_errors_via_kube(state, project, deployment, desired_replicas, ready_replicas)
+            .await;
+
+    // Update controller_metadata with pod status
+    if let Some(ref pod_status) = pod_check.pod_status {
+        let is_healthy = deployment.status == DeploymentStatus::Healthy
+            || (deployment.status == DeploymentStatus::Deploying
+                && !pod_check.has_error
+                && ready_replicas >= desired_replicas
+                && desired_replicas > 0);
+
+        let metadata = serde_json::json!({
+            "pod_status": pod_status,
+            "health": {
+                "last_check": Utc::now().to_rfc3339(),
+                "healthy": is_healthy,
+            },
+        });
+        if let Err(e) =
+            db_deployments::update_controller_metadata(&state.db_pool, deployment.id, &metadata)
+                .await
+        {
+            warn!(
+                deployment_id = %deployment.deployment_id,
+                "Failed to update controller metadata: {:?}", e
+            );
+        }
+    }
 
     let is_ready = ready_replicas >= desired_replicas && desired_replicas > 0;
 
     match deployment.status {
         DeploymentStatus::Deploying => {
-            if has_pod_error {
-                let error_msg = pod_error_msg.unwrap_or_else(|| "Pod error".to_string());
+            if pod_check.has_error {
+                let error_msg = pod_check
+                    .error_message
+                    .unwrap_or_else(|| "Pod error".to_string());
                 warn!(
                     deployment_id = %deployment.deployment_id,
                     "Deployment has irrecoverable pod error: {}", error_msg
@@ -441,8 +490,8 @@ async fn check_deployment_health_from_observed(
             }
         }
 
-        DeploymentStatus::Healthy if has_pod_error || !is_ready => {
-            let msg = pod_error_msg.unwrap_or_else(|| {
+        DeploymentStatus::Healthy if pod_check.has_error || !is_ready => {
+            let msg = pod_check.error_message.unwrap_or_else(|| {
                 format!(
                     "Deployment unhealthy: {}/{} replicas ready",
                     ready_replicas, desired_replicas
@@ -456,7 +505,7 @@ async fn check_deployment_health_from_observed(
             db_projects::update_calculated_status(&state.db_pool, project.id).await?;
         }
 
-        DeploymentStatus::Unhealthy if !has_pod_error && is_ready => {
+        DeploymentStatus::Unhealthy if !pod_check.has_error && is_ready => {
             info!(
                 deployment_id = %deployment.deployment_id,
                 "Unhealthy deployment has recovered, marking as Healthy"
@@ -471,16 +520,33 @@ async fn check_deployment_health_from_observed(
     Ok(())
 }
 
-/// Check pods for errors via direct kube-rs API call.
-/// Returns (has_error, optional_error_message).
+/// Result of checking pod status via kube-rs API.
+struct PodCheckResult {
+    /// Whether any pod has an irrecoverable error
+    has_error: bool,
+    /// Error message if has_error is true
+    error_message: Option<String>,
+    /// Full pod status for storing in controller_metadata
+    pod_status: Option<serde_json::Value>,
+}
+
+/// Check pods for errors via direct kube-rs API call and collect full pod status.
 async fn check_pod_errors_via_kube(
     state: &AppState,
     project: &Project,
     deployment: &Deployment,
-) -> (bool, Option<String>) {
+    desired_replicas: i32,
+    ready_replicas: i32,
+) -> PodCheckResult {
     let kube_client = match &state.kube_client {
         Some(client) => client,
-        None => return (false, None),
+        None => {
+            return PodCheckResult {
+                has_error: false,
+                error_message: None,
+                pod_status: None,
+            }
+        }
     };
 
     let namespace = ResourceBuilder::namespace_name(project);
@@ -500,44 +566,136 @@ async fn check_pod_errors_via_kube(
                 deployment_id = %deployment.deployment_id,
                 "Failed to list pods for health check: {:?}", e
             );
-            return (false, None);
+            return PodCheckResult {
+                has_error: false,
+                error_message: None,
+                pod_status: None,
+            };
         }
     };
 
-    for pod in pods.items {
-        if let Some(status) = pod.status {
-            if let Some(container_statuses) = status.container_statuses {
-                for cs in container_statuses {
-                    // Check waiting state for irrecoverable errors
-                    if let Some(waiting) = cs.state.as_ref().and_then(|s| s.waiting.as_ref()) {
+    let mut has_error = false;
+    let mut error_message: Option<String> = None;
+    let mut pod_infos: Vec<serde_json::Value> = Vec::new();
+    let mut current_replicas: i32 = 0;
+
+    for pod in &pods.items {
+        current_replicas += 1;
+        let pod_name = pod
+            .metadata
+            .name
+            .as_deref()
+            .unwrap_or("unknown")
+            .to_string();
+        let pod_phase = pod
+            .status
+            .as_ref()
+            .and_then(|s| s.phase.as_deref())
+            .unwrap_or("Unknown")
+            .to_string();
+
+        // Collect pod conditions
+        let conditions: Vec<serde_json::Value> = pod
+            .status
+            .as_ref()
+            .and_then(|s| s.conditions.as_ref())
+            .map(|conds| {
+                conds
+                    .iter()
+                    .map(|c| {
+                        serde_json::json!({
+                            "type": c.type_,
+                            "status": c.status,
+                            "reason": c.reason,
+                            "message": c.message,
+                        })
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+
+        // Collect container statuses
+        let mut container_infos: Vec<serde_json::Value> = Vec::new();
+        if let Some(container_statuses) = pod
+            .status
+            .as_ref()
+            .and_then(|s| s.container_statuses.as_ref())
+        {
+            for cs in container_statuses {
+                let state_info = if let Some(state) = &cs.state {
+                    if let Some(waiting) = &state.waiting {
                         let reason = waiting.reason.as_deref().unwrap_or("");
-                        if IRRECOVERABLE_CONTAINER_REASONS.contains(&reason) {
+                        // Check for irrecoverable errors
+                        if !has_error && IRRECOVERABLE_CONTAINER_REASONS.contains(&reason) {
+                            has_error = true;
                             let message = waiting.message.as_deref().unwrap_or(reason);
-                            return (true, Some(format!("{}: {}", reason, message)));
+                            error_message = Some(format!("{}: {}", reason, message));
                         }
-                    }
-                    // Check terminated with too many restarts
-                    if let Some(terminated) = cs.state.as_ref().and_then(|s| s.terminated.as_ref())
-                    {
-                        if terminated.exit_code != 0 && cs.restart_count >= 3 {
+                        Some(serde_json::json!({
+                            "state_type": "waiting",
+                            "reason": waiting.reason,
+                            "message": waiting.message,
+                        }))
+                    } else if let Some(running) = &state.running {
+                        Some(serde_json::json!({
+                            "state_type": "running",
+                            "reason": running.started_at.as_ref().map(|t| t.0.to_string()),
+                        }))
+                    } else if let Some(terminated) = &state.terminated {
+                        // Check terminated with too many restarts
+                        if !has_error && terminated.exit_code != 0 && cs.restart_count >= 3 {
+                            has_error = true;
                             let reason = terminated.reason.as_deref().unwrap_or("ContainerFailed");
                             let default_msg = format!("Exit code: {}", terminated.exit_code);
                             let message = terminated.message.as_deref().unwrap_or(&default_msg);
-                            return (
-                                true,
-                                Some(format!(
-                                    "{}: {} (restarts: {})",
-                                    reason, message, cs.restart_count
-                                )),
-                            );
+                            error_message = Some(format!(
+                                "{}: {} (restarts: {})",
+                                reason, message, cs.restart_count
+                            ));
                         }
+                        Some(serde_json::json!({
+                            "state_type": "terminated",
+                            "reason": terminated.reason,
+                            "message": terminated.message,
+                            "exit_code": terminated.exit_code,
+                        }))
+                    } else {
+                        None
                     }
-                }
+                } else {
+                    None
+                };
+
+                container_infos.push(serde_json::json!({
+                    "name": cs.name,
+                    "ready": cs.ready,
+                    "restart_count": cs.restart_count,
+                    "state": state_info,
+                }));
             }
         }
+
+        pod_infos.push(serde_json::json!({
+            "name": pod_name,
+            "phase": pod_phase,
+            "conditions": conditions,
+            "containers": container_infos,
+        }));
     }
 
-    (false, None)
+    let pod_status = serde_json::json!({
+        "desired_replicas": desired_replicas,
+        "ready_replicas": ready_replicas,
+        "current_replicas": current_replicas,
+        "pods": pod_infos,
+        "last_checked": Utc::now().to_rfc3339(),
+    });
+
+    PodCheckResult {
+        has_error,
+        error_message,
+        pod_status: Some(pod_status),
+    }
 }
 
 /// Handle a deployment becoming Healthy: mark active, supersede old deployments.
@@ -848,8 +1006,11 @@ async fn build_image_pull_secret(
     namespace: &str,
     observed: &ObservedChildren,
 ) -> anyhow::Result<Option<Secret>> {
+    // Metacontroller keys namespaced children of cluster-scoped parents as "namespace/name"
+    let secret_key = format!("{}/{}", namespace, IMAGE_PULL_SECRET_NAME);
+
     // Check if existing secret is fresh enough
-    let needs_refresh = match observed.secrets.get(IMAGE_PULL_SECRET_NAME) {
+    let needs_refresh = match observed.secrets.get(&secret_key) {
         Some(secret_json) => {
             let last_refresh = secret_json
                 .get("metadata")
@@ -871,7 +1032,7 @@ async fn build_image_pull_secret(
 
     if !needs_refresh {
         // Return the existing secret so Metacontroller keeps it
-        if let Some(secret_json) = observed.secrets.get(IMAGE_PULL_SECRET_NAME) {
+        if let Some(secret_json) = observed.secrets.get(&secret_key) {
             let existing: Secret = serde_json::from_value(secret_json.clone())?;
             return Ok(Some(existing));
         }

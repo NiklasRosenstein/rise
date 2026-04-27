@@ -31,7 +31,7 @@ use crate::server::registry::{
 use crate::server::settings::AccessRequirement;
 
 // Re-export constants used by webhook and other consumers
-pub const LABEL_MANAGED_BY: &str = "rise.dev/managed-by";
+pub const LABEL_MANAGED_BY: &str = "app.kubernetes.io/managed-by";
 pub const LABEL_PROJECT: &str = "rise.dev/project";
 pub const LABEL_DEPLOYMENT_GROUP: &str = "rise.dev/deployment-group";
 pub const LABEL_DEPLOYMENT_ID: &str = "rise.dev/deployment-id";

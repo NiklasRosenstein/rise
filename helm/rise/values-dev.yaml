@@ -1,0 +1,10 @@
+# Dev values: Rise runs on the host, only install CRDs + Metacontroller into the cluster.
+replicaCount: 0
+
+metacontroller:
+  webhookBaseUrl: "http://host.minikube.internal:3000"
+
+postgresql:
+  enabled: false
+dex:
+  enabled: false
