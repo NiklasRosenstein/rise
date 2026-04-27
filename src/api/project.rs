@@ -50,6 +50,8 @@ pub struct Project {
     pub app_users: Vec<UserInfo>,
     #[serde(default)]
     pub app_teams: Vec<TeamInfo>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source_url: Option<String>,
 }
 
 /// User information in owner context
@@ -106,6 +108,9 @@ pub struct UpdateProjectRequest {
     pub app_users: Option<Vec<String>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub app_teams: Option<Vec<String>>,
+    /// URL to where the project code lives. Use Some(None) to clear, Some(Some(url)) to set.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source_url: Option<Option<String>>,
 }
 
 /// Domain item in list response

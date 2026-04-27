@@ -201,6 +201,7 @@ mod tests {
             "public".to_string(),
             Some(owner.id),
             None,
+            None,
         )
         .await
         .unwrap();
@@ -268,6 +269,7 @@ mod tests {
             "public".to_string(),
             Some(owner.id),
             None,
+            None,
         )
         .await
         .unwrap();
@@ -302,6 +304,7 @@ mod tests {
             ProjectStatus::Stopped,
             "public".to_string(),
             Some(user.id),
+            None,
             None,
         )
         .await

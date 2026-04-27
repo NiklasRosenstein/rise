@@ -100,6 +100,10 @@ mod client_models {
         pub http_port: u16,
         #[serde(default)]
         pub can_rollback: bool,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        pub job_url: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        pub pull_request_url: Option<String>,
         #[serde(default)]
         pub created: String,
         #[serde(default)]

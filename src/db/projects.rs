@@ -17,7 +17,7 @@ pub async fn list(pool: &PgPool, owner_user_id: Option<Uuid>) -> Result<Vec<Proj
                 status as "status: ProjectStatus",
                 access_class,
                 owner_user_id, owner_team_id,
-                finalizers,
+                finalizers, source_url,
                 created_at, updated_at
             FROM projects
             WHERE owner_user_id = $1
@@ -36,7 +36,7 @@ pub async fn list(pool: &PgPool, owner_user_id: Option<Uuid>) -> Result<Vec<Proj
                 status as "status: ProjectStatus",
                 access_class,
                 owner_user_id, owner_team_id,
-                finalizers,
+                finalizers, source_url,
                 created_at, updated_at
             FROM projects
             ORDER BY created_at DESC
@@ -59,7 +59,7 @@ pub async fn list_accessible_by_user(pool: &PgPool, user_id: Uuid) -> Result<Vec
             p.status as "status: ProjectStatus",
             p.access_class,
             p.owner_user_id, p.owner_team_id,
-            p.finalizers,
+            p.finalizers, p.source_url,
             p.created_at, p.updated_at
         FROM projects p
         WHERE
@@ -96,7 +96,7 @@ pub async fn find_by_name(pool: &PgPool, name: &str) -> Result<Option<Project>> 
             status as "status: ProjectStatus",
             access_class,
             owner_user_id, owner_team_id,
-            finalizers,
+            finalizers, source_url,
             created_at, updated_at
         FROM projects
         WHERE name = $1
@@ -120,7 +120,7 @@ pub async fn find_by_id(pool: &PgPool, id: Uuid) -> Result<Option<Project>> {
             status as "status: ProjectStatus",
             access_class,
             owner_user_id, owner_team_id,
-            finalizers,
+            finalizers, source_url,
             created_at, updated_at
         FROM projects
         WHERE id = $1
@@ -144,7 +144,7 @@ pub async fn find_by_ids(pool: &PgPool, ids: &[Uuid]) -> Result<Vec<Project>> {
             status as "status: ProjectStatus",
             access_class,
             owner_user_id, owner_team_id,
-            finalizers,
+            finalizers, source_url,
             created_at, updated_at
         FROM projects
         WHERE id = ANY($1)
@@ -166,6 +166,7 @@ pub async fn create<'a, E>(
     access_class: String,
     owner_user_id: Option<Uuid>,
     owner_team_id: Option<Uuid>,
+    source_url: Option<&str>,
 ) -> Result<Project>
 where
     E: sqlx::Executor<'a, Database = sqlx::Postgres>,
@@ -175,21 +176,22 @@ where
     let project = sqlx::query_as!(
         Project,
         r#"
-        INSERT INTO projects (name, status, access_class, owner_user_id, owner_team_id)
-        VALUES ($1, $2, $3, $4, $5)
+        INSERT INTO projects (name, status, access_class, owner_user_id, owner_team_id, source_url)
+        VALUES ($1, $2, $3, $4, $5, $6)
         RETURNING
             id, name,
             status as "status: ProjectStatus",
             access_class,
             owner_user_id, owner_team_id,
-            finalizers,
+            finalizers, source_url,
             created_at, updated_at
         "#,
         name,
         status_str,
         access_class,
         owner_user_id,
-        owner_team_id
+        owner_team_id,
+        source_url
     )
     .fetch_one(executor)
     .await
@@ -213,7 +215,7 @@ pub async fn update_status(pool: &PgPool, id: Uuid, status: ProjectStatus) -> Re
             status as "status: ProjectStatus",
             access_class,
             owner_user_id, owner_team_id,
-            finalizers,
+            finalizers, source_url,
             created_at, updated_at
         "#,
         id,
@@ -239,7 +241,7 @@ pub async fn update_access_class(pool: &PgPool, id: Uuid, access_class: String) 
             status as "status: ProjectStatus",
             access_class,
             owner_user_id, owner_team_id,
-            finalizers,
+            finalizers, source_url,
             created_at, updated_at
         "#,
         id,
@@ -270,7 +272,7 @@ pub async fn update_owner(
             status as "status: ProjectStatus",
             access_class,
             owner_user_id, owner_team_id,
-            finalizers,
+            finalizers, source_url,
             created_at, updated_at
         "#,
         id,
@@ -280,6 +282,36 @@ pub async fn update_owner(
     .fetch_one(pool)
     .await
     .context("Failed to update project owner")?;
+
+    Ok(project)
+}
+
+/// Update project source URL
+pub async fn update_source_url(
+    pool: &PgPool,
+    id: Uuid,
+    source_url: Option<String>,
+) -> Result<Project> {
+    let project = sqlx::query_as!(
+        Project,
+        r#"
+        UPDATE projects
+        SET source_url = $2
+        WHERE id = $1
+        RETURNING
+            id, name,
+            status as "status: ProjectStatus",
+            access_class,
+            owner_user_id, owner_team_id,
+            finalizers, source_url,
+            created_at, updated_at
+        "#,
+        id,
+        source_url
+    )
+    .fetch_one(pool)
+    .await
+    .context("Failed to update project source URL")?;
 
     Ok(project)
 }
@@ -484,7 +516,7 @@ pub async fn mark_deleting(pool: &PgPool, id: Uuid) -> Result<Project> {
             status as "status: ProjectStatus",
             access_class,
             owner_user_id, owner_team_id,
-            finalizers,
+            finalizers, source_url,
             created_at, updated_at
         "#,
         id
@@ -506,7 +538,7 @@ pub async fn find_deleting(pool: &PgPool, limit: i64) -> Result<Vec<Project>> {
             status as "status: ProjectStatus",
             access_class,
             owner_user_id, owner_team_id,
-            finalizers,
+            finalizers, source_url,
             created_at, updated_at
         FROM projects
         WHERE status = 'Deleting'
@@ -580,7 +612,7 @@ pub async fn find_deleting_with_finalizer(
             status as "status: ProjectStatus",
             access_class,
             owner_user_id, owner_team_id,
-            finalizers,
+            finalizers, source_url,
             created_at, updated_at
         FROM projects
         WHERE status = 'Deleting' AND $1 = ANY(finalizers)
@@ -625,7 +657,7 @@ pub async fn list_active(pool: &PgPool) -> Result<Vec<Project>> {
             status as "status: ProjectStatus",
             access_class,
             owner_user_id, owner_team_id,
-            finalizers,
+            finalizers, source_url,
             created_at, updated_at
         FROM projects
         WHERE status NOT IN ('Deleting', 'Terminated')
@@ -662,6 +694,7 @@ mod tests {
             "default".to_string(),
             Some(user.id),
             None,
+            None,
         )
         .await
         .expect("Failed to create test project");
@@ -682,6 +715,8 @@ mod tests {
                 expires_at: None,
                 http_port: 8080,
                 is_active: false, // Initially not active
+                job_url: None,
+                pull_request_url: None,
             },
         )
         .await
@@ -725,6 +760,8 @@ mod tests {
                 expires_at: None,
                 http_port: 8080,
                 is_active: false, // This is NOT active
+                job_url: None,
+                pull_request_url: None,
             },
         )
         .await
@@ -744,6 +781,53 @@ mod tests {
         );
     }
 
+    /// Test setting and clearing source_url on a project
+    #[sqlx::test]
+    async fn test_update_source_url(pool: PgPool) {
+        let user = crate::db::users::create(&pool, "test@example.com")
+            .await
+            .expect("Failed to create test user");
+
+        let project = create(
+            &pool,
+            "source-url-test",
+            ProjectStatus::Stopped,
+            "default".to_string(),
+            Some(user.id),
+            None,
+            None,
+        )
+        .await
+        .expect("Failed to create test project");
+
+        assert!(
+            project.source_url.is_none(),
+            "source_url should be None initially"
+        );
+
+        // Set source_url
+        let project = update_source_url(
+            &pool,
+            project.id,
+            Some("https://github.com/example/repo".to_string()),
+        )
+        .await
+        .expect("Failed to set source_url");
+
+        assert_eq!(
+            project.source_url.as_deref(),
+            Some("https://github.com/example/repo"),
+            "source_url should be set"
+        );
+
+        // Clear source_url
+        let project = update_source_url(&pool, project.id, None)
+            .await
+            .expect("Failed to clear source_url");
+
+        assert!(project.source_url.is_none(), "source_url should be cleared");
+    }
+
     /// Test that project status is Stopped when no active deployment but has failed deployment
     #[sqlx::test]
     async fn test_project_status_with_only_failed_deployment(pool: PgPool) {
@@ -759,6 +843,7 @@ mod tests {
             ProjectStatus::Stopped,
             "default".to_string(),
             Some(user.id),
+            None,
             None,
         )
         .await
@@ -780,6 +865,8 @@ mod tests {
                 expires_at: None,
                 http_port: 8080,
                 is_active: false,
+                job_url: None,
+                pull_request_url: None,
             },
         )
         .await

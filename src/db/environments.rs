@@ -292,6 +292,7 @@ mod tests {
             "public".to_string(),
             Some(user.id),
             None,
+            None,
         )
         .await?;
 
@@ -327,6 +328,7 @@ mod tests {
             "public".to_string(),
             Some(user.id),
             None,
+            None,
         )
         .await?;
 
@@ -348,6 +350,7 @@ mod tests {
             ProjectStatus::Stopped,
             "public".to_string(),
             Some(user.id),
+            None,
             None,
         )
         .await?;
@@ -409,6 +412,7 @@ mod tests {
             "public".to_string(),
             Some(user.id),
             None,
+            None,
         )
         .await?;
 
@@ -429,6 +433,7 @@ mod tests {
             ProjectStatus::Stopped,
             "public".to_string(),
             Some(user.id),
+            None,
             None,
         )
         .await?;
@@ -477,6 +482,7 @@ mod tests {
             ProjectStatus::Stopped,
             "public".to_string(),
             Some(user.id),
+            None,
             None,
         )
         .await?;

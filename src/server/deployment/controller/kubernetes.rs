@@ -5612,6 +5612,7 @@ mod tests {
             owner_user_id: None,
             owner_team_id: None,
             finalizers: vec![],
+            source_url: None,
             created_at: chrono::Utc::now(),
             updated_at: chrono::Utc::now(),
         }
@@ -5640,6 +5641,8 @@ mod tests {
             is_active: false,
             deploying_started_at: None,
             first_healthy_at: None,
+            job_url: None,
+            pull_request_url: None,
             created_at: chrono::Utc::now(),
             updated_at: chrono::Utc::now(),
         }
@@ -5827,6 +5830,7 @@ mod tests {
             owner_user_id: None,
             owner_team_id: None,
             finalizers: vec![],
+            source_url: None,
             created_at: chrono::Utc::now(),
             updated_at: chrono::Utc::now(),
         };
@@ -5853,6 +5857,8 @@ mod tests {
             is_active: false,
             deploying_started_at: None,
             first_healthy_at: None,
+            job_url: None,
+            pull_request_url: None,
             created_at: chrono::Utc::now(),
             updated_at: chrono::Utc::now(),
         };
@@ -5906,6 +5912,7 @@ mod tests {
             owner_user_id: None,
             owner_team_id: None,
             finalizers: vec![],
+            source_url: None,
             created_at: chrono::Utc::now(),
             updated_at: chrono::Utc::now(),
         };
@@ -5932,6 +5939,8 @@ mod tests {
             is_active: false,
             deploying_started_at: None,
             first_healthy_at: None,
+            job_url: None,
+            pull_request_url: None,
             created_at: chrono::Utc::now(),
             updated_at: chrono::Utc::now(),
         };
@@ -5963,6 +5972,7 @@ mod tests {
             owner_user_id: None,
             owner_team_id: None,
             finalizers: vec![],
+            source_url: None,
             created_at: chrono::Utc::now(),
             updated_at: chrono::Utc::now(),
         };
@@ -5989,6 +5999,8 @@ mod tests {
             is_active: false,
             deploying_started_at: None,
             first_healthy_at: None,
+            job_url: None,
+            pull_request_url: None,
             created_at: chrono::Utc::now(),
             updated_at: chrono::Utc::now(),
         };
@@ -6018,6 +6030,7 @@ mod tests {
             owner_user_id: None,
             owner_team_id: None,
             finalizers: vec![],
+            source_url: None,
             created_at: chrono::Utc::now(),
             updated_at: chrono::Utc::now(),
         };
@@ -6044,6 +6057,8 @@ mod tests {
             is_active: false,
             deploying_started_at: None,
             first_healthy_at: None,
+            job_url: None,
+            pull_request_url: None,
             created_at: chrono::Utc::now(),
             updated_at: chrono::Utc::now(),
         };
@@ -6105,6 +6120,7 @@ mod tests {
             owner_user_id: None,
             owner_team_id: None,
             finalizers: vec![],
+            source_url: None,
             created_at: chrono::Utc::now(),
             updated_at: chrono::Utc::now(),
         };
@@ -6131,6 +6147,8 @@ mod tests {
             is_active: false,
             deploying_started_at: None,
             first_healthy_at: None,
+            job_url: None,
+            pull_request_url: None,
             created_at: chrono::Utc::now(),
             updated_at: chrono::Utc::now(),
         };
@@ -6213,6 +6231,7 @@ mod tests {
             owner_user_id: None,
             owner_team_id: None,
             finalizers: vec![],
+            source_url: None,
             created_at: chrono::Utc::now(),
             updated_at: chrono::Utc::now(),
         };
@@ -6239,6 +6258,8 @@ mod tests {
             is_active: false,
             deploying_started_at: None,
             first_healthy_at: None,
+            job_url: None,
+            pull_request_url: None,
             created_at: chrono::Utc::now(),
             updated_at: chrono::Utc::now(),
         };
@@ -6359,6 +6380,7 @@ mod tests {
             owner_user_id: None,
             owner_team_id: None,
             finalizers: vec![],
+            source_url: None,
             created_at: chrono::Utc::now(),
             updated_at: chrono::Utc::now(),
         };
@@ -6384,6 +6406,8 @@ mod tests {
             is_active: false,
             deploying_started_at: None,
             first_healthy_at: None,
+            job_url: None,
+            pull_request_url: None,
             created_at: chrono::Utc::now(),
             updated_at: chrono::Utc::now(),
         };

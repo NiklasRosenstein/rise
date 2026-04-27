@@ -423,6 +423,8 @@ async fn convert_deployment(
         http_port: deployment.http_port as u16,
         is_active: deployment.is_active,
         can_rollback,
+        job_url: deployment.job_url,
+        pull_request_url: deployment.pull_request_url,
         created: deployment.created_at.to_rfc3339(),
         updated: deployment.updated_at.to_rfc3339(),
     }
@@ -579,6 +581,22 @@ pub async fn create_deployment(
             ));
         }
     }
+
+    // Validate and normalize URL fields if provided
+    let job_url = match payload.job_url {
+        Some(ref url) => Some(
+            crate::server::project::handlers::validate_http_url(url)
+                .map_err(|e| ServerError::bad_request(format!("job_url: {e}")))?,
+        ),
+        None => None,
+    };
+    let pull_request_url = match payload.pull_request_url {
+        Some(ref url) => Some(
+            crate::server::project::handlers::validate_http_url(url)
+                .map_err(|e| ServerError::bad_request(format!("pull_request_url: {e}")))?,
+        ),
+        None => None,
+    };
 
     validate_env_overrides(&payload.env_overrides)?;
 
@@ -760,6 +778,8 @@ pub async fn create_deployment(
                 expires_at,                        // expires_at
                 http_port: final_http_port as i32, // Use determined http_port
                 is_active: false,                  // Deployments start as inactive
+                job_url: job_url.as_deref(),
+                pull_request_url: pull_request_url.as_deref(),
             },
             &project,
         )
@@ -878,6 +898,8 @@ pub async fn create_deployment(
                     expires_at,
                     http_port: effective_http_port as i32,
                     is_active: false,
+                    job_url: job_url.as_deref(),
+                    pull_request_url: pull_request_url.as_deref(),
                 },
                 &project,
             )
@@ -961,6 +983,8 @@ pub async fn create_deployment(
                 expires_at,
                 http_port: effective_http_port as i32,
                 is_active: false,
+                job_url: job_url.as_deref(),
+                pull_request_url: pull_request_url.as_deref(),
             },
             &project,
         )
@@ -1046,6 +1070,8 @@ pub async fn create_deployment(
                 expires_at,                            // expires_at
                 http_port: effective_http_port as i32, // http_port
                 is_active: false,                      // Deployments start as inactive
+                job_url: job_url.as_deref(),
+                pull_request_url: pull_request_url.as_deref(),
             },
             &project,
         )

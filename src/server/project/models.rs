@@ -86,6 +86,8 @@ pub struct Project {
     pub app_users: Vec<UserInfo>, // Users who can access the deployed app
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub app_teams: Vec<TeamInfo>, // Teams whose members can access the deployed app
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source_url: Option<String>, // URL to where the project code lives
     // Timestamps
     #[serde(default)]
     pub created: String,
@@ -102,6 +104,8 @@ pub struct CreateProjectRequest {
     pub app_users: Vec<String>, // User emails or IDs
     #[serde(default)]
     pub app_teams: Vec<String>, // Team names or IDs
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source_url: Option<String>, // URL to where the project code lives
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
@@ -115,8 +119,9 @@ pub struct UpdateProjectRequest {
     pub access_class: Option<String>,
     pub status: Option<ProjectStatus>,
     pub owner: Option<ProjectOwner>,
-    pub app_users: Option<Vec<String>>, // User emails or IDs
-    pub app_teams: Option<Vec<String>>, // Team names or IDs
+    pub app_users: Option<Vec<String>>,     // User emails or IDs
+    pub app_teams: Option<Vec<String>>,     // Team names or IDs
+    pub source_url: Option<Option<String>>, // URL to where the project code lives (None = don't update, Some(None) = clear)
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]

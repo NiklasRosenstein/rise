@@ -16,6 +16,20 @@ use axum::{
 };
 use uuid::Uuid;
 
+/// Validate that a URL uses only http or https schemes.
+/// Returns the trimmed URL on success, or an error message if the URL is invalid or uses a disallowed scheme.
+pub fn validate_http_url(url: &str) -> Result<String, String> {
+    let trimmed = url.trim();
+    let parsed = url::Url::parse(trimmed).map_err(|e| format!("Invalid URL: {e}"))?;
+    match parsed.scheme() {
+        "http" | "https" => Ok(trimmed.to_string()),
+        scheme => Err(format!(
+            "URL scheme '{}' is not allowed; only http and https are permitted",
+            scheme
+        )),
+    }
+}
+
 /// List available access classes for the deployment controller
 pub async fn list_access_classes(
     State(state): State<AppState>,
@@ -106,6 +120,15 @@ pub async fn create_project(
         )));
     }
 
+    // Validate and normalize source_url if provided
+    let source_url = match payload.source_url {
+        Some(ref url) => Some(
+            validate_http_url(url)
+                .map_err(|e| ServerError::bad_request(format!("source_url: {e}")))?,
+        ),
+        None => None,
+    };
+
     // Validate owner - exactly one of owner_user or owner_team must be set
     let (owner_user_id, owner_team_id) = match &payload.owner {
         ProjectOwner::User(user_id) => {
@@ -155,6 +178,7 @@ pub async fn create_project(
         payload.access_class,
         owner_user_id,
         owner_team_id,
+        source_url.as_deref(),
     )
     .await
     .map_err(|e| {
@@ -330,6 +354,7 @@ pub async fn list_projects(
             finalizers: vec![],      // Not populated in list view for performance
             app_users: vec![],       // Not populated in list view for performance
             app_teams: vec![],       // Not populated in list view for performance
+            source_url: project.source_url,
         });
     }
 
@@ -631,6 +656,21 @@ pub async fn update_project(
         .internal_err("Failed to update project status")?;
     }
 
+    // Update source_url if provided (Some(None) clears, Some(Some(url)) sets)
+    if let Some(ref source_url) = payload.source_url {
+        let normalized = match source_url {
+            Some(url) => Some(
+                validate_http_url(url)
+                    .map_err(|e| ServerError::bad_request(format!("source_url: {e}")))?,
+            ),
+            None => None,
+        };
+        updated_project =
+            projects::update_source_url(&state.db_pool, updated_project.id, normalized)
+                .await
+                .internal_err("Failed to update project source URL")?;
+    }
+
     let owner_info = resolve_owner_info(&state, &updated_project)
         .await
         .map_err(|e| ServerError::internal(format!("Failed to resolve owner info: {}", e)))?;
@@ -869,6 +909,7 @@ fn convert_project(project: crate::db::models::Project, owner: Option<OwnerInfo>
         finalizers: project.finalizers.clone(),
         app_users: vec![], // Will be populated by caller if needed
         app_teams: vec![], // Will be populated by caller if needed
+        source_url: project.source_url,
     }
 }
 

@@ -94,6 +94,14 @@ struct DeployArgs {
     /// Lines: KEY=value (plain) or KEY=secret:value (protected secret).
     #[arg(long)]
     env_file: Option<String>,
+    /// URL to the CI pipeline/job that created this deployment.
+    /// Auto-detected from: CI_JOB_URL (GitLab), GITHUB_SERVER_URL + GITHUB_REPOSITORY + GITHUB_RUN_ID (GitHub Actions).
+    #[arg(long)]
+    job_url: Option<String>,
+    /// URL to the pull request/merge request associated with this deployment.
+    /// Auto-detected from: CI_MERGE_REQUEST_URL (GitLab), GITHUB_SERVER_URL + GITHUB_REPOSITORY + GITHUB_REF + GITHUB_EVENT_NAME (GitHub Actions).
+    #[arg(long)]
+    pull_request_url: Option<String>,
     #[command(flatten)]
     build_args: build::BuildArgs,
 }
@@ -222,6 +230,9 @@ enum ProjectCommands {
         /// Owner (format: "user:email" or "team:name", defaults to current user)
         #[arg(long)]
         owner: Option<String>,
+        /// URL to where the project code lives (e.g. a GitHub/GitLab repository)
+        #[arg(long)]
+        source_url: Option<String>,
         /// Path where to create rise.toml (defaults to current directory)
         #[arg(long, default_value = ".")]
         path: String,
@@ -255,6 +266,9 @@ enum ProjectCommands {
         /// Transfer ownership (format: "user:email" or "team:name")
         #[arg(long)]
         owner: Option<String>,
+        /// URL to where the project code lives (e.g. a GitHub/GitLab repository). Use empty string to clear.
+        #[arg(long)]
+        source_url: Option<String>,
         /// Sync from rise.toml to backend (ignores other flags)
         #[arg(long)]
         sync: bool,
@@ -923,6 +937,7 @@ async fn main() -> Result<()> {
                 name,
                 access_class,
                 owner,
+                source_url,
                 path,
                 mode,
             } => {
@@ -933,6 +948,7 @@ async fn main() -> Result<()> {
                     name,
                     access_class,
                     owner.clone(),
+                    source_url.clone(),
                     path,
                     mode,
                 )
@@ -949,9 +965,15 @@ async fn main() -> Result<()> {
                 name,
                 access_class,
                 owner,
+                source_url,
                 sync,
                 path,
             } => {
+                // Convert "--source-url ''" (empty string) to Some(None) to clear
+                let source_url_opt: Option<Option<String>> =
+                    source_url
+                        .as_ref()
+                        .map(|u| if u.is_empty() { None } else { Some(u.clone()) });
                 project::update_project(
                     &http_client,
                     &backend_url,
@@ -960,6 +982,7 @@ async fn main() -> Result<()> {
                     name.clone(),
                     access_class.clone(),
                     owner.clone(),
+                    source_url_opt,
                     *sync,
                     path,
                 )
@@ -1218,6 +1241,8 @@ async fn main() -> Result<()> {
                         use_source_env_vars: args.use_source_env_vars,
                         push_image: args.push_image,
                         env_overrides,
+                        job_url: args.job_url.clone(),
+                        pull_request_url: args.pull_request_url.clone(),
                     },
                 )
                 .await?;

@@ -24,6 +24,8 @@ pub struct Project {
     /// Finalizers that must be removed before the project can be deleted.
     /// Each controller adds its own finalizer when it creates external resources.
     pub finalizers: Vec<String>,
+    /// URL to where the project code lives (e.g. a GitHub/GitLab repository)
+    pub source_url: Option<String>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
@@ -147,6 +149,10 @@ pub struct Deployment {
     pub is_active: bool,
     pub deploying_started_at: Option<DateTime<Utc>>,
     pub first_healthy_at: Option<DateTime<Utc>>,
+    /// URL to the CI pipeline/job that created this deployment
+    pub job_url: Option<String>,
+    /// URL to the pull request/merge request associated with this deployment
+    pub pull_request_url: Option<String>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }

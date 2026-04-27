@@ -70,6 +70,7 @@ pub async fn create_project(
     name: &Option<String>,
     access_class: &str,
     owner: Option<String>,
+    source_url: Option<String>,
     path: &str,
     mode: &Option<crate::ProjectMode>,
 ) -> Result<()> {
@@ -199,12 +200,15 @@ pub async fn create_project(
             name: String,
             access_class: String,
             owner: OwnerType,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            source_url: Option<String>,
         }
 
         let request = CreateRequest {
             name: project_name.clone(),
             access_class: project_access_class.clone(),
             owner: owner_payload,
+            source_url: source_url.clone(),
         };
 
         let url = format!("{}/api/v1/projects", backend_url);
@@ -249,6 +253,7 @@ pub async fn create_project(
             access_class: project_access_class.clone(),
             custom_domains: Vec::new(),
             env: HashMap::new(),
+            source_url: source_url.clone(),
         };
 
         let config_to_write = ProjectBuildConfig {
@@ -379,6 +384,9 @@ pub async fn show_project(
         } else {
             println!("Primary URL: (not deployed)");
         }
+        if let Some(ref url) = project.source_url {
+            println!("Source URL: {}", url);
+        }
         if !project.custom_domain_urls.is_empty() {
             println!("Custom Domains:");
             for domain_url in &project.custom_domain_urls {
@@ -457,6 +465,7 @@ pub async fn update_project(
     name: Option<String>,
     access_class: Option<String>,
     owner: Option<String>,
+    source_url: Option<Option<String>>,
     sync: bool,
     path: &str,
 ) -> Result<()> {
@@ -486,11 +495,15 @@ pub async fn update_project(
         struct SyncUpdateRequest {
             name: String,
             access_class: String,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            source_url: Option<Option<String>>,
         }
 
         let request = SyncUpdateRequest {
             name: project_config.name.clone(),
             access_class: project_config.access_class.clone(),
+            // In sync mode, always send source_url (even None to clear it)
+            source_url: Some(project_config.source_url.clone()),
         };
 
         let url = format!("{}/api/v1/projects/{}", backend_url, project_identifier);
@@ -644,12 +657,15 @@ pub async fn update_project(
         access_class: Option<String>,
         #[serde(skip_serializing_if = "Option::is_none")]
         owner: Option<OwnerType>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        source_url: Option<Option<String>>,
     }
 
     let request = UpdateRequest {
         name: name.clone(),
         access_class: access_class.clone(),
         owner: owner_payload,
+        source_url: source_url.clone(),
     };
 
     let url = format!("{}/api/v1/projects/{}", backend_url, project_identifier);
@@ -688,6 +704,12 @@ pub async fn update_project(
                 // Update access_class in rise.toml if provided
                 if let Some(ref new_access_class) = access_class {
                     project_config.access_class = new_access_class.clone();
+                    updated = true;
+                }
+
+                // Update source_url in rise.toml if provided
+                if let Some(ref new_source_url) = source_url {
+                    project_config.source_url = new_source_url.clone();
                     updated = true;
                 }
 
@@ -1016,6 +1038,7 @@ pub async fn add_app_user(
         owner: None,
         app_users: Some(updated_users),
         app_teams: Some(updated_teams),
+        source_url: None,
     };
 
     let url = format!("{}/api/v1/projects/{}", backend_url, project);
@@ -1126,6 +1149,7 @@ pub async fn remove_app_user(
         owner: None,
         app_users: Some(updated_users),
         app_teams: Some(updated_teams),
+        source_url: None,
     };
 
     let url = format!("{}/api/v1/projects/{}", backend_url, project);

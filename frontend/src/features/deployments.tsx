@@ -4,7 +4,7 @@ import { api } from '../lib/api';
 import { navigate } from '../lib/navigation';
 import { copyToClipboard, formatDate, formatISO8601, formatRelativeTimeRounded, formatTimeRemaining } from '../lib/utils';
 import { useToast } from '../components/toast';
-import { Button, ConfirmDialog, ENV_COLOR_STYLES, EnvironmentColorDot, Modal, ModalActions, ModalSection, StatusBadge } from '../components/ui';
+import { Button, ConfirmDialog, ENV_COLOR_STYLES, EnvironmentColorDot, Modal, ModalActions, ModalSection, SourceLinkGroup, SourceLinkGroupAction, StatusBadge } from '../components/ui';
 import { MonoSortButton, MonoTable, MonoTableBody, MonoTableEmptyRow, MonoTableFrame, MonoTableHead, MonoTableRow, MonoTd, MonoTh } from '../components/table';
 import { EnvVarsList } from './resources';
 import { EmptyState, ErrorState, LoadingState } from '../components/states';
@@ -194,18 +194,16 @@ export function ActiveDeploymentsSummary({ projectName }) {
                                 <h5 className="text-lg font-semibold">{group}</h5>
                                 <div className="flex items-center gap-3">
                                     <StatusBadge status={deployment.status} />
-                                    {canStop && (
-                                        <Button
-                                            variant="danger"
-                                            size="sm"
-                                            onClick={(e) => {
-                                                e.stopPropagation();
-                                                handleStopClick(deployment);
-                                            }}
-                                        >
-                                            Stop
-                                        </Button>
-                                    )}
+                                    <SourceLinkGroup jobUrl={deployment.job_url} prUrl={deployment.pull_request_url} onClick={(e) => e.stopPropagation()}>
+                                        {canStop && (
+                                            <SourceLinkGroupAction
+                                                variant="danger"
+                                                onClick={(e) => { e.stopPropagation(); handleStopClick(deployment); }}
+                                            >
+                                                Stop
+                                            </SourceLinkGroupAction>
+                                        )}
+                                    </SourceLinkGroup>
                                 </div>
                             </div>
                         <dl className="grid grid-cols-2 gap-4 text-sm">
@@ -1591,6 +1589,14 @@ export function DeploymentDetail({ projectName, deploymentId }) {
                             : '-'}
                     </strong>
                 </div>
+                {(deployment.job_url || deployment.pull_request_url) && (
+                    <div>
+                        <span>source</span>
+                        <strong>
+                            <SourceLinkGroup jobUrl={deployment.job_url} prUrl={deployment.pull_request_url} />
+                        </strong>
+                    </div>
+                )}
                 <div><span>completed</span><strong>{deployment.completed_at ? formatDate(deployment.completed_at) : '-'}</strong></div>
                 <div><span>expires</span><strong>{deployment.expires_at ? formatTimeRemaining(deployment.expires_at) : '-'}</strong></div>
             </div>

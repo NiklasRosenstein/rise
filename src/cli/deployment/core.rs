@@ -448,6 +448,12 @@ pub struct DeploymentOptions<'a> {
     pub push_image: bool,
     /// Runtime environment variable overrides to apply to the deployment.
     pub env_overrides: Vec<EnvOverride>,
+    /// URL to the CI pipeline/job that created this deployment.
+    /// If None, auto-detection from CI environment variables is attempted.
+    pub job_url: Option<String>,
+    /// URL to the pull request/merge request associated with this deployment.
+    /// If None, auto-detection from CI environment variables is attempted.
+    pub pull_request_url: Option<String>,
 }
 
 pub async fn create_deployment(
@@ -480,6 +486,20 @@ pub async fn create_deployment(
         .get_token()
         .ok_or_else(|| anyhow::anyhow!("Not authenticated. Run 'rise login' first."))?;
 
+    // Resolve job_url and pull_request_url: use explicit values, or auto-detect from CI environment
+    let resolved_job_url = deploy_opts.job_url.clone().or_else(detect_ci_job_url);
+    let resolved_pull_request_url = deploy_opts
+        .pull_request_url
+        .clone()
+        .or_else(detect_ci_pull_request_url);
+
+    if let Some(ref url) = resolved_job_url {
+        info!("Deployment job URL: {}", url);
+    }
+    if let Some(ref url) = resolved_pull_request_url {
+        info!("Deployment pull request URL: {}", url);
+    }
+
     // Step 1: Create deployment and get deployment ID + credentials
     info!(
         "Creating deployment for project '{}'",
@@ -499,6 +519,8 @@ pub async fn create_deployment(
         deploy_opts.use_source_env_vars,
         deploy_opts.push_image,
         &deploy_opts.env_overrides,
+        resolved_job_url.as_deref(),
+        resolved_pull_request_url.as_deref(),
     )
     .await?;
 
@@ -787,6 +809,73 @@ async fn login_to_registry(
     Ok(())
 }
 
+/// Auto-detect CI source URL from well-known CI environment variables.
+///
+/// Checks common CI platforms in order:
+/// - GitLab CI: `CI_JOB_URL`
+/// - GitHub Actions: `GITHUB_SERVER_URL` + `GITHUB_REPOSITORY` + `GITHUB_RUN_ID`
+///
+/// Returns the first detected URL, or None if no CI environment is detected.
+fn detect_ci_job_url() -> Option<String> {
+    // GitLab CI
+    if let Ok(url) = std::env::var("CI_JOB_URL") {
+        if !url.is_empty() {
+            return Some(url);
+        }
+    }
+
+    // GitHub Actions
+    if let (Ok(server), Ok(repo), Ok(run_id)) = (
+        std::env::var("GITHUB_SERVER_URL"),
+        std::env::var("GITHUB_REPOSITORY"),
+        std::env::var("GITHUB_RUN_ID"),
+    ) {
+        if !server.is_empty() && !repo.is_empty() && !run_id.is_empty() {
+            return Some(format!("{}/{}/actions/runs/{}", server, repo, run_id));
+        }
+    }
+
+    None
+}
+
+/// Auto-detect pull request/merge request URL from CI environment variables.
+///
+/// Supported CI environments:
+/// - GitLab CI: `CI_MERGE_REQUEST_URL`
+/// - GitHub Actions: Constructed from `GITHUB_SERVER_URL`, `GITHUB_REPOSITORY`, and
+///   `GITHUB_REF` (when `GITHUB_EVENT_NAME` is `pull_request` or `pull_request_target`)
+///
+/// Returns the detected URL, or None if not in a PR/MR context.
+fn detect_ci_pull_request_url() -> Option<String> {
+    // GitLab CI
+    if let Ok(url) = std::env::var("CI_MERGE_REQUEST_URL") {
+        if !url.is_empty() {
+            return Some(url);
+        }
+    }
+
+    // GitHub Actions
+    if let Ok(event) = std::env::var("GITHUB_EVENT_NAME") {
+        if event == "pull_request" || event == "pull_request_target" {
+            if let (Ok(server), Ok(repo), Ok(github_ref)) = (
+                std::env::var("GITHUB_SERVER_URL"),
+                std::env::var("GITHUB_REPOSITORY"),
+                std::env::var("GITHUB_REF"),
+            ) {
+                // GITHUB_REF is in the form refs/pull/<number>/merge
+                if let Some(pr_number) = github_ref
+                    .strip_prefix("refs/pull/")
+                    .and_then(|s| s.strip_suffix("/merge"))
+                {
+                    return Some(format!("{}/{}/pull/{}", server, repo, pr_number));
+                }
+            }
+        }
+    }
+
+    None
+}
+
 #[allow(clippy::too_many_arguments)]
 async fn call_create_deployment_api(
     http_client: &Client,
@@ -802,6 +891,8 @@ async fn call_create_deployment_api(
     use_source_env_vars: bool,
     push_image: bool,
     env_overrides: &[EnvOverride],
+    job_url: Option<&str>,
+    pull_request_url: Option<&str>,
 ) -> Result<CreateDeploymentResponse> {
     let url = format!("{}/api/v1/deployments", backend_url);
     let mut payload = serde_json::json!({
@@ -843,6 +934,16 @@ async fn call_create_deployment_api(
     // Add push_image field if set
     if push_image {
         payload["push_image"] = serde_json::json!(true);
+    }
+
+    // Add job_url if provided
+    if let Some(url) = job_url {
+        payload["job_url"] = serde_json::json!(url);
+    }
+
+    // Add pull_request_url if provided
+    if let Some(url) = pull_request_url {
+        payload["pull_request_url"] = serde_json::json!(url);
     }
 
     // Add env_overrides if any

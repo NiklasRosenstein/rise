@@ -2,7 +2,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { api } from '../lib/api';
 import { navigate } from '../lib/navigation';
-import { copyToClipboard, formatISO8601, formatRelativeTimeRounded } from '../lib/utils';
+import { copyToClipboard, formatISO8601, formatRelativeTimeRounded, isSafeUrl } from '../lib/utils';
 import { useToast } from '../components/toast';
 import { AutocompleteInput, Button, ConfirmDialog, FormField, Modal, ModalActions, ModalSection, SegmentedRadioGroup } from '../components/ui';
 import { ProjectTable } from '../components/project-table';
@@ -608,6 +608,32 @@ export function ProjectDetail({ projectName, initialTab }) {
                         )}
                     </strong>
                 </div>
+                {project.source_url && (
+                    <div>
+                        <span>source</span>
+                        <strong className="mono-copyable-value">
+                            {isSafeUrl(project.source_url) ? (
+                                <a href={project.source_url} target="_blank" rel="noopener noreferrer" className="underline">
+                                    {project.source_url}
+                                </a>
+                            ) : (
+                                <span>{project.source_url}</span>
+                            )}
+                            <button
+                                type="button"
+                                className="mono-copy-button"
+                                title="Copy source URL"
+                                aria-label="Copy source URL"
+                                onClick={() => handleCopy(project.source_url, 'Source URL')}
+                            >
+                                <span
+                                    className="mono-copy-icon svg-mask"
+                                    style={{ maskImage: 'url(/assets/copy.svg)', WebkitMaskImage: 'url(/assets/copy.svg)' }}
+                                />
+                            </button>
+                        </strong>
+                    </div>
+                )}
             </div>
 
             <div className="mono-tabbar mb-6">
