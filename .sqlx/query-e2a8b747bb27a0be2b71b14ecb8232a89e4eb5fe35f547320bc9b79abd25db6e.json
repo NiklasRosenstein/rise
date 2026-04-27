@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        UPDATE deployments\n        SET\n            status = 'Stopped',\n            termination_reason = 'UserStopped',\n            controller_metadata = '{}',\n            updated_at = NOW()\n        WHERE id = $1\n        RETURNING\n            id, deployment_id, project_id, created_by_id,\n            status as \"status: DeploymentStatus\",\n            deployment_group, environment_id, expires_at,\n            termination_reason as \"termination_reason: _\",\n            completed_at, error_message, build_logs,\n            controller_metadata as \"controller_metadata: serde_json::Value\",\n            image, image_digest, rolled_back_from_deployment_id,\n            http_port, needs_reconcile, is_active,\n            deploying_started_at,\n            first_healthy_at,\n            created_at, updated_at\n        ",
+  "query": "\n        SELECT\n            id, deployment_id, project_id, created_by_id,\n            status as \"status: DeploymentStatus\",\n            deployment_group, environment_id, expires_at,\n            termination_reason as \"termination_reason: _\",\n            completed_at, error_message, build_logs,\n            controller_metadata as \"controller_metadata: serde_json::Value\",\n            image, image_digest, rolled_back_from_deployment_id,\n            http_port, needs_reconcile, is_active,\n            deploying_started_at,\n            first_healthy_at,\n            health_check_config as \"health_check_config: serde_json::Value\",\n            created_at, updated_at\n        FROM deployments\n        WHERE project_id = $1\n          AND deployment_group = $2\n        ORDER BY created_at DESC\n        LIMIT 1\n        ",
   "describe": {
     "columns": [
       {
@@ -123,18 +123,24 @@
       },
       {
         "ordinal": 21,
+        "name": "health_check_config: serde_json::Value",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 22,
         "name": "created_at",
         "type_info": "Timestamptz"
       },
       {
-        "ordinal": 22,
+        "ordinal": 23,
         "name": "updated_at",
         "type_info": "Timestamptz"
       }
     ],
     "parameters": {
       "Left": [
-        "Uuid"
+        "Uuid",
+        "Text"
       ]
     },
     "nullable": [
@@ -159,9 +165,10 @@
       false,
       true,
       true,
+      true,
       false,
       false
     ]
   },
-  "hash": "7ef390c73c3ffb3830f1286277921e04c92951ce58a2e217da15272f8f1d226e"
+  "hash": "e2a8b747bb27a0be2b71b14ecb8232a89e4eb5fe35f547320bc9b79abd25db6e"
 }

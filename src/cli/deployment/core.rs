@@ -448,6 +448,8 @@ pub struct DeploymentOptions<'a> {
     pub push_image: bool,
     /// Runtime environment variable overrides to apply to the deployment.
     pub env_overrides: Vec<EnvOverride>,
+    /// Health check configuration read from rise.toml.
+    pub health_check_config: Option<serde_json::Value>,
 }
 
 pub async fn create_deployment(
@@ -499,6 +501,7 @@ pub async fn create_deployment(
         deploy_opts.use_source_env_vars,
         deploy_opts.push_image,
         &deploy_opts.env_overrides,
+        deploy_opts.health_check_config.as_ref(),
     )
     .await?;
 
@@ -802,6 +805,7 @@ async fn call_create_deployment_api(
     use_source_env_vars: bool,
     push_image: bool,
     env_overrides: &[EnvOverride],
+    health_check_config: Option<&serde_json::Value>,
 ) -> Result<CreateDeploymentResponse> {
     let url = format!("{}/api/v1/deployments", backend_url);
     let mut payload = serde_json::json!({
@@ -859,6 +863,11 @@ async fn call_create_deployment_api(
             })
             .collect();
         payload["env_overrides"] = serde_json::json!(overrides);
+    }
+
+    // Add health_check_config if provided
+    if let Some(hc) = health_check_config {
+        payload["health_check_config"] = hc.clone();
     }
 
     let response = http_client

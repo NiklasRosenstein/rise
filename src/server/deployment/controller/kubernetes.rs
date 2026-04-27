@@ -2833,10 +2833,17 @@ impl KubernetesController {
 
     /// Create HTTP health probe for application port
     /// Returns None if probes are disabled
-    fn create_http_probe(&self, port: i32, probe_type: ProbeType) -> Option<Probe> {
-        // Get config or use defaults
-        let config = self.health_probes.as_ref().cloned().unwrap_or_else(|| {
-            crate::server::settings::HealthProbeConfig {
+    fn create_http_probe(
+        &self,
+        port: i32,
+        probe_type: ProbeType,
+        deployment_health_check: Option<&crate::server::settings::HealthProbeConfig>,
+    ) -> Option<Probe> {
+        // Use deployment-level config, then fall back to server-wide config, then defaults
+        let config = deployment_health_check
+            .cloned()
+            .or_else(|| self.health_probes.clone())
+            .unwrap_or_else(|| crate::server::settings::HealthProbeConfig {
                 liveness_enabled: true,
                 readiness_enabled: true,
                 path: "/".to_string(),
@@ -2844,8 +2851,7 @@ impl KubernetesController {
                 period_seconds: 10,
                 timeout_seconds: 5,
                 failure_threshold: 3,
-            }
-        });
+            });
 
         // Check if this probe type is enabled
         let enabled = match probe_type {
@@ -3062,10 +3068,34 @@ impl KubernetesController {
                             env: Some(env_vars), // Always set env vars (at minimum, PORT is injected)
                             security_context: self.create_container_security_context(),
                             resources: self.create_resource_requirements(),
-                            liveness_probe: self
-                                .create_http_probe(metadata.http_port as i32, ProbeType::Liveness),
-                            readiness_probe: self
-                                .create_http_probe(metadata.http_port as i32, ProbeType::Readiness),
+                            liveness_probe: self.create_http_probe(
+                                metadata.http_port as i32,
+                                ProbeType::Liveness,
+                                deployment
+                                    .health_check_config
+                                    .as_ref()
+                                    .and_then(|v| {
+                                        serde_json::from_value::<
+                                            crate::server::settings::HealthProbeConfig,
+                                        >(v.clone())
+                                        .ok()
+                                    })
+                                    .as_ref(),
+                            ),
+                            readiness_probe: self.create_http_probe(
+                                metadata.http_port as i32,
+                                ProbeType::Readiness,
+                                deployment
+                                    .health_check_config
+                                    .as_ref()
+                                    .and_then(|v| {
+                                        serde_json::from_value::<
+                                            crate::server::settings::HealthProbeConfig,
+                                        >(v.clone())
+                                        .ok()
+                                    })
+                                    .as_ref(),
+                            ),
                             volume_mounts,
                             ..Default::default()
                         }],
@@ -5640,6 +5670,7 @@ mod tests {
             is_active: false,
             deploying_started_at: None,
             first_healthy_at: None,
+            health_check_config: None,
             created_at: chrono::Utc::now(),
             updated_at: chrono::Utc::now(),
         }
@@ -5853,6 +5884,7 @@ mod tests {
             is_active: false,
             deploying_started_at: None,
             first_healthy_at: None,
+            health_check_config: None,
             created_at: chrono::Utc::now(),
             updated_at: chrono::Utc::now(),
         };
@@ -5989,6 +6021,7 @@ mod tests {
             is_active: false,
             deploying_started_at: None,
             first_healthy_at: None,
+            health_check_config: None,
             created_at: chrono::Utc::now(),
             updated_at: chrono::Utc::now(),
         };
@@ -6044,6 +6077,7 @@ mod tests {
             is_active: false,
             deploying_started_at: None,
             first_healthy_at: None,
+            health_check_config: None,
             created_at: chrono::Utc::now(),
             updated_at: chrono::Utc::now(),
         };
@@ -6131,6 +6165,7 @@ mod tests {
             is_active: false,
             deploying_started_at: None,
             first_healthy_at: None,
+            health_check_config: None,
             created_at: chrono::Utc::now(),
             updated_at: chrono::Utc::now(),
         };
@@ -6239,6 +6274,7 @@ mod tests {
             is_active: false,
             deploying_started_at: None,
             first_healthy_at: None,
+            health_check_config: None,
             created_at: chrono::Utc::now(),
             updated_at: chrono::Utc::now(),
         };
@@ -6384,6 +6420,7 @@ mod tests {
             is_active: false,
             deploying_started_at: None,
             first_healthy_at: None,
+            health_check_config: None,
             created_at: chrono::Utc::now(),
             updated_at: chrono::Utc::now(),
         };

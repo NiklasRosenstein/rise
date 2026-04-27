@@ -147,6 +147,7 @@ pub struct Deployment {
     pub is_active: bool,
     pub deploying_started_at: Option<DateTime<Utc>>,
     pub first_healthy_at: Option<DateTime<Utc>>,
+    pub health_check_config: Option<serde_json::Value>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }

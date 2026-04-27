@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n            SELECT\n                id, deployment_id, project_id, created_by_id,\n                status as \"status: DeploymentStatus\",\n                deployment_group, environment_id, expires_at,\n                termination_reason as \"termination_reason: _\",\n                completed_at, error_message, build_logs,\n                controller_metadata as \"controller_metadata: serde_json::Value\",\n                image, image_digest, rolled_back_from_deployment_id,\n                http_port, needs_reconcile, is_active,\n                deploying_started_at,\n                first_healthy_at,\n                created_at, updated_at\n            FROM deployments\n            WHERE project_id = $1\n            ORDER BY created_at DESC\n            LIMIT $2 OFFSET $3\n            ",
+  "query": "\n        SELECT\n            id, deployment_id, project_id, created_by_id,\n            status as \"status: DeploymentStatus\",\n            deployment_group, environment_id, expires_at,\n            termination_reason as \"termination_reason: _\",\n            completed_at, error_message, build_logs,\n            controller_metadata as \"controller_metadata: serde_json::Value\",\n            image, image_digest, rolled_back_from_deployment_id,\n            http_port, needs_reconcile, is_active,\n            deploying_started_at,\n            first_healthy_at,\n            health_check_config as \"health_check_config: serde_json::Value\",\n            created_at, updated_at\n        FROM deployments\n        WHERE needs_reconcile = TRUE\n          AND status IN ('Healthy', 'Unhealthy')\n        ORDER BY updated_at ASC\n        LIMIT $1\n        ",
   "describe": {
     "columns": [
       {
@@ -123,19 +123,22 @@
       },
       {
         "ordinal": 21,
+        "name": "health_check_config: serde_json::Value",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 22,
         "name": "created_at",
         "type_info": "Timestamptz"
       },
       {
-        "ordinal": 22,
+        "ordinal": 23,
         "name": "updated_at",
         "type_info": "Timestamptz"
       }
     ],
     "parameters": {
       "Left": [
-        "Uuid",
-        "Int8",
         "Int8"
       ]
     },
@@ -161,9 +164,10 @@
       false,
       true,
       true,
+      true,
       false,
       false
     ]
   },
-  "hash": "59366f3786d181c403a55f5b9ac74e0cf225478913868b9a31fd405d01a536d1"
+  "hash": "32eba035886026e16d3dd599d25135dfe4e9a3fb18378e6c879184072d324fd6"
 }

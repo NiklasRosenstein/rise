@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        UPDATE deployments\n        SET status = 'Failed', completed_at = NOW(), error_message = $2\n        WHERE id = $1\n        RETURNING\n            id, deployment_id, project_id, created_by_id,\n            status as \"status: DeploymentStatus\",\n            deployment_group, environment_id, expires_at,\n            completed_at, error_message, build_logs,\n            controller_metadata as \"controller_metadata: serde_json::Value\",\n            image, image_digest, rolled_back_from_deployment_id,\n            http_port, needs_reconcile, is_active,\n            deploying_started_at,\n            first_healthy_at,\n            termination_reason as \"termination_reason: _\",\n            created_at, updated_at\n        ",
+  "query": "\n        SELECT\n            id, deployment_id, project_id, created_by_id,\n            status as \"status: DeploymentStatus\",\n            deployment_group, environment_id, expires_at,\n            error_message, completed_at, build_logs,\n            controller_metadata as \"controller_metadata: serde_json::Value\",\n            image, image_digest, rolled_back_from_deployment_id,\n            http_port, needs_reconcile, is_active,\n            deploying_started_at,\n            first_healthy_at,\n            health_check_config as \"health_check_config: serde_json::Value\",\n            termination_reason as \"termination_reason: _\",\n            created_at, updated_at\n        FROM deployments\n        WHERE status IN ('Pending', 'Building', 'Pushing')\n          AND created_at < $1\n          AND NOT is_protected(status)\n        LIMIT $2\n        ",
   "describe": {
     "columns": [
       {
@@ -45,13 +45,13 @@
       },
       {
         "ordinal": 8,
-        "name": "completed_at",
-        "type_info": "Timestamptz"
+        "name": "error_message",
+        "type_info": "Text"
       },
       {
         "ordinal": 9,
-        "name": "error_message",
-        "type_info": "Text"
+        "name": "completed_at",
+        "type_info": "Timestamptz"
       },
       {
         "ordinal": 10,
@@ -105,6 +105,11 @@
       },
       {
         "ordinal": 20,
+        "name": "health_check_config: serde_json::Value",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 21,
         "name": "termination_reason: _",
         "type_info": {
           "Custom": {
@@ -122,20 +127,20 @@
         }
       },
       {
-        "ordinal": 21,
+        "ordinal": 22,
         "name": "created_at",
         "type_info": "Timestamptz"
       },
       {
-        "ordinal": 22,
+        "ordinal": 23,
         "name": "updated_at",
         "type_info": "Timestamptz"
       }
     ],
     "parameters": {
       "Left": [
-        "Uuid",
-        "Text"
+        "Timestamptz",
+        "Int8"
       ]
     },
     "nullable": [
@@ -160,9 +165,10 @@
       true,
       true,
       true,
+      true,
       false,
       false
     ]
   },
-  "hash": "e06198bc7b52ec03e460633f7f297d2ab515e9c356fd4fb72489c4e164642928"
+  "hash": "465a2b355257426e44cc840f2486d8704f1b2f60e6ebd55e510ab6f91af73f30"
 }

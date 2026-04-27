@@ -760,6 +760,7 @@ pub async fn create_deployment(
                 expires_at,                        // expires_at
                 http_port: final_http_port as i32, // Use determined http_port
                 is_active: false,                  // Deployments start as inactive
+                health_check_config: payload.health_check_config.clone(),
             },
             &project,
         )
@@ -878,6 +879,7 @@ pub async fn create_deployment(
                     expires_at,
                     http_port: effective_http_port as i32,
                     is_active: false,
+                    health_check_config: payload.health_check_config.clone(),
                 },
                 &project,
             )
@@ -961,6 +963,7 @@ pub async fn create_deployment(
                 expires_at,
                 http_port: effective_http_port as i32,
                 is_active: false,
+                health_check_config: payload.health_check_config.clone(),
             },
             &project,
         )
@@ -1046,6 +1049,7 @@ pub async fn create_deployment(
                 expires_at,                            // expires_at
                 http_port: effective_http_port as i32, // http_port
                 is_active: false,                      // Deployments start as inactive
+                health_check_config: payload.health_check_config.clone(),
             },
             &project,
         )

@@ -163,6 +163,7 @@ mod tests {
             is_active: false,
             deploying_started_at: None,
             first_healthy_at: None,
+            health_check_config: None,
             created_at: chrono::Utc::now(),
             updated_at: chrono::Utc::now(),
         }

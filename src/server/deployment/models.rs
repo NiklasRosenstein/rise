@@ -217,6 +217,10 @@ pub struct CreateDeploymentRequest {
     /// Runtime environment variable overrides applied after copying project/source env vars
     #[serde(default)]
     pub env_overrides: Vec<EnvOverride>,
+    /// Health check (liveness/readiness probe) configuration read from rise.toml at deploy time.
+    /// If not provided, the controller falls back to server-wide defaults.
+    #[serde(default)]
+    pub health_check_config: Option<serde_json::Value>,
 }
 
 // Response from creating a deployment
