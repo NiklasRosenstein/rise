@@ -2,9 +2,9 @@
 import { Fragment, useCallback, useEffect, useRef, useState } from 'react';
 import { api } from '../lib/api';
 import { navigate } from '../lib/navigation';
-import { copyToClipboard, formatDate, formatISO8601, formatRelativeTimeRounded, formatTimeRemaining, isSafeUrl } from '../lib/utils';
+import { copyToClipboard, formatDate, formatISO8601, formatRelativeTimeRounded, formatTimeRemaining } from '../lib/utils';
 import { useToast } from '../components/toast';
-import { Button, ConfirmDialog, ENV_COLOR_STYLES, EnvironmentColorDot, Modal, ModalActions, ModalSection, StatusBadge } from '../components/ui';
+import { Button, ConfirmDialog, ENV_COLOR_STYLES, EnvironmentColorDot, Modal, ModalActions, ModalSection, SourceLinkGroup, StatusBadge } from '../components/ui';
 import { MonoSortButton, MonoTable, MonoTableBody, MonoTableEmptyRow, MonoTableFrame, MonoTableHead, MonoTableRow, MonoTd, MonoTh } from '../components/table';
 import { EnvVarsList } from './resources';
 import { EmptyState, ErrorState, LoadingState } from '../components/states';
@@ -193,6 +193,7 @@ export function ActiveDeploymentsSummary({ projectName }) {
                             <div className="flex justify-between items-center mb-4">
                                 <h5 className="text-lg font-semibold">{group}</h5>
                                 <div className="flex items-center gap-3">
+                                    <SourceLinkGroup jobUrl={deployment.job_url} prUrl={deployment.pull_request_url} onClick={(e) => e.stopPropagation()} />
                                     <StatusBadge status={deployment.status} />
                                     {canStop && (
                                         <Button
@@ -1591,55 +1592,11 @@ export function DeploymentDetail({ projectName, deploymentId }) {
                             : '-'}
                     </strong>
                 </div>
-                {deployment.job_url && (
+                {(deployment.job_url || deployment.pull_request_url) && (
                     <div>
-                        <span>ci_job</span>
-                        <strong className="mono-copyable-value">
-                            {isSafeUrl(deployment.job_url) ? (
-                                <a href={deployment.job_url} target="_blank" rel="noopener noreferrer" className="underline">
-                                    {deployment.job_url}
-                                </a>
-                            ) : (
-                                <span>{deployment.job_url}</span>
-                            )}
-                            <button
-                                type="button"
-                                className="mono-copy-button"
-                                title="Copy CI job URL"
-                                aria-label="Copy CI job URL"
-                                onClick={() => handleCopy(deployment.job_url, 'CI job URL')}
-                            >
-                                <span
-                                    className="mono-copy-icon svg-mask"
-                                    style={{ maskImage: 'url(/assets/copy.svg)', WebkitMaskImage: 'url(/assets/copy.svg)' }}
-                                />
-                            </button>
-                        </strong>
-                    </div>
-                )}
-                {deployment.pull_request_url && (
-                    <div>
-                        <span>pull_request</span>
-                        <strong className="mono-copyable-value">
-                            {isSafeUrl(deployment.pull_request_url) ? (
-                                <a href={deployment.pull_request_url} target="_blank" rel="noopener noreferrer" className="underline">
-                                    {deployment.pull_request_url}
-                                </a>
-                            ) : (
-                                <span>{deployment.pull_request_url}</span>
-                            )}
-                            <button
-                                type="button"
-                                className="mono-copy-button"
-                                title="Copy pull request URL"
-                                aria-label="Copy pull request URL"
-                                onClick={() => handleCopy(deployment.pull_request_url, 'Pull request URL')}
-                            >
-                                <span
-                                    className="mono-copy-icon svg-mask"
-                                    style={{ maskImage: 'url(/assets/copy.svg)', WebkitMaskImage: 'url(/assets/copy.svg)' }}
-                                />
-                            </button>
+                        <span>source</span>
+                        <strong>
+                            <SourceLinkGroup jobUrl={deployment.job_url} prUrl={deployment.pull_request_url} />
                         </strong>
                     </div>
                 )}

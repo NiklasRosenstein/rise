@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
+import { isSafeUrl } from '../lib/utils';
 
 function cx(...parts: Array<string | false | null | undefined>) {
     return parts.filter(Boolean).join(' ');
@@ -26,6 +27,74 @@ export function StatusBadge({ status }) {
     const color = statusColors[status] || 'mono-status-muted';
 
     return <span className={`mono-status ${color}`}>{status}</span>;
+}
+
+function iconForUrl(href: string): string {
+    try {
+        const host = new URL(href).hostname;
+        if (host.includes('github')) return '/assets/github.svg';
+        if (host.includes('gitlab')) return '/assets/gitlab.svg';
+    } catch { /* fall through */ }
+    return '/assets/external-link.svg';
+}
+
+function isGitLabUrl(href: string): boolean {
+    try { return new URL(href).hostname.includes('gitlab'); } catch { return false; }
+}
+
+export function ExternalLinkButton({ href, label, onClick }: { href: string; label: string; onClick?: (e: React.MouseEvent) => void }) {
+    if (!isSafeUrl(href)) return null;
+    const icon = iconForUrl(href);
+    return (
+        <a href={href} target="_blank" rel="noopener noreferrer"
+           className="inline-flex items-center gap-1.5 px-2.5 py-1 text-xs border border-[var(--mono-line)] hover:border-[#5a5a5a] text-[var(--mono-muted)] hover:text-[var(--mono-text)] transition-colors"
+           onClick={onClick}
+        >
+            <span className="w-3 h-3 svg-mask inline-block"
+                  style={{ maskImage: `url(${icon})`, WebkitMaskImage: `url(${icon})` }}
+            />
+            {label}
+        </a>
+    );
+}
+
+const sourceLinkCls = "px-2.5 py-1 text-xs text-[var(--mono-muted)] hover:text-[var(--mono-text)] transition-colors";
+
+export function SourceLinkGroup({ jobUrl, prUrl, onClick }: { jobUrl?: string | null; prUrl?: string | null; onClick?: (e: React.MouseEvent) => void }) {
+    const safeJob = jobUrl && isSafeUrl(jobUrl) ? jobUrl : null;
+    const safePr = prUrl && isSafeUrl(prUrl) ? prUrl : null;
+    if (!safeJob && !safePr) return null;
+
+    // If only one link, render a standalone ExternalLinkButton
+    if (!safeJob || !safePr) {
+        const href = (safeJob || safePr)!;
+        const label = safeJob ? 'CI Job' : (isGitLabUrl(href) ? 'Merge Request' : 'Pull Request');
+        return <ExternalLinkButton href={href} label={label} onClick={onClick} />;
+    }
+
+    // Both present: combined pill — PR/MR first, then CI Job
+    const icon = iconForUrl(safePr);
+    const prLabel = isGitLabUrl(safePr) ? 'Merge Request' : 'Pull Request';
+    return (
+        <span className="inline-flex items-center text-xs border border-[var(--mono-line)]">
+            <a href={safePr} target="_blank" rel="noopener noreferrer"
+               className={`${sourceLinkCls} inline-flex items-center gap-1.5 hover:bg-[var(--mono-line-light)]`}
+               onClick={onClick}
+            >
+                <span className="w-3 h-3 svg-mask inline-block"
+                      style={{ maskImage: `url(${icon})`, WebkitMaskImage: `url(${icon})` }}
+                />
+                {prLabel}
+            </a>
+            <span className="w-px self-stretch bg-[var(--mono-line)]" />
+            <a href={safeJob} target="_blank" rel="noopener noreferrer"
+               className={`${sourceLinkCls} hover:bg-[var(--mono-line-light)]`}
+               onClick={onClick}
+            >
+                CI Job
+            </a>
+        </span>
+    );
 }
 
 export function Button({
