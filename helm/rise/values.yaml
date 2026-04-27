@@ -91,14 +91,16 @@ tolerations: []
 affinity: {}
 
 # Metacontroller integration
-# Requires Metacontroller to be installed in the cluster.
 # See: https://metacontroller.github.io/metacontroller/
 metacontroller:
-  enabled: false
+  enabled: true
   # Resync interval in seconds (default: 5)
   resyncPeriodSeconds: 5
   # Override the webhook base URL (defaults to the Rise service URL within the cluster)
   # webhookBaseUrl: "http://rise-backend.rise-system.svc:3000"
+  # Install the Metacontroller operator itself as a subchart dependency.
+  # Disable this if Metacontroller is already installed in the cluster.
+  install: true
 
 # Rise backend configuration overrides
 # Converted to YAML and mounted as /etc/rise/local.yaml

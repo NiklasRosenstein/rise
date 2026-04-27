@@ -14,12 +14,14 @@ use tracing::{debug, info, warn};
     version = "v1alpha1",
     kind = "RiseProject",
     plural = "riseprojects",
+    shortname = "rp",
     status = "RiseProjectStatus",
     derive = "Default"
 )]
 pub struct RiseProjectSpec {}
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
 pub struct RiseProjectStatus {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub last_sync_time: Option<String>,

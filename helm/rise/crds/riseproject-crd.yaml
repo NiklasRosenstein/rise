@@ -5,27 +5,38 @@ metadata:
 spec:
   group: rise.dev
   names:
+    categories: []
     kind: RiseProject
     plural: riseprojects
-    singular: riseproject
     shortNames:
-      - rp
+    - rp
+    singular: riseproject
   scope: Cluster
   versions:
-    - name: v1alpha1
-      served: true
-      storage: true
-      schema:
-        openAPIV3Schema:
-          type: object
-          properties:
-            spec:
-              type: object
-              description: "Empty spec — the database is the source of truth."
-            status:
-              type: object
-              properties:
-                lastSyncTime:
-                  type: string
-      subresources:
-        status: {}
+  - additionalPrinterColumns: []
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: Auto-generated derived type for RiseProjectSpec via `CustomResource`
+        properties:
+          spec:
+            description: |-
+              CRD spec for RiseProject — intentionally empty.
+              The database remains the source of truth; the CRD is a marker that tells
+              Metacontroller "this project exists, manage its resources."
+            type: object
+          status:
+            nullable: true
+            properties:
+              lastSyncTime:
+                nullable: true
+                type: string
+            type: object
+        required:
+        - spec
+        title: RiseProject
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}

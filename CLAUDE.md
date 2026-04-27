@@ -209,6 +209,7 @@ cargo clippy --all-features --all-targets -- -D warnings  # Lint (uses cached bu
 | Any `.rs` file | `cargo test --all-features` | Unit tests (requires `mise run db:migrate` once) |
 | SQLX queries (`sqlx::query!` etc.) | `mise run sqlx:prepare` | Regenerate offline query cache (commit the result) |
 | Server settings structs (`src/server/settings.rs`) | `mise run config:schema:generate` | Regenerate `docs/schemas/backend-settings.schema.json` (commit the result) |
+| CRD structs (`src/server/deployment/crd.rs`) | `mise run crd:generate` | Regenerate `helm/rise/crds/riseproject-crd.yaml` (commit the result) |
 | Helm chart (`helm/rise/`) | `helm lint helm/rise` | Validate chart templates |
 
 **Full CI-equivalent check** (slower, runs everything):
@@ -216,6 +217,7 @@ cargo clippy --all-features --all-targets -- -D warnings  # Lint (uses cached bu
 ```bash
 mise run lint                  # cargo check + clippy + fmt check + sqlx check + helm lint
 mise run config:schema:check   # Verify backend config schema is up to date
+mise run crd:check             # Verify CRD YAML matches Rust definition
 cargo test --all-features      # Unit tests
 ```
 

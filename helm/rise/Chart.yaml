@@ -11,3 +11,9 @@ keywords:
 home: https://github.com/niklasrosenstein/rise
 sources:
   - https://github.com/niklasrosenstein/rise
+dependencies:
+  - name: metacontroller-helm
+    version: "4.15.0"
+    repository: "oci://ghcr.io/metacontroller"
+    alias: metacontroller-operator
+    condition: metacontroller.install
