@@ -17,11 +17,12 @@ use axum::{
 use uuid::Uuid;
 
 /// Validate that a URL uses only http or https schemes.
-/// Returns an error message if the URL is invalid or uses a disallowed scheme.
-pub fn validate_http_url(url: &str) -> Result<(), String> {
-    let parsed = url::Url::parse(url.trim()).map_err(|e| format!("Invalid URL: {e}"))?;
+/// Returns the trimmed URL on success, or an error message if the URL is invalid or uses a disallowed scheme.
+pub fn validate_http_url(url: &str) -> Result<String, String> {
+    let trimmed = url.trim();
+    let parsed = url::Url::parse(trimmed).map_err(|e| format!("Invalid URL: {e}"))?;
     match parsed.scheme() {
-        "http" | "https" => Ok(()),
+        "http" | "https" => Ok(trimmed.to_string()),
         scheme => Err(format!(
             "URL scheme '{}' is not allowed; only http and https are permitted",
             scheme
@@ -119,10 +120,14 @@ pub async fn create_project(
         )));
     }
 
-    // Validate source_url if provided
-    if let Some(ref url) = payload.source_url {
-        validate_http_url(url).map_err(|e| ServerError::bad_request(format!("source_url: {e}")))?;
-    }
+    // Validate and normalize source_url if provided
+    let source_url = match payload.source_url {
+        Some(ref url) => Some(
+            validate_http_url(url)
+                .map_err(|e| ServerError::bad_request(format!("source_url: {e}")))?,
+        ),
+        None => None,
+    };
 
     // Validate owner - exactly one of owner_user or owner_team must be set
     let (owner_user_id, owner_team_id) = match &payload.owner {
@@ -173,7 +178,7 @@ pub async fn create_project(
         payload.access_class,
         owner_user_id,
         owner_team_id,
-        payload.source_url.as_deref(),
+        source_url.as_deref(),
     )
     .await
     .map_err(|e| {
@@ -653,12 +658,15 @@ pub async fn update_project(
 
     // Update source_url if provided (Some(None) clears, Some(Some(url)) sets)
     if let Some(ref source_url) = payload.source_url {
-        if let Some(ref url) = source_url {
-            validate_http_url(url)
-                .map_err(|e| ServerError::bad_request(format!("source_url: {e}")))?;
-        }
+        let normalized = match source_url {
+            Some(url) => Some(
+                validate_http_url(url)
+                    .map_err(|e| ServerError::bad_request(format!("source_url: {e}")))?,
+            ),
+            None => None,
+        };
         updated_project =
-            projects::update_source_url(&state.db_pool, updated_project.id, source_url.clone())
+            projects::update_source_url(&state.db_pool, updated_project.id, normalized)
                 .await
                 .internal_err("Failed to update project source URL")?;
     }

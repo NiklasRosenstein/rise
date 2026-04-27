@@ -38,10 +38,6 @@ function iconForUrl(href: string): string {
     return '/assets/external-link.svg';
 }
 
-function isGitLabUrl(href: string): boolean {
-    try { return new URL(href).hostname.includes('gitlab'); } catch { return false; }
-}
-
 /** Extract a display label for a PR/MR URL, e.g. "Pull Request (#99)" or "Merge Request (!42)". */
 function prLabel(href: string): string {
     try {
@@ -86,7 +82,7 @@ export function SourceLinkGroupAction({ onClick, variant, children }: { onClick?
     const cls = variant === 'danger'
         ? `${sourceLinkBase} text-[var(--mono-bad)] hover:text-white`
         : sourceLinkDefault;
-    return <button className={cls} onClick={onClick}>{children}</button>;
+    return <button type="button" className={cls} onClick={onClick}>{children}</button>;
 }
 
 export function SourceLinkGroup({ jobUrl, prUrl, onClick, children }: { jobUrl?: string | null; prUrl?: string | null; onClick?: (e: React.MouseEvent) => void; children?: React.ReactNode }) {
