@@ -70,6 +70,7 @@ pub async fn create_project(
     name: &Option<String>,
     access_class: &str,
     owner: Option<String>,
+    source_url: Option<String>,
     path: &str,
     mode: &Option<crate::ProjectMode>,
 ) -> Result<()> {
@@ -199,12 +200,15 @@ pub async fn create_project(
             name: String,
             access_class: String,
             owner: OwnerType,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            source_url: Option<String>,
         }
 
         let request = CreateRequest {
             name: project_name.clone(),
             access_class: project_access_class.clone(),
             owner: owner_payload,
+            source_url: source_url.clone(),
         };
 
         let url = format!("{}/api/v1/projects", backend_url);
@@ -379,6 +383,9 @@ pub async fn show_project(
             println!("Primary URL: {}", url);
         } else {
             println!("Primary URL: (not deployed)");
+        }
+        if let Some(ref url) = project.source_url {
+            println!("Source URL: {}", url);
         }
         if !project.custom_domain_urls.is_empty() {
             println!("Custom Domains:");

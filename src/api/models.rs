@@ -101,7 +101,9 @@ mod client_models {
         #[serde(default)]
         pub can_rollback: bool,
         #[serde(skip_serializing_if = "Option::is_none")]
-        pub source_url: Option<String>,
+        pub job_url: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        pub pull_request_url: Option<String>,
         #[serde(default)]
         pub created: String,
         #[serde(default)]

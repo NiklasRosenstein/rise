@@ -435,6 +435,7 @@ mod tests {
             "default".to_string(),
             Some(user.id),
             None,
+            None,
         )
         .await
         .expect("Failed to create test project");
@@ -454,7 +455,8 @@ mod tests {
                 expires_at: None,
                 http_port: 8080,
                 is_active: false,
-            source_url: None,
+                job_url: None,
+                pull_request_url: None,
             },
         )
         .await
@@ -487,6 +489,7 @@ mod tests {
             ProjectStatus::Stopped,
             "default".to_string(),
             Some(user.id),
+            None,
             None,
         )
         .await
@@ -544,7 +547,8 @@ mod tests {
                 expires_at: None,
                 http_port: 8080,
                 is_active: false,
-            source_url: None,
+                job_url: None,
+                pull_request_url: None,
             },
         )
         .await

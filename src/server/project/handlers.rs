@@ -155,6 +155,7 @@ pub async fn create_project(
         payload.access_class,
         owner_user_id,
         owner_team_id,
+        payload.source_url.as_deref(),
     )
     .await
     .map_err(|e| {

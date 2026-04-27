@@ -965,7 +965,8 @@ mod tests {
             is_active: false,
             deploying_started_at: None,
             first_healthy_at,
-            source_url: None,
+            job_url: None,
+            pull_request_url: None,
             created_at: Utc::now(),
             updated_at: Utc::now(),
         }

@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        SELECT\n            id, deployment_id, project_id, created_by_id,\n            status as \"status: DeploymentStatus\",\n            deployment_group, environment_id, expires_at,\n            termination_reason as \"termination_reason: _\",\n            completed_at, error_message, build_logs,\n            controller_metadata as \"controller_metadata: serde_json::Value\",\n            image, image_digest, rolled_back_from_deployment_id,\n            http_port, needs_reconcile, is_active,\n            deploying_started_at,\n            first_healthy_at, source_url,\n            created_at, updated_at\n        FROM deployments\n        WHERE project_id = $1\n          AND deployment_group = $2\n        ORDER BY created_at DESC\n        LIMIT 1\n        ",
+  "query": "\n            SELECT\n                id, deployment_id, project_id, created_by_id,\n                status as \"status: DeploymentStatus\",\n                deployment_group, environment_id, expires_at,\n                termination_reason as \"termination_reason: _\",\n                completed_at, error_message, build_logs,\n                controller_metadata as \"controller_metadata: serde_json::Value\",\n                image, image_digest, rolled_back_from_deployment_id,\n                http_port, needs_reconcile, is_active,\n                deploying_started_at,\n                first_healthy_at, job_url, pull_request_url,\n                created_at, updated_at\n            FROM deployments\n            WHERE project_id = $1 AND deployment_group = $2\n            ORDER BY created_at DESC\n            LIMIT $3 OFFSET $4\n            ",
   "describe": {
     "columns": [
       {
@@ -123,16 +123,21 @@
       },
       {
         "ordinal": 21,
-        "name": "source_url",
+        "name": "job_url",
         "type_info": "Text"
       },
       {
         "ordinal": 22,
+        "name": "pull_request_url",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 23,
         "name": "created_at",
         "type_info": "Timestamptz"
       },
       {
-        "ordinal": 23,
+        "ordinal": 24,
         "name": "updated_at",
         "type_info": "Timestamptz"
       }
@@ -140,7 +145,9 @@
     "parameters": {
       "Left": [
         "Uuid",
-        "Text"
+        "Text",
+        "Int8",
+        "Int8"
       ]
     },
     "nullable": [
@@ -166,9 +173,10 @@
       true,
       true,
       true,
+      true,
       false,
       false
     ]
   },
-  "hash": "bd133e0a30ef4cd973d1e19965214d725795ecd775844c56e0b9a8951f619a62"
+  "hash": "617204f10b29f9d2dbb2d20c436cfc41a8952e13a55874a80313eea659317c82"
 }

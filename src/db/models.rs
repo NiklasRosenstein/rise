@@ -149,8 +149,10 @@ pub struct Deployment {
     pub is_active: bool,
     pub deploying_started_at: Option<DateTime<Utc>>,
     pub first_healthy_at: Option<DateTime<Utc>>,
-    /// URL to the source of the deployment (e.g. a CI job URL)
-    pub source_url: Option<String>,
+    /// URL to the CI pipeline/job that created this deployment
+    pub job_url: Option<String>,
+    /// URL to the pull request/merge request associated with this deployment
+    pub pull_request_url: Option<String>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }

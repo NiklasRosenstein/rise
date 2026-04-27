@@ -166,6 +166,7 @@ pub async fn create<'a, E>(
     access_class: String,
     owner_user_id: Option<Uuid>,
     owner_team_id: Option<Uuid>,
+    source_url: Option<&str>,
 ) -> Result<Project>
 where
     E: sqlx::Executor<'a, Database = sqlx::Postgres>,
@@ -175,8 +176,8 @@ where
     let project = sqlx::query_as!(
         Project,
         r#"
-        INSERT INTO projects (name, status, access_class, owner_user_id, owner_team_id)
-        VALUES ($1, $2, $3, $4, $5)
+        INSERT INTO projects (name, status, access_class, owner_user_id, owner_team_id, source_url)
+        VALUES ($1, $2, $3, $4, $5, $6)
         RETURNING
             id, name,
             status as "status: ProjectStatus",
@@ -189,7 +190,8 @@ where
         status_str,
         access_class,
         owner_user_id,
-        owner_team_id
+        owner_team_id,
+        source_url
     )
     .fetch_one(executor)
     .await
@@ -692,6 +694,7 @@ mod tests {
             "default".to_string(),
             Some(user.id),
             None,
+            None,
         )
         .await
         .expect("Failed to create test project");
@@ -712,7 +715,8 @@ mod tests {
                 expires_at: None,
                 http_port: 8080,
                 is_active: false, // Initially not active
-                source_url: None,
+                job_url: None,
+                pull_request_url: None,
             },
         )
         .await
@@ -756,7 +760,8 @@ mod tests {
                 expires_at: None,
                 http_port: 8080,
                 is_active: false, // This is NOT active
-                source_url: None,
+                job_url: None,
+                pull_request_url: None,
             },
         )
         .await
@@ -792,6 +797,7 @@ mod tests {
             "default".to_string(),
             Some(user.id),
             None,
+            None,
         )
         .await
         .expect("Failed to create test project");
@@ -812,7 +818,8 @@ mod tests {
                 expires_at: None,
                 http_port: 8080,
                 is_active: false,
-                source_url: None,
+                job_url: None,
+                pull_request_url: None,
             },
         )
         .await

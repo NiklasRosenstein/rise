@@ -1591,6 +1591,50 @@ export function DeploymentDetail({ projectName, deploymentId }) {
                             : '-'}
                     </strong>
                 </div>
+                {deployment.job_url && (
+                    <div>
+                        <span>ci_job</span>
+                        <strong className="mono-copyable-value">
+                            <a href={deployment.job_url} target="_blank" rel="noopener noreferrer" className="underline">
+                                {deployment.job_url}
+                            </a>
+                            <button
+                                type="button"
+                                className="mono-copy-button"
+                                title="Copy CI job URL"
+                                aria-label="Copy CI job URL"
+                                onClick={() => handleCopy(deployment.job_url, 'CI job URL')}
+                            >
+                                <span
+                                    className="mono-copy-icon svg-mask"
+                                    style={{ maskImage: 'url(/assets/copy.svg)', WebkitMaskImage: 'url(/assets/copy.svg)' }}
+                                />
+                            </button>
+                        </strong>
+                    </div>
+                )}
+                {deployment.pull_request_url && (
+                    <div>
+                        <span>pull_request</span>
+                        <strong className="mono-copyable-value">
+                            <a href={deployment.pull_request_url} target="_blank" rel="noopener noreferrer" className="underline">
+                                {deployment.pull_request_url}
+                            </a>
+                            <button
+                                type="button"
+                                className="mono-copy-button"
+                                title="Copy pull request URL"
+                                aria-label="Copy pull request URL"
+                                onClick={() => handleCopy(deployment.pull_request_url, 'Pull request URL')}
+                            >
+                                <span
+                                    className="mono-copy-icon svg-mask"
+                                    style={{ maskImage: 'url(/assets/copy.svg)', WebkitMaskImage: 'url(/assets/copy.svg)' }}
+                                />
+                            </button>
+                        </strong>
+                    </div>
+                )}
                 <div><span>completed</span><strong>{deployment.completed_at ? formatDate(deployment.completed_at) : '-'}</strong></div>
                 <div><span>expires</span><strong>{deployment.expires_at ? formatTimeRemaining(deployment.expires_at) : '-'}</strong></div>
             </div>

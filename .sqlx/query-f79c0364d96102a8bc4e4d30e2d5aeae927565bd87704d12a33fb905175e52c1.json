@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        SELECT\n            id, deployment_id, project_id, created_by_id,\n            status as \"status: DeploymentStatus\",\n            deployment_group, environment_id, expires_at,\n            completed_at, error_message, build_logs,\n            controller_metadata as \"controller_metadata: serde_json::Value\",\n            image, image_digest, rolled_back_from_deployment_id,\n            http_port, needs_reconcile, is_active,\n            deploying_started_at,\n            first_healthy_at, source_url,\n            termination_reason as \"termination_reason: _\",\n            created_at, updated_at\n        FROM deployments\n        WHERE deployment_id = $1\n        ORDER BY created_at ASC\n        LIMIT $2\n        ",
+  "query": "\n        SELECT\n            id, deployment_id, project_id, created_by_id,\n            status as \"status: DeploymentStatus\",\n            deployment_group, environment_id, expires_at,\n            termination_reason as \"termination_reason: _\",\n            completed_at, error_message, build_logs,\n            controller_metadata as \"controller_metadata: serde_json::Value\",\n            image, image_digest, rolled_back_from_deployment_id,\n            http_port, needs_reconcile, is_active,\n            deploying_started_at,\n            first_healthy_at, job_url, pull_request_url,\n            created_at, updated_at\n        FROM deployments\n        WHERE project_id = $1\n          AND deployment_group = $2\n          AND is_active = TRUE\n        LIMIT 1\n        ",
   "describe": {
     "columns": [
       {
@@ -45,71 +45,6 @@
       },
       {
         "ordinal": 8,
-        "name": "completed_at",
-        "type_info": "Timestamptz"
-      },
-      {
-        "ordinal": 9,
-        "name": "error_message",
-        "type_info": "Text"
-      },
-      {
-        "ordinal": 10,
-        "name": "build_logs",
-        "type_info": "Text"
-      },
-      {
-        "ordinal": 11,
-        "name": "controller_metadata: serde_json::Value",
-        "type_info": "Jsonb"
-      },
-      {
-        "ordinal": 12,
-        "name": "image",
-        "type_info": "Text"
-      },
-      {
-        "ordinal": 13,
-        "name": "image_digest",
-        "type_info": "Text"
-      },
-      {
-        "ordinal": 14,
-        "name": "rolled_back_from_deployment_id",
-        "type_info": "Uuid"
-      },
-      {
-        "ordinal": 15,
-        "name": "http_port",
-        "type_info": "Int4"
-      },
-      {
-        "ordinal": 16,
-        "name": "needs_reconcile",
-        "type_info": "Bool"
-      },
-      {
-        "ordinal": 17,
-        "name": "is_active",
-        "type_info": "Bool"
-      },
-      {
-        "ordinal": 18,
-        "name": "deploying_started_at",
-        "type_info": "Timestamptz"
-      },
-      {
-        "ordinal": 19,
-        "name": "first_healthy_at",
-        "type_info": "Timestamptz"
-      },
-      {
-        "ordinal": 20,
-        "name": "source_url",
-        "type_info": "Text"
-      },
-      {
-        "ordinal": 21,
         "name": "termination_reason: _",
         "type_info": {
           "Custom": {
@@ -127,20 +62,90 @@
         }
       },
       {
+        "ordinal": 9,
+        "name": "completed_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 10,
+        "name": "error_message",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 11,
+        "name": "build_logs",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 12,
+        "name": "controller_metadata: serde_json::Value",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 13,
+        "name": "image",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 14,
+        "name": "image_digest",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 15,
+        "name": "rolled_back_from_deployment_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 16,
+        "name": "http_port",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 17,
+        "name": "needs_reconcile",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 18,
+        "name": "is_active",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 19,
+        "name": "deploying_started_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 20,
+        "name": "first_healthy_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 21,
+        "name": "job_url",
+        "type_info": "Text"
+      },
+      {
         "ordinal": 22,
+        "name": "pull_request_url",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 23,
         "name": "created_at",
         "type_info": "Timestamptz"
       },
       {
-        "ordinal": 23,
+        "ordinal": 24,
         "name": "updated_at",
         "type_info": "Timestamptz"
       }
     ],
     "parameters": {
       "Left": [
-        "Text",
-        "Int8"
+        "Uuid",
+        "Text"
       ]
     },
     "nullable": [
@@ -150,6 +155,7 @@
       false,
       false,
       false,
+      true,
       true,
       true,
       true,
@@ -170,5 +176,5 @@
       false
     ]
   },
-  "hash": "f7952a9558b93800c943adfb2d24ee9040b8f3eb19ec81b4e392d2497b82e2dc"
+  "hash": "f79c0364d96102a8bc4e4d30e2d5aeae927565bd87704d12a33fb905175e52c1"
 }

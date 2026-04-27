@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        UPDATE deployments\n        SET status = $2,\n            deploying_started_at = CASE\n                WHEN $2 = 'Deploying' AND deploying_started_at IS NULL THEN NOW()\n                ELSE deploying_started_at\n            END,\n            first_healthy_at = CASE\n                WHEN $2 = 'Healthy' AND first_healthy_at IS NULL THEN NOW()\n                ELSE first_healthy_at\n            END\n        WHERE id = $1\n        RETURNING\n            id, deployment_id, project_id, created_by_id,\n            status as \"status: DeploymentStatus\",\n            deployment_group, environment_id, expires_at,\n            completed_at, error_message, build_logs,\n            controller_metadata as \"controller_metadata: serde_json::Value\",\n            image, image_digest, rolled_back_from_deployment_id,\n            http_port, needs_reconcile, is_active,\n            deploying_started_at,\n            first_healthy_at, source_url,\n            termination_reason as \"termination_reason: _\",\n            created_at, updated_at\n        ",
+  "query": "\n        SELECT\n            id, deployment_id, project_id, created_by_id,\n            status as \"status: DeploymentStatus\",\n            deployment_group, environment_id, expires_at,\n            completed_at, error_message, build_logs,\n            controller_metadata as \"controller_metadata: serde_json::Value\",\n            image, image_digest, rolled_back_from_deployment_id,\n            http_port, needs_reconcile, is_active,\n            deploying_started_at,\n            first_healthy_at, job_url, pull_request_url,\n            termination_reason as \"termination_reason: _\",\n            created_at, updated_at\n        FROM deployments\n        WHERE project_id = $1\n        ORDER BY created_at DESC\n        ",
   "describe": {
     "columns": [
       {
@@ -105,11 +105,16 @@
       },
       {
         "ordinal": 20,
-        "name": "source_url",
+        "name": "job_url",
         "type_info": "Text"
       },
       {
         "ordinal": 21,
+        "name": "pull_request_url",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 22,
         "name": "termination_reason: _",
         "type_info": {
           "Custom": {
@@ -127,20 +132,19 @@
         }
       },
       {
-        "ordinal": 22,
+        "ordinal": 23,
         "name": "created_at",
         "type_info": "Timestamptz"
       },
       {
-        "ordinal": 23,
+        "ordinal": 24,
         "name": "updated_at",
         "type_info": "Timestamptz"
       }
     ],
     "parameters": {
       "Left": [
-        "Uuid",
-        "Text"
+        "Uuid"
       ]
     },
     "nullable": [
@@ -166,9 +170,10 @@
       true,
       true,
       true,
+      true,
       false,
       false
     ]
   },
-  "hash": "4f294891721de71a67158eaf124bdac465d15a1d7e036236dab2d103396c34ac"
+  "hash": "c025a149f71df635b0374b32deab87d036d15dc503cbfb8ecbf46c817c8a6a90"
 }

@@ -441,6 +441,7 @@ mod tests {
             "public".to_string(),
             Some(user.id),
             None,
+            None,
         )
         .await?;
 
@@ -474,6 +475,7 @@ mod tests {
             "public".to_string(),
             Some(user.id),
             None,
+            None,
         )
         .await?;
 
@@ -500,6 +502,7 @@ mod tests {
             "public".to_string(),
             Some(user.id),
             None,
+            None,
         )
         .await?;
 
@@ -525,6 +528,7 @@ mod tests {
             ProjectStatus::Stopped,
             "public".to_string(),
             Some(user.id),
+            None,
             None,
         )
         .await?;
@@ -557,6 +561,7 @@ mod tests {
             "public".to_string(),
             Some(user.id),
             None,
+            None,
         )
         .await?;
 
@@ -584,6 +589,7 @@ mod tests {
             "public".to_string(),
             Some(user.id),
             None,
+            None,
         )
         .await?;
         let project2 = projects::create(
@@ -592,6 +598,7 @@ mod tests {
             ProjectStatus::Stopped,
             "public".to_string(),
             Some(user.id),
+            None,
             None,
         )
         .await?;
@@ -627,6 +634,7 @@ mod tests {
             ProjectStatus::Stopped,
             "public".to_string(),
             Some(regular_user.id),
+            None,
             None,
         )
         .await?;

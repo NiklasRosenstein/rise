@@ -423,7 +423,8 @@ async fn convert_deployment(
         http_port: deployment.http_port as u16,
         is_active: deployment.is_active,
         can_rollback,
-        source_url: deployment.source_url,
+        job_url: deployment.job_url,
+        pull_request_url: deployment.pull_request_url,
         created: deployment.created_at.to_rfc3339(),
         updated: deployment.updated_at.to_rfc3339(),
     }
@@ -761,7 +762,8 @@ pub async fn create_deployment(
                 expires_at,                        // expires_at
                 http_port: final_http_port as i32, // Use determined http_port
                 is_active: false,                  // Deployments start as inactive
-                source_url: payload.source_url.as_deref(),
+                job_url: payload.job_url.as_deref(),
+                pull_request_url: payload.pull_request_url.as_deref(),
             },
             &project,
         )
@@ -880,7 +882,8 @@ pub async fn create_deployment(
                     expires_at,
                     http_port: effective_http_port as i32,
                     is_active: false,
-                    source_url: payload.source_url.as_deref(),
+                    job_url: payload.job_url.as_deref(),
+                    pull_request_url: payload.pull_request_url.as_deref(),
                 },
                 &project,
             )
@@ -964,7 +967,8 @@ pub async fn create_deployment(
                 expires_at,
                 http_port: effective_http_port as i32,
                 is_active: false,
-                source_url: payload.source_url.as_deref(),
+                job_url: payload.job_url.as_deref(),
+                pull_request_url: payload.pull_request_url.as_deref(),
             },
             &project,
         )
@@ -1050,7 +1054,8 @@ pub async fn create_deployment(
                 expires_at,                            // expires_at
                 http_port: effective_http_port as i32, // http_port
                 is_active: false,                      // Deployments start as inactive
-                source_url: payload.source_url.as_deref(),
+                job_url: payload.job_url.as_deref(),
+                pull_request_url: payload.pull_request_url.as_deref(),
             },
             &project,
         )

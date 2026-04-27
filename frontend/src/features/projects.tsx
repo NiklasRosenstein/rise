@@ -608,6 +608,28 @@ export function ProjectDetail({ projectName, initialTab }) {
                         )}
                     </strong>
                 </div>
+                {project.source_url && (
+                    <div>
+                        <span>source</span>
+                        <strong className="mono-copyable-value">
+                            <a href={project.source_url} target="_blank" rel="noopener noreferrer" className="underline">
+                                {project.source_url}
+                            </a>
+                            <button
+                                type="button"
+                                className="mono-copy-button"
+                                title="Copy source URL"
+                                aria-label="Copy source URL"
+                                onClick={() => handleCopy(project.source_url, 'Source URL')}
+                            >
+                                <span
+                                    className="mono-copy-icon svg-mask"
+                                    style={{ maskImage: 'url(/assets/copy.svg)', WebkitMaskImage: 'url(/assets/copy.svg)' }}
+                                />
+                            </button>
+                        </strong>
+                    </div>
+                )}
             </div>
 
             <div className="mono-tabbar mb-6">

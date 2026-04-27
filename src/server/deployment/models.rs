@@ -91,7 +91,9 @@ pub struct Deployment {
     #[serde(default)]
     pub can_rollback: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub source_url: Option<String>, // URL to the source of the deployment (e.g. a CI job URL)
+    pub job_url: Option<String>, // URL to the CI pipeline/job that created this deployment
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pull_request_url: Option<String>, // URL to the PR/MR associated with this deployment
     #[serde(default)]
     pub created: String,
     #[serde(default)]
@@ -219,9 +221,12 @@ pub struct CreateDeploymentRequest {
     /// Runtime environment variable overrides applied after copying project/source env vars
     #[serde(default)]
     pub env_overrides: Vec<EnvOverride>,
-    /// URL to the source of this deployment (e.g. a CI job URL). Auto-detected from CI environment if not provided.
+    /// URL to the CI pipeline/job that created this deployment. Auto-detected from CI environment if not provided.
     #[serde(default)]
-    pub source_url: Option<String>,
+    pub job_url: Option<String>,
+    /// URL to the pull request/merge request associated with this deployment. Auto-detected from CI environment if not provided.
+    #[serde(default)]
+    pub pull_request_url: Option<String>,
 }
 
 // Response from creating a deployment

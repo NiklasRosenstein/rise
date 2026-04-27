@@ -94,10 +94,14 @@ struct DeployArgs {
     /// Lines: KEY=value (plain) or KEY=secret:value (protected secret).
     #[arg(long)]
     env_file: Option<String>,
-    /// URL to the source of this deployment (e.g. a CI job URL).
+    /// URL to the CI pipeline/job that created this deployment.
     /// Auto-detected from CI environment variables (CI_JOB_URL, GITHUB_RUN_ID) if not provided.
     #[arg(long)]
-    source_url: Option<String>,
+    job_url: Option<String>,
+    /// URL to the pull request/merge request associated with this deployment.
+    /// Auto-detected from CI environment variables if not provided.
+    #[arg(long)]
+    pull_request_url: Option<String>,
     #[command(flatten)]
     build_args: build::BuildArgs,
 }
@@ -226,6 +230,9 @@ enum ProjectCommands {
         /// Owner (format: "user:email" or "team:name", defaults to current user)
         #[arg(long)]
         owner: Option<String>,
+        /// URL to where the project code lives (e.g. a GitHub/GitLab repository)
+        #[arg(long)]
+        source_url: Option<String>,
         /// Path where to create rise.toml (defaults to current directory)
         #[arg(long, default_value = ".")]
         path: String,
@@ -930,6 +937,7 @@ async fn main() -> Result<()> {
                 name,
                 access_class,
                 owner,
+                source_url,
                 path,
                 mode,
             } => {
@@ -940,6 +948,7 @@ async fn main() -> Result<()> {
                     name,
                     access_class,
                     owner.clone(),
+                    source_url.clone(),
                     path,
                     mode,
                 )
@@ -961,13 +970,10 @@ async fn main() -> Result<()> {
                 path,
             } => {
                 // Convert "--source-url ''" (empty string) to Some(None) to clear
-                let source_url_opt: Option<Option<String>> = source_url.as_ref().map(|u| {
-                    if u.is_empty() {
-                        None
-                    } else {
-                        Some(u.clone())
-                    }
-                });
+                let source_url_opt: Option<Option<String>> =
+                    source_url
+                        .as_ref()
+                        .map(|u| if u.is_empty() { None } else { Some(u.clone()) });
                 project::update_project(
                     &http_client,
                     &backend_url,
@@ -1235,7 +1241,8 @@ async fn main() -> Result<()> {
                         use_source_env_vars: args.use_source_env_vars,
                         push_image: args.push_image,
                         env_overrides,
-                        source_url: args.source_url.clone(),
+                        job_url: args.job_url.clone(),
+                        pull_request_url: args.pull_request_url.clone(),
                     },
                 )
                 .await?;
