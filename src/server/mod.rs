@@ -12,6 +12,7 @@ pub mod frontend;
 pub mod middleware;
 pub mod oci;
 pub mod project;
+pub mod rate_limit;
 pub mod registry;
 pub mod settings;
 pub mod ssrf;
