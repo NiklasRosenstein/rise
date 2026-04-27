@@ -42,6 +42,26 @@ function isGitLabUrl(href: string): boolean {
     try { return new URL(href).hostname.includes('gitlab'); } catch { return false; }
 }
 
+/** Extract a display label for a PR/MR URL, e.g. "Pull Request (#99)" or "Merge Request (!42)". */
+function prLabel(href: string): string {
+    try {
+        const url = new URL(href);
+        const parts = url.pathname.split('/').filter(Boolean);
+        if (url.hostname.includes('gitlab')) {
+            // GitLab: /owner/repo/-/merge_requests/42
+            const idx = parts.indexOf('merge_requests');
+            const num = idx >= 0 ? parts[idx + 1] : undefined;
+            return num ? `Merge Request (!${num})` : 'Merge Request';
+        }
+        // GitHub: /owner/repo/pull/99
+        const idx = parts.indexOf('pull');
+        const num = idx >= 0 ? parts[idx + 1] : undefined;
+        return num ? `Pull Request (#${num})` : 'Pull Request';
+    } catch {
+        return 'Pull Request';
+    }
+}
+
 export function ExternalLinkButton({ href, label, onClick }: { href: string; label: string; onClick?: (e: React.MouseEvent) => void }) {
     if (!isSafeUrl(href)) return null;
     const icon = iconForUrl(href);
@@ -58,41 +78,60 @@ export function ExternalLinkButton({ href, label, onClick }: { href: string; lab
     );
 }
 
-const sourceLinkCls = "px-2.5 py-1 text-xs text-[var(--mono-muted)] hover:text-[var(--mono-text)] transition-colors";
+const sourceLinkBase = "px-2.5 py-1 text-xs cursor-pointer hover:bg-[#2a2a2a] transition-colors";
+const sourceLinkDefault = `${sourceLinkBase} text-[var(--mono-muted)] hover:text-[var(--mono-text)]`;
 
-export function SourceLinkGroup({ jobUrl, prUrl, onClick }: { jobUrl?: string | null; prUrl?: string | null; onClick?: (e: React.MouseEvent) => void }) {
+/** A button-style action item for use inside SourceLinkGroup's children. */
+export function SourceLinkGroupAction({ onClick, variant, children }: { onClick?: (e: React.MouseEvent) => void; variant?: 'danger'; children: React.ReactNode }) {
+    const cls = variant === 'danger'
+        ? `${sourceLinkBase} text-[var(--mono-bad)] hover:text-white`
+        : sourceLinkDefault;
+    return <button className={cls} onClick={onClick}>{children}</button>;
+}
+
+export function SourceLinkGroup({ jobUrl, prUrl, onClick, children }: { jobUrl?: string | null; prUrl?: string | null; onClick?: (e: React.MouseEvent) => void; children?: React.ReactNode }) {
     const safeJob = jobUrl && isSafeUrl(jobUrl) ? jobUrl : null;
     const safePr = prUrl && isSafeUrl(prUrl) ? prUrl : null;
-    if (!safeJob && !safePr) return null;
+    if (!safeJob && !safePr && !children) return null;
 
-    // If only one link, render a standalone ExternalLinkButton
-    if (!safeJob || !safePr) {
+    // If only one link and no extra children, render a standalone ExternalLinkButton
+    if (!children && (safeJob ? 1 : 0) + (safePr ? 1 : 0) === 1) {
         const href = (safeJob || safePr)!;
-        const label = safeJob ? 'CI Job' : (isGitLabUrl(href) ? 'Merge Request' : 'Pull Request');
+        const label = safeJob ? 'CI Job' : prLabel(href);
         return <ExternalLinkButton href={href} label={label} onClick={onClick} />;
     }
 
-    // Both present: combined pill — PR/MR first, then CI Job
-    const icon = iconForUrl(safePr);
-    const prLabel = isGitLabUrl(safePr) ? 'Merge Request' : 'Pull Request';
+    // Combined pill
+    const prIcon = safePr ? iconForUrl(safePr) : null;
+    const prText = safePr ? prLabel(safePr) : null;
+    const jobIcon = safeJob ? iconForUrl(safeJob) : null;
     return (
-        <span className="inline-flex items-center text-xs border border-[var(--mono-line)]">
-            <a href={safePr} target="_blank" rel="noopener noreferrer"
-               className={`${sourceLinkCls} inline-flex items-center gap-1.5 hover:bg-[var(--mono-line-light)]`}
-               onClick={onClick}
-            >
-                <span className="w-3 h-3 svg-mask inline-block"
-                      style={{ maskImage: `url(${icon})`, WebkitMaskImage: `url(${icon})` }}
-                />
-                {prLabel}
-            </a>
-            <span className="w-px self-stretch bg-[var(--mono-line)]" />
-            <a href={safeJob} target="_blank" rel="noopener noreferrer"
-               className={`${sourceLinkCls} hover:bg-[var(--mono-line-light)]`}
-               onClick={onClick}
-            >
-                CI Job
-            </a>
+        <span className="inline-flex items-center text-xs border border-[var(--mono-line)] hover:border-[#5a5a5a] transition-colors">
+            {safePr && (
+                <a href={safePr} target="_blank" rel="noopener noreferrer"
+                   className={`${sourceLinkDefault} inline-flex items-center gap-1.5`}
+                   onClick={onClick}
+                >
+                    <span className="w-3 h-3 svg-mask inline-block"
+                          style={{ maskImage: `url(${prIcon})`, WebkitMaskImage: `url(${prIcon})` }}
+                    />
+                    {prText}
+                </a>
+            )}
+            {safePr && safeJob && <span className="w-px self-stretch bg-[var(--mono-line)]" />}
+            {safeJob && (
+                <a href={safeJob} target="_blank" rel="noopener noreferrer"
+                   className={`${sourceLinkDefault} inline-flex items-center gap-1.5`}
+                   onClick={onClick}
+                >
+                    <span className="w-3 h-3 svg-mask inline-block"
+                          style={{ maskImage: `url(${jobIcon})`, WebkitMaskImage: `url(${jobIcon})` }}
+                    />
+                    CI Job
+                </a>
+            )}
+            {children && (safeJob || safePr) && <span className="w-px self-stretch bg-[var(--mono-line)]" />}
+            {children}
         </span>
     );
 }
