@@ -915,6 +915,10 @@ rules:
   - apiGroups: [""]
     resources: ["events"]
     verbs: ["get", "list", "watch"]
+  # Endpoints for backend service routing (applied directly via kube-rs)
+  - apiGroups: [""]
+    resources: ["endpoints"]
+    verbs: ["get", "patch"]
 ```
 
 **Note:** Metacontroller itself needs broad permissions to manage child resources (namespaces, deployments, services, secrets, ingresses, etc.). Those are configured in the Metacontroller operator's own RBAC, not in Rise's ClusterRole.

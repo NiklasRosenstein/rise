@@ -33,6 +33,11 @@ rules:
   resources: ["events"]
   verbs: ["get", "list", "watch"]
 
+# Endpoints (for backend service routing, applied directly via kube-rs)
+- apiGroups: [""]
+  resources: ["endpoints"]
+  verbs: ["get", "patch"]
+
 {{- if .Values.metacontroller.adoptExistingResources }}
 # Patch existing resources with Metacontroller ownership label during migration.
 # Can be disabled after migration is complete.
