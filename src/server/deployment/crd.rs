@@ -91,11 +91,7 @@ pub async fn trigger_resync(client: &Client, project_name: &str) -> anyhow::Resu
     });
 
     match api
-        .patch(
-            project_name,
-            &PatchParams::default(),
-            &Patch::Merge(patch),
-        )
+        .patch(project_name, &PatchParams::default(), &Patch::Merge(patch))
         .await
     {
         Ok(_) => {
