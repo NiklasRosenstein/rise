@@ -41,8 +41,9 @@ pub fn deployment_routes() -> Router<AppState> {
         )
 }
 
-/// Metacontroller webhook routes (no authentication required).
-/// These are called by Metacontroller within the cluster.
+/// Metacontroller webhook routes (token-authenticated on an internal listener).
+/// These are called by Metacontroller within the cluster and require a shared-secret
+/// token passed as a `?token=` query parameter.
 #[cfg(feature = "backend")]
 pub fn metacontroller_routes() -> Router<AppState> {
     Router::new()

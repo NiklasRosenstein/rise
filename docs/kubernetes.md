@@ -74,8 +74,8 @@ Rise creates a `RiseProject` custom resource per project. Metacontroller watches
 | Deployment | One per deployment | Runs application pods |
 | Service | One per deployment group | Routes traffic to active deployment |
 | Ingress | One per deployment group | Exposes HTTP/HTTPS endpoints |
-| Endpoints | One per deployment group | Managed alongside Services |
-| NetworkPolicy | One per project | Restricts network access (e.g., webhook port isolation) |
+| Endpoints | One per project (if backend configured) | Backend endpoints for the `rise-backend` Service (applied directly, not via Metacontroller) |
+| NetworkPolicy | One per active deployment group | Restricts network access per deployment group |
 | ServiceAccount | One per environment | Per-environment workload identity |
 | Secret | One per project | Stores image pull credentials |
 

@@ -492,12 +492,12 @@ impl AppState {
                     .ok();
 
                 // Create kube client for webhook and deployment backend
-                let kube_config = if kubeconfig.is_some() {
-                    kube::Config::from_kubeconfig(&kube::config::KubeConfigOptions {
-                        context: None,
-                        cluster: None,
-                        user: None,
-                    })
+                let kube_config = if let Some(path) = kubeconfig {
+                    let kubeconfig_data = kube::config::Kubeconfig::read_from(path)?;
+                    kube::Config::from_custom_kubeconfig(
+                        kubeconfig_data,
+                        &kube::config::KubeConfigOptions::default(),
+                    )
                     .await?
                 } else {
                     kube::Config::infer().await?

@@ -3,7 +3,7 @@
 {{- $baseUrl := .Values.metacontroller.webhookBaseUrl | default (printf "http://%s-webhook.%s.svc:%s" (include "rise.fullname" .) .Release.Namespace (toString $webhookPort)) }}
 {{- $tokenParam := "" }}
 {{- if .Values.metacontroller.webhookToken }}
-{{- $tokenParam = printf "?token=%s" .Values.metacontroller.webhookToken }}
+{{- $tokenParam = printf "?token=%s" (.Values.metacontroller.webhookToken | urlquery) }}
 {{- end }}
 apiVersion: metacontroller.k8s.io/v1alpha1
 kind: CompositeController
