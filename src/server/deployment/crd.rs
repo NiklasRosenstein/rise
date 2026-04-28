@@ -83,10 +83,7 @@ pub async fn trigger_resync(client: &Client, project_name: &str) -> anyhow::Resu
     let timestamp = chrono::Utc::now().to_rfc3339();
 
     let patch = serde_json::json!({
-        "apiVersion": "rise.dev/v1alpha1",
-        "kind": "RiseProject",
         "metadata": {
-            "name": project_name,
             "annotations": {
                 TRIGGER_ANNOTATION: timestamp,
             },
@@ -96,13 +93,13 @@ pub async fn trigger_resync(client: &Client, project_name: &str) -> anyhow::Resu
     match api
         .patch(
             project_name,
-            &PatchParams::apply("rise-controller").force(),
-            &Patch::Apply(patch),
+            &PatchParams::default(),
+            &Patch::Merge(patch),
         )
         .await
     {
         Ok(_) => {
-            debug!(
+            info!(
                 "Triggered resync for RiseProject '{}' (trigger={})",
                 project_name, timestamp
             );

@@ -850,6 +850,18 @@ pub async fn create_deployment(
             }
         );
 
+        // Trigger Metacontroller resync so the webhook picks up the new Pushed deployment
+        if let Some(ref kube_client) = state.kube_client {
+            if let Err(e) =
+                crate::server::deployment::crd::trigger_resync(kube_client, &project.name).await
+            {
+                tracing::warn!(
+                    project = %project.name,
+                    "Failed to trigger CRD resync after rollback deployment: {:?}", e
+                );
+            }
+        }
+
         // Return response with image tag and empty credentials (no push needed)
         return Ok(Json(CreateDeploymentResponse {
             deployment_id,
@@ -1024,6 +1036,18 @@ pub async fn create_deployment(
         // Insert Rise-provided environment variables
         insert_rise_env_vars(&state, &deployment, &project).await?;
 
+        // Trigger Metacontroller resync so the webhook picks up the new Pushed deployment
+        if let Some(ref kube_client) = state.kube_client {
+            if let Err(e) =
+                crate::server::deployment::crd::trigger_resync(kube_client, &project.name).await
+            {
+                tracing::warn!(
+                    project = %project.name,
+                    "Failed to trigger CRD resync after pre-built image deployment: {:?}", e
+                );
+            }
+        }
+
         // Return response with digest as image_tag and empty credentials
         Ok(Json(CreateDeploymentResponse {
             deployment_id,
@@ -1191,7 +1215,6 @@ async fn perform_status_update(
     );
 
     // Trigger Metacontroller resync so the webhook picks up the status change
-    #[cfg(feature = "backend")]
     if let Some(ref kube_client) = state.kube_client {
         if let Err(e) =
             crate::server::deployment::crd::trigger_resync(kube_client, &project.name).await
@@ -1582,7 +1605,6 @@ pub async fn stop_deployments_by_group(
         .internal_err("Failed to update project status")?;
 
     // Trigger Metacontroller resync
-    #[cfg(feature = "backend")]
     if !stopped_ids.is_empty() {
         if let Some(ref kube_client) = state.kube_client {
             if let Err(e) =
@@ -1689,7 +1711,6 @@ pub async fn stop_deployment(
         .internal_err("Failed to update project status")?;
 
     // Trigger Metacontroller resync
-    #[cfg(feature = "backend")]
     if let Some(ref kube_client) = state.kube_client {
         if let Err(e) =
             crate::server::deployment::crd::trigger_resync(kube_client, &project.name).await
