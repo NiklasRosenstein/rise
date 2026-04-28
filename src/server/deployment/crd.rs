@@ -295,36 +295,55 @@ async fn adopt_children_for_project(client: &Client, project_name: &str) -> anyh
         }
     }
 
-    // 2. Patch namespaced children: list by managed-by label, skip already-labeled
-    let lp = ListParams::default().labels("app.kubernetes.io/managed-by=rise");
+    // 2. Patch namespaced children: list by managed-by label, skip already-labeled.
+    //    Support both the current label (app.kubernetes.io/managed-by=rise) and the
+    //    legacy label (rise.dev/managed-by=rise) used by older controller versions.
+    let label_selectors = [
+        ListParams::default().labels("app.kubernetes.io/managed-by=rise"),
+        ListParams::default().labels("rise.dev/managed-by=rise"),
+    ];
 
     // Secret
     let secret_api: Api<Secret> = Api::namespaced(client.clone(), &ns_name);
-    patch_all_matching(&secret_api, &lp, uid, "Secret").await;
+    for lp in &label_selectors {
+        patch_all_matching(&secret_api, lp, uid, "Secret").await;
+    }
 
     // ServiceAccount
     let sa_api: Api<ServiceAccount> = Api::namespaced(client.clone(), &ns_name);
-    patch_all_matching(&sa_api, &lp, uid, "ServiceAccount").await;
+    for lp in &label_selectors {
+        patch_all_matching(&sa_api, lp, uid, "ServiceAccount").await;
+    }
 
     // Deployment
     let deploy_api: Api<K8sDeployment> = Api::namespaced(client.clone(), &ns_name);
-    patch_all_matching(&deploy_api, &lp, uid, "Deployment").await;
+    for lp in &label_selectors {
+        patch_all_matching(&deploy_api, lp, uid, "Deployment").await;
+    }
 
     // Service
     let svc_api: Api<Service> = Api::namespaced(client.clone(), &ns_name);
-    patch_all_matching(&svc_api, &lp, uid, "Service").await;
+    for lp in &label_selectors {
+        patch_all_matching(&svc_api, lp, uid, "Service").await;
+    }
 
     // Endpoints
     let ep_api: Api<Endpoints> = Api::namespaced(client.clone(), &ns_name);
-    patch_all_matching(&ep_api, &lp, uid, "Endpoints").await;
+    for lp in &label_selectors {
+        patch_all_matching(&ep_api, lp, uid, "Endpoints").await;
+    }
 
     // Ingress
     let ing_api: Api<Ingress> = Api::namespaced(client.clone(), &ns_name);
-    patch_all_matching(&ing_api, &lp, uid, "Ingress").await;
+    for lp in &label_selectors {
+        patch_all_matching(&ing_api, lp, uid, "Ingress").await;
+    }
 
     // NetworkPolicy
     let np_api: Api<NetworkPolicy> = Api::namespaced(client.clone(), &ns_name);
-    patch_all_matching(&np_api, &lp, uid, "NetworkPolicy").await;
+    for lp in &label_selectors {
+        patch_all_matching(&np_api, lp, uid, "NetworkPolicy").await;
+    }
 
     info!(
         "Adopted existing resources for project '{}' (uid={})",
