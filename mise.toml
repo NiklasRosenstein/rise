@@ -177,6 +177,7 @@ echo "Port-forward running in background (PID: $!)"
 
 # Install Metacontroller + Rise CRDs for development
 helm dependency build helm/rise
+kubectl apply --server-side --force-conflicts -f helm/rise/crds/
 helm upgrade --install rise-dev ./helm/rise \
   -f helm/rise/values-dev.yaml \
   --namespace rise \
@@ -217,6 +218,7 @@ helm upgrade --install --repo https://kubernetes.github.io/ingress-nginx ingress
 # Install Metacontroller + Rise CRDs for development
 HOST_IP=$(kubectl get node $(hostname) -o jsonpath='{.metadata.annotations.k3s\\.io/internal-ip}')
 helm dependency build helm/rise
+kubectl apply --server-side --force-conflicts -f helm/rise/crds/
 helm upgrade --install rise-dev ./helm/rise \
   -f helm/rise/values-dev.yaml \
   --set "metacontroller.webhookBaseUrl=http://${HOST_IP}:3001" \

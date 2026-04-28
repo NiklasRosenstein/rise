@@ -306,10 +306,38 @@ async fn adopt_children_for_project(client: &Client, project_name: &str) -> anyh
         ListParams::default().labels("rise.dev/managed-by=rise"),
     ];
 
-    // Secret
+    // Secret (by managed-by label)
     let secret_api: Api<Secret> = Api::namespaced(client.clone(), &ns_name);
     for lp in &label_selectors {
         patch_all_matching(&secret_api, lp, uid, "Secret").await;
+    }
+
+    // Image pull secret — the old controller created this without any labels,
+    // so it won't be found by label selectors. Adopt it by name directly.
+    match patch_resource_label(
+        &secret_api,
+        super::resource_builder::IMAGE_PULL_SECRET_NAME,
+        uid,
+        "Secret",
+    )
+    .await
+    {
+        Ok(()) => {}
+        Err(kube::Error::Api(err)) if err.code == 404 => {
+            debug!(
+                "Image pull secret '{}' not found in '{}', skipping",
+                super::resource_builder::IMAGE_PULL_SECRET_NAME,
+                ns_name
+            );
+        }
+        Err(e) => {
+            warn!(
+                "Failed to patch image pull secret '{}' in '{}' with controller-uid: {:?}",
+                super::resource_builder::IMAGE_PULL_SECRET_NAME,
+                ns_name,
+                e
+            );
+        }
     }
 
     // ServiceAccount
