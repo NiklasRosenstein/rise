@@ -17,6 +17,7 @@ use axum::Json;
 use chrono::Utc;
 use k8s_openapi::api::apps::v1::Deployment as K8sDeployment;
 use k8s_openapi::api::core::v1::Secret;
+use k8s_openapi::apimachinery::pkg::apis::meta::v1::ObjectMeta;
 use serde::{Deserialize, Serialize};
 use subtle::ConstantTimeEq;
 use tracing::{debug, error, info, warn};
@@ -57,8 +58,6 @@ pub struct ObservedChildren {
     pub deployments: HashMap<String, serde_json::Value>,
     #[serde(rename = "Service.v1", default)]
     pub services: HashMap<String, serde_json::Value>,
-    #[serde(rename = "Endpoints.v1", default)]
-    pub endpoints: HashMap<String, serde_json::Value>,
     #[serde(rename = "Ingress.networking.k8s.io/v1", default)]
     pub ingresses: HashMap<String, serde_json::Value>,
     #[serde(rename = "NetworkPolicy.networking.k8s.io/v1", default)]
@@ -872,12 +871,14 @@ async fn compute_desired_children(
     // 3. Backend service + endpoints (if configured)
     if let Some(ref backend_address) = resource_builder.backend_address {
         add_backend_resources(
+            state,
             &mut children,
             resource_builder,
             project,
             &namespace,
             backend_address,
-        )?;
+        )
+        .await?;
     }
 
     // Collect deployments that should have K8s infrastructure
@@ -1062,10 +1063,33 @@ async fn build_image_pull_secret(
     };
 
     if !needs_refresh {
-        // Return the existing secret so Metacontroller keeps it
+        // Return a clean secret with only the fields we control, using the existing
+        // data and last-refresh annotation from the observed secret. Echoing back
+        // the full observed JSON would include server-set fields (managedFields,
+        // resourceVersion, etc.) that change on every update, creating a perpetual
+        // diff loop with Metacontroller's last-applied-configuration.
         if let Some(secret_json) = observed.secrets.get(&secret_key) {
             let existing: Secret = serde_json::from_value(secret_json.clone())?;
-            return Ok(Some(existing));
+            let last_refresh = existing
+                .metadata
+                .annotations
+                .as_ref()
+                .and_then(|a| a.get(ANNOTATION_LAST_REFRESH))
+                .cloned()
+                .unwrap_or_default();
+            let mut annotations = std::collections::BTreeMap::new();
+            annotations.insert(ANNOTATION_LAST_REFRESH.to_string(), last_refresh);
+            return Ok(Some(Secret {
+                metadata: ObjectMeta {
+                    name: Some(IMAGE_PULL_SECRET_NAME.to_string()),
+                    namespace: Some(namespace.to_string()),
+                    annotations: Some(annotations),
+                    ..Default::default()
+                },
+                type_: existing.type_,
+                data: existing.data,
+                ..Default::default()
+            }));
         }
     }
 
@@ -1086,8 +1110,17 @@ async fn build_image_pull_secret(
     Ok(Some(secret))
 }
 
-/// Add backend service + endpoints resources
-fn add_backend_resources(
+/// Add backend service + endpoints resources.
+///
+/// The Service is returned as a Metacontroller child. For IP-based backends,
+/// the Endpoints are applied directly via kube-rs because Endpoints cannot be
+/// a Metacontroller child resource type — Kubernetes auto-creates Endpoints
+/// for Services with selectors (e.g. the deployment `default` Service), and
+/// Metacontroller would thrash deleting/adopting those in an infinite loop.
+/// Since child resource types are all-or-nothing, we manage the `rise-backend`
+/// Endpoints outside of Metacontroller as well.
+async fn add_backend_resources(
+    state: &AppState,
     children: &mut Vec<serde_json::Value>,
     resource_builder: &ResourceBuilder,
     project: &Project,
@@ -1097,7 +1130,7 @@ fn add_backend_resources(
     let is_ip = backend_address.host.parse::<std::net::IpAddr>().is_ok();
 
     if is_ip {
-        // IP address → ClusterIP + Endpoints
+        // IP address → ClusterIP Service (as child) + Endpoints (applied directly)
         let svc = resource_builder.create_backend_service_clusterip(
             project,
             namespace,
@@ -1111,7 +1144,7 @@ fn add_backend_resources(
             &backend_address.host,
             backend_address.port,
         );
-        children.push(serde_json::to_value(&endpoints)?);
+        apply_backend_endpoints(state, &endpoints, namespace).await;
     } else {
         // DNS name → ExternalName
         let svc = resource_builder.create_backend_service_externalname(
@@ -1123,6 +1156,30 @@ fn add_backend_resources(
     }
 
     Ok(())
+}
+
+/// Apply backend Endpoints directly via kube-rs server-side apply.
+async fn apply_backend_endpoints(
+    state: &AppState,
+    endpoints: &k8s_openapi::api::core::v1::Endpoints,
+    namespace: &str,
+) {
+    let Some(ref kube_client) = state.kube_client else {
+        return;
+    };
+    let api: kube::Api<k8s_openapi::api::core::v1::Endpoints> =
+        kube::Api::namespaced(kube_client.clone(), namespace);
+    let name = endpoints.metadata.name.as_deref().unwrap_or("rise-backend");
+    let params = kube::api::PatchParams::apply("rise-controller").force();
+    if let Err(e) = api
+        .patch(name, &params, &kube::api::Patch::Apply(endpoints))
+        .await
+    {
+        warn!(
+            namespace = %namespace,
+            "Failed to apply backend Endpoints: {:?}", e
+        );
+    }
 }
 
 /// Resolve the environment name for a deployment

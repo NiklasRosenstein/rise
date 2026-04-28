@@ -31,6 +31,11 @@ spec:
               lastSyncTime:
                 nullable: true
                 type: string
+              observedGeneration:
+                description: Set by Metacontroller to track which generation of the spec has been observed.
+                format: int64
+                nullable: true
+                type: integer
             type: object
         required:
         - spec

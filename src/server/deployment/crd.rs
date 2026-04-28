@@ -33,6 +33,9 @@ pub struct RiseProjectSpec {}
 pub struct RiseProjectStatus {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub last_sync_time: Option<String>,
+    /// Set by Metacontroller to track which generation of the spec has been observed.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub observed_generation: Option<i64>,
 }
 
 /// Annotation key used to trigger an immediate Metacontroller resync.

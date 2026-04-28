@@ -689,10 +689,16 @@ impl ResourceBuilder {
         let (egress_rules, policy_types) = match &self.network_policy.egress {
             None => (None, vec!["Ingress".to_string()]),
             Some(rules) => (
-                Some(rules.clone()),
+                Some(normalize_network_policy_label_selectors_in_egress(
+                    rules.clone(),
+                )),
                 vec!["Ingress".to_string(), "Egress".to_string()],
             ),
         };
+
+        let ingress_rules = normalize_network_policy_label_selectors_in_ingress(
+            self.network_policy.ingress.clone(),
+        );
 
         NetworkPolicy {
             metadata: ObjectMeta {
@@ -708,7 +714,7 @@ impl ResourceBuilder {
                 }),
                 policy_types: Some(policy_types),
                 egress: egress_rules,
-                ingress: Some(self.network_policy.ingress.clone()),
+                ingress: Some(ingress_rules),
             }),
         }
     }
@@ -1289,4 +1295,56 @@ impl ResourceBuilder {
             )
         }
     }
+}
+
+/// Normalize a `LabelSelector` to match Kubernetes API server behavior:
+/// empty `matchLabels` maps are stripped (K8s normalizes `{matchLabels: {}}`
+/// to `{}`), avoiding perpetual diffs with Metacontroller's last-applied state.
+fn normalize_label_selector(mut sel: LabelSelector) -> LabelSelector {
+    if sel.match_labels.as_ref().is_some_and(|m| m.is_empty()) {
+        sel.match_labels = None;
+    }
+    sel
+}
+
+fn normalize_network_policy_label_selectors_in_ingress(
+    rules: Vec<k8s_openapi::api::networking::v1::NetworkPolicyIngressRule>,
+) -> Vec<k8s_openapi::api::networking::v1::NetworkPolicyIngressRule> {
+    rules
+        .into_iter()
+        .map(|mut rule| {
+            if let Some(ref mut from) = rule.from {
+                for peer in from.iter_mut() {
+                    if let Some(sel) = peer.pod_selector.take() {
+                        peer.pod_selector = Some(normalize_label_selector(sel));
+                    }
+                    if let Some(sel) = peer.namespace_selector.take() {
+                        peer.namespace_selector = Some(normalize_label_selector(sel));
+                    }
+                }
+            }
+            rule
+        })
+        .collect()
+}
+
+fn normalize_network_policy_label_selectors_in_egress(
+    rules: Vec<k8s_openapi::api::networking::v1::NetworkPolicyEgressRule>,
+) -> Vec<k8s_openapi::api::networking::v1::NetworkPolicyEgressRule> {
+    rules
+        .into_iter()
+        .map(|mut rule| {
+            if let Some(ref mut to) = rule.to {
+                for peer in to.iter_mut() {
+                    if let Some(sel) = peer.pod_selector.take() {
+                        peer.pod_selector = Some(normalize_label_selector(sel));
+                    }
+                    if let Some(sel) = peer.namespace_selector.take() {
+                        peer.namespace_selector = Some(normalize_label_selector(sel));
+                    }
+                }
+            }
+            rule
+        })
+        .collect()
 }
