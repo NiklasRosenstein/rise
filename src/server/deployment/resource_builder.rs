@@ -109,13 +109,22 @@ pub struct ResourceBuilder {
     pub pod_security_enabled: bool,
     pub pod_resources: Option<crate::server::settings::PodResourceLimits>,
     pub health_probes: Option<crate::server::settings::HealthProbeConfig>,
+    pub namespace_format: String,
+}
+
+/// Format a namespace name using the given format string and project name.
+///
+/// Standalone function for use in contexts where a `ResourceBuilder` instance
+/// is not available (e.g., CRD backfill at startup).
+pub fn format_namespace_name(format: &str, project_name: &str) -> String {
+    format.replace("{project_name}", project_name)
 }
 
 impl ResourceBuilder {
     // ── Naming helpers ─────────────────────────────────────────────────
 
-    pub fn namespace_name(project: &Project) -> String {
-        format!("rise-{}", project.name)
+    pub fn namespace_name(&self, project: &Project) -> String {
+        format_namespace_name(&self.namespace_format, &project.name)
     }
 
     pub fn sanitize_label_value(value: &str) -> String {
@@ -478,7 +487,7 @@ impl ResourceBuilder {
 
         Namespace {
             metadata: ObjectMeta {
-                name: Some(Self::namespace_name(project)),
+                name: Some(self.namespace_name(project)),
                 labels: Some(labels),
                 annotations,
                 ..Default::default()

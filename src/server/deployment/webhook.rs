@@ -420,7 +420,11 @@ async fn check_deployment_health_from_observed(
     observed: &ObservedChildren,
 ) -> anyhow::Result<()> {
     // Metacontroller keys namespaced children of cluster-scoped parents as "namespace/name"
-    let namespace = ResourceBuilder::namespace_name(project);
+    let resource_builder = match &state.resource_builder {
+        Some(rb) => rb,
+        None => return Ok(()),
+    };
+    let namespace = resource_builder.namespace_name(project);
     let k8s_deploy_name = format!(
         "{}/{}-{}",
         namespace, project.name, deployment.deployment_id
@@ -579,7 +583,16 @@ async fn check_pod_errors_via_kube(
         }
     };
 
-    let namespace = ResourceBuilder::namespace_name(project);
+    let namespace = match &state.resource_builder {
+        Some(rb) => rb.namespace_name(project),
+        None => {
+            return PodCheckResult {
+                has_error: false,
+                error_message: None,
+                pod_status: None,
+            }
+        }
+    };
     let pod_api: kube::Api<k8s_openapi::api::core::v1::Pod> =
         kube::Api::namespaced(kube_client.clone(), &namespace);
 
@@ -851,7 +864,7 @@ async fn compute_desired_children(
     observed: &ObservedChildren,
 ) -> anyhow::Result<Vec<serde_json::Value>> {
     let mut children: Vec<serde_json::Value> = Vec::new();
-    let namespace = ResourceBuilder::namespace_name(project);
+    let namespace = resource_builder.namespace_name(project);
 
     // 1. Namespace (always)
     let ns = resource_builder.create_namespace(project);

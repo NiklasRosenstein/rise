@@ -141,6 +141,7 @@ pub async fn backfill_rise_projects(
     client: &Client,
     db_pool: &PgPool,
     adopt_existing: bool,
+    namespace_format: &str,
 ) -> anyhow::Result<()> {
     // 1. List all RiseProject CRDs currently in the cluster
     let api: Api<RiseProject> = Api::all(client.clone());
@@ -166,7 +167,9 @@ pub async fn backfill_rise_projects(
 
             // Adopt pre-existing child resources for newly-created CRDs
             if adopt_existing {
-                if let Err(e) = adopt_children_for_project(client, &project.name).await {
+                if let Err(e) =
+                    adopt_children_for_project(client, &project.name, namespace_format).await
+                {
                     warn!(
                         project = %project.name,
                         "Failed to adopt existing resources: {:?}", e
@@ -271,7 +274,11 @@ where
 /// Metacontroller `controller-uid` label derived from the RiseProject CRD's UID.
 ///
 /// This is best-effort: individual failures are warned but do not block startup.
-async fn adopt_children_for_project(client: &Client, project_name: &str) -> anyhow::Result<()> {
+async fn adopt_children_for_project(
+    client: &Client,
+    project_name: &str,
+    namespace_format: &str,
+) -> anyhow::Result<()> {
     // Read back the CRD to get its UID
     let crd_api: Api<RiseProject> = Api::all(client.clone());
     let crd = crd_api.get(project_name).await?;
@@ -281,7 +288,7 @@ async fn adopt_children_for_project(client: &Client, project_name: &str) -> anyh
         .as_deref()
         .ok_or_else(|| anyhow::anyhow!("RiseProject '{}' has no UID", project_name))?;
 
-    let ns_name = format!("rise-{}", project_name);
+    let ns_name = super::resource_builder::format_namespace_name(namespace_format, project_name);
 
     // 1. Patch the namespace (cluster-scoped)
     let ns_api: Api<Namespace> = Api::all(client.clone());

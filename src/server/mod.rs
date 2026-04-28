@@ -41,15 +41,24 @@ pub async fn run_server(settings: settings::Settings) -> Result<()> {
     // Backfill missing RiseProject CRDs (upgrade migration + recovery)
     #[cfg(feature = "backend")]
     if let Some(ref kube_client) = state.kube_client {
-        let adopt = match &settings.deployment_controller {
+        let (adopt, namespace_format) = match &settings.deployment_controller {
             Some(settings::DeploymentControllerSettings::Kubernetes {
                 legacy_adopt_existing_resources_to_metacontroller,
+                namespace_format,
                 ..
-            }) => *legacy_adopt_existing_resources_to_metacontroller,
-            _ => false,
+            }) => (
+                *legacy_adopt_existing_resources_to_metacontroller,
+                namespace_format.as_str(),
+            ),
+            _ => (false, "rise-{project_name}"),
         };
-        if let Err(e) =
-            deployment::crd::backfill_rise_projects(kube_client, &state.db_pool, adopt).await
+        if let Err(e) = deployment::crd::backfill_rise_projects(
+            kube_client,
+            &state.db_pool,
+            adopt,
+            namespace_format,
+        )
+        .await
         {
             tracing::warn!("Failed to backfill RiseProject CRDs: {:?}", e);
         }

@@ -483,6 +483,7 @@ impl AppState {
                 health_probes,
                 metacontroller_webhook_port,
                 metacontroller_webhook_token,
+                namespace_format,
                 ..
             }) = &settings.deployment_controller
             {
@@ -539,6 +540,7 @@ impl AppState {
                     pod_security_enabled: *pod_security_enabled,
                     pod_resources: pod_resources.clone(),
                     health_probes: health_probes.clone(),
+                    namespace_format: namespace_format.clone(),
                 };
 
                 // Reject the well-known development token in non-development environments

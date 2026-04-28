@@ -122,7 +122,7 @@ impl DeploymentBackend for KubernetesBackend {
         use kube::api::{Api, ListParams, LogParams};
 
         // Derive namespace from project name
-        let namespace = ResourceBuilder::namespace_name(project);
+        let namespace = self.resource_builder.namespace_name(project);
 
         // Find pod using label selector
         let pod_api: Api<Pod> = Api::namespaced(self.kube_client.clone(), &namespace);
