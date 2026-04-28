@@ -193,12 +193,12 @@ The frontend uses two tiers of tag-like components. Prefer these reusable compon
 
 ### Before Commit & Push
 
-Run these to match what CI checks. Fix any issues before committing.
+**MANDATORY**: You MUST run `cargo fmt --all` before every commit. Always. No exceptions. CI will reject unformatted code. Run it, stage any formatting changes, then commit.
 
 **Always run** (fast, catches most issues):
 
 ```bash
-cargo fmt --all                # Format code
+cargo fmt --all                # Format code — MUST run before every commit
 cargo clippy --all-features --all-targets -- -D warnings  # Lint (uses cached build artifacts)
 ```
 
