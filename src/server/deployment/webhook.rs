@@ -864,6 +864,14 @@ async fn compute_desired_children(
     let mut children: Vec<serde_json::Value> = Vec::new();
     let namespace = resource_builder.namespace_name(project);
 
+    // Preload all environments for this project to avoid per-deployment DB lookups
+    let environments: HashMap<uuid::Uuid, crate::db::models::Environment> =
+        db_environments::list_for_project(&state.db_pool, project.id)
+            .await?
+            .into_iter()
+            .map(|env| (env.id, env))
+            .collect();
+
     // 1. Namespace (always)
     let ns = resource_builder.create_namespace(project);
     children.push(serde_json::to_value(&ns)?);
@@ -899,11 +907,12 @@ async fn compute_desired_children(
         .collect();
 
     // 4. Per-environment ServiceAccounts
-    let mut seen_environments: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let mut seen_environments: std::collections::HashSet<uuid::Uuid> =
+        std::collections::HashSet::new();
     for deployment in &infra_deployments {
         if let Some(env_id) = deployment.environment_id {
-            if let Some(environment) = db_environments::find_by_id(&state.db_pool, env_id).await? {
-                if seen_environments.insert(environment.name.clone()) {
+            if seen_environments.insert(env_id) {
+                if let Some(environment) = environments.get(&env_id) {
                     // Check if we should skip SA creation for production
                     if resource_builder.use_default_service_account_for_production
                         && environment.is_production
@@ -930,9 +939,17 @@ async fn compute_desired_children(
         }
     }
 
+    // Helper: look up environment name from preloaded cache
+    let env_name_for = |deployment: &Deployment| -> Option<String> {
+        deployment
+            .environment_id
+            .and_then(|id| environments.get(&id))
+            .map(|env| env.name.clone())
+    };
+
     // K8s Deployments — one per non-terminal, infrastructure-bearing deployment
     for deployment in &infra_deployments {
-        let env_name = resolve_environment_name(state, deployment).await?;
+        let env_name = env_name_for(deployment);
         let env_vars = load_env_vars(state, project, deployment).await?;
 
         // Resolve image
@@ -947,8 +964,24 @@ async fn compute_desired_children(
         let image =
             resource_builder.resolve_image(project, deployment, source_deployment_id.as_deref());
 
-        // Resolve service account name
-        let sa_name = resolve_service_account_name(state, resource_builder, deployment).await?;
+        // Resolve service account name from preloaded environments
+        let sa_name = {
+            let env = deployment
+                .environment_id
+                .and_then(|id| environments.get(&id));
+            match env {
+                Some(environment)
+                    if resource_builder.use_default_service_account_for_production
+                        && environment.is_production =>
+                {
+                    None
+                }
+                Some(environment) => Some(ResourceBuilder::environment_service_account_name(
+                    &environment.name,
+                )),
+                None => None,
+            }
+        };
 
         let k8s_deploy = resource_builder.create_k8s_deployment(
             project,
@@ -966,9 +999,10 @@ async fn compute_desired_children(
     // Services, Ingresses, NetworkPolicies — one per group with an active deployment
     let custom_domains =
         crate::db::custom_domains::list_project_custom_domains(&state.db_pool, project.id).await?;
+    let valid_custom_domains = resource_builder.filter_valid_custom_domains(&custom_domains);
 
     for (group, active_deployment) in &active_by_group {
-        let env_name = resolve_environment_name(state, active_deployment).await?;
+        let env_name = env_name_for(active_deployment);
 
         // Service (selector points to the active deployment)
         let service = resource_builder.create_service(
@@ -990,32 +1024,25 @@ async fn compute_desired_children(
         children.push(serde_json::to_value(&ingress)?);
 
         // Custom domain Ingress (only for production primary group)
-        let environment = if let Some(env_id) = active_deployment.environment_id {
-            db_environments::find_by_id(&state.db_pool, env_id).await?
-        } else {
-            None
-        };
+        let environment = active_deployment
+            .environment_id
+            .and_then(|id| environments.get(&id));
 
         let is_production_primary = environment
-            .as_ref()
             .map(|env| {
                 env.is_production && env.primary_deployment_group.as_deref() == Some(group.as_str())
             })
             .unwrap_or(*group == crate::server::deployment::models::DEFAULT_DEPLOYMENT_GROUP);
 
-        if is_production_primary {
-            let valid_domains =
-                resource_builder.filter_valid_custom_domains(custom_domains.clone());
-            if !valid_domains.is_empty() {
-                let custom_ingress = resource_builder.create_custom_domain_ingress(
-                    project,
-                    active_deployment,
-                    &namespace,
-                    &valid_domains,
-                    env_name.as_deref(),
-                )?;
-                children.push(serde_json::to_value(&custom_ingress)?);
-            }
+        if is_production_primary && !valid_custom_domains.is_empty() {
+            let custom_ingress = resource_builder.create_custom_domain_ingress(
+                project,
+                active_deployment,
+                &namespace,
+                &valid_custom_domains,
+                env_name.as_deref(),
+            )?;
+            children.push(serde_json::to_value(&custom_ingress)?);
         }
 
         // NetworkPolicy
@@ -1191,52 +1218,6 @@ async fn apply_backend_endpoints(
             "Failed to apply backend Endpoints: {:?}", e
         );
     }
-}
-
-/// Resolve the environment name for a deployment
-async fn resolve_environment_name(
-    state: &AppState,
-    deployment: &Deployment,
-) -> anyhow::Result<Option<String>> {
-    match deployment.environment_id {
-        Some(env_id) => match db_environments::find_by_id(&state.db_pool, env_id).await? {
-            Some(env) => Ok(Some(env.name)),
-            None => {
-                warn!(
-                    deployment_id = %deployment.deployment_id,
-                    environment_id = %env_id,
-                    "Environment not found for label resolution"
-                );
-                Ok(None)
-            }
-        },
-        None => Ok(None),
-    }
-}
-
-/// Resolve service account name for a deployment
-async fn resolve_service_account_name(
-    state: &AppState,
-    resource_builder: &ResourceBuilder,
-    deployment: &Deployment,
-) -> anyhow::Result<Option<String>> {
-    let env_id = match deployment.environment_id {
-        Some(id) => id,
-        None => return Ok(None),
-    };
-
-    let environment = match db_environments::find_by_id(&state.db_pool, env_id).await? {
-        Some(env) => env,
-        None => return Ok(None),
-    };
-
-    if resource_builder.use_default_service_account_for_production && environment.is_production {
-        return Ok(None);
-    }
-
-    Ok(Some(ResourceBuilder::environment_service_account_name(
-        &environment.name,
-    )))
 }
 
 /// Load and decrypt environment variables for a deployment

@@ -263,12 +263,12 @@ impl ResourceBuilder {
 
     pub fn filter_valid_custom_domains(
         &self,
-        custom_domains: Vec<CustomDomain>,
+        custom_domains: &[CustomDomain],
     ) -> Vec<CustomDomain> {
         use crate::server::custom_domains::validation;
 
         custom_domains
-            .into_iter()
+            .iter()
             .filter(|domain| {
                 match validation::validate_custom_domain(
                     &domain.domain,
@@ -289,6 +289,7 @@ impl ResourceBuilder {
                     }
                 }
             })
+            .cloned()
             .collect()
     }
 
@@ -325,7 +326,7 @@ impl ResourceBuilder {
                     == crate::server::deployment::models::DEFAULT_DEPLOYMENT_GROUP,
             );
 
-        let custom_domains = self.filter_valid_custom_domains(custom_domains.to_vec());
+        let custom_domains = self.filter_valid_custom_domains(custom_domains);
 
         let (custom_domain_urls, primary_url) = if is_production_primary {
             let starred = custom_domains.iter().find(|d| d.is_primary);
@@ -378,7 +379,7 @@ impl ResourceBuilder {
         let full_host = self.full_ingress_url_from_host(&url_host);
         let default_url = format!("{}://{}", self.ingress_schema, full_host);
 
-        let custom_domains = self.filter_valid_custom_domains(custom_domains.to_vec());
+        let custom_domains = self.filter_valid_custom_domains(custom_domains);
 
         let (custom_domain_urls, primary_url) =
             if deployment_group == crate::server::deployment::models::DEFAULT_DEPLOYMENT_GROUP {
