@@ -4,7 +4,7 @@
 //! (for generating a JSON Schema endpoint).
 
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 
 /// Root structure for rise.toml / .rise.toml configuration file
 #[derive(Debug, Deserialize, Serialize, Default)]
@@ -23,16 +23,20 @@ pub struct ProjectBuildConfig {
 
     /// Per-environment configuration (optional)
     #[serde(default)]
-    pub environments: HashMap<String, EnvironmentConfig>,
+    pub environments: BTreeMap<String, EnvironmentConfig>,
 }
 
 /// Per-environment configuration
 #[derive(Debug, Deserialize, Serialize, Clone, Default)]
 #[cfg_attr(feature = "backend", derive(schemars::JsonSchema))]
 pub struct EnvironmentConfig {
+    /// Whether this is the default environment for local deployments
+    #[serde(default)]
+    pub default: bool,
+
     /// Plain-text environment variables scoped to this environment
     #[serde(default)]
-    pub env: HashMap<String, String>,
+    pub env: BTreeMap<String, String>,
 }
 
 /// Project metadata configuration
@@ -42,25 +46,9 @@ pub struct ProjectConfig {
     /// Project name
     pub name: String,
 
-    /// Access class (e.g., public, private)
-    #[serde(default = "default_access_class", alias = "visibility")]
-    pub access_class: String,
-
-    /// Custom domains
-    #[serde(default)]
-    pub custom_domains: Vec<String>,
-
     /// Plain-text environment variables (non-secret)
     #[serde(default)]
-    pub env: HashMap<String, String>,
-
-    /// URL to where the project code lives (e.g. a GitHub/GitLab repository)
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub source_url: Option<String>,
-}
-
-pub(crate) fn default_access_class() -> String {
-    "public".to_string()
+    pub env: BTreeMap<String, String>,
 }
 
 /// Build configuration options for a project

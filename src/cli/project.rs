@@ -1,6 +1,6 @@
 use crate::api::project::{
-    CreateProjectResponse, DomainsResponse, EnvVarsResponse, MeResponse, OwnerInfo, Project,
-    ProjectErrorResponse, ProjectStatus, UpdateProjectResponse,
+    CreateProjectResponse, MeResponse, OwnerInfo, Project, ProjectErrorResponse, ProjectStatus,
+    UpdateProjectResponse,
 };
 use crate::config::Config;
 use anyhow::{Context, Result};
@@ -72,188 +72,126 @@ pub async fn create_project(
     owner: Option<String>,
     source_url: Option<String>,
     path: &str,
-    mode: &Option<crate::ProjectMode>,
+    no_rise_toml: bool,
 ) -> Result<()> {
     use crate::build::config::{
         load_full_project_config, write_project_config, ProjectBuildConfig, ProjectConfig,
     };
-    use std::collections::HashMap;
-    use std::path::Path;
+    use std::collections::BTreeMap;
 
     let token = config
         .get_token()
         .ok_or_else(|| anyhow::anyhow!("Not logged in. Please run 'rise login' first."))?;
 
-    // Determine the mode
-    let effective_mode = if let Some(m) = mode {
-        *m
-    } else {
-        // Auto-detect mode: remote if rise.toml exists, remote+local otherwise
-        let rise_toml_path = Path::new(path).join("rise.toml");
-        let dot_rise_toml_path = Path::new(path).join(".rise.toml");
-        if rise_toml_path.exists() || dot_rise_toml_path.exists() {
-            crate::ProjectMode::Remote
-        } else {
-            crate::ProjectMode::RemoteLocal
-        }
-    };
+    // Check if rise.toml already exists
+    let existing_config = load_full_project_config(path)?;
+    let rise_toml_exists = existing_config.is_some();
 
-    // Determine project name and access_class based on mode and inputs
-    let (project_name, project_access_class) = match effective_mode {
-        crate::ProjectMode::Remote => {
-            // Remote mode: read from rise.toml if name not provided
-            if let Some(name_str) = name {
-                (name_str.clone(), access_class.to_string())
-            } else {
-                // Read from rise.toml
-                let full_config = load_full_project_config(path)?.ok_or_else(|| {
-                    anyhow::anyhow!(
-                        "No rise.toml found at {}. In remote mode without a project name, rise.toml must exist to read the project configuration.",
-                        path
-                    )
-                })?;
-
-                let project_config = full_config
-                    .project
-                    .ok_or_else(|| anyhow::anyhow!("No [project] section found in rise.toml"))?;
-
-                (
-                    project_config.name.clone(),
-                    project_config.access_class.clone(),
-                )
-            }
-        }
-        crate::ProjectMode::Local => {
-            // Local mode: name is optional, will read from rise.toml if exists, or use provided name
-            if let Some(name_str) = name {
-                (name_str.clone(), access_class.to_string())
-            } else {
-                // Try to read from existing rise.toml
-                if let Some(full_config) = load_full_project_config(path)? {
-                    let project_config = full_config.project.ok_or_else(|| {
-                        anyhow::anyhow!("No [project] section found in rise.toml")
-                    })?;
-                    (
-                        project_config.name.clone(),
-                        project_config.access_class.clone(),
-                    )
-                } else {
-                    anyhow::bail!("In local mode, project name is required when no existing rise.toml is found. Either specify a name with the command or ensure rise.toml exists in the target directory.");
+    // Resolve project name
+    let project_name = if let Some(name_str) = name {
+        // Name provided as argument
+        if let Some(ref full_config) = existing_config {
+            if let Some(ref project_config) = full_config.project {
+                if project_config.name != *name_str {
+                    eprintln!(
+                        "Note: rise.toml contains project name '{}', but creating project '{}'. rise.toml was not updated.",
+                        project_config.name, name_str
+                    );
                 }
             }
         }
-        crate::ProjectMode::RemoteLocal => {
-            // Remote+local mode: name is required
-            if let Some(name_str) = name {
-                (name_str.clone(), access_class.to_string())
-            } else {
-                anyhow::bail!("In remote+local mode, project name is required");
-            }
-        }
+        name_str.clone()
+    } else {
+        // No name argument — try to read from existing rise.toml
+        let full_config = existing_config.as_ref().ok_or_else(|| {
+            anyhow::anyhow!("Project name is required. Provide it as an argument or create a rise.toml with a [project] section.")
+        })?;
+
+        let project_config = full_config
+            .project
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("No [project] section found in rise.toml. Either add a [project] section or provide the project name as an argument."))?;
+
+        project_config.name.clone()
     };
 
-    // Process based on mode
-    let should_create_remote = matches!(
-        effective_mode,
-        crate::ProjectMode::Remote | crate::ProjectMode::RemoteLocal
-    );
-    let should_create_local = matches!(
-        effective_mode,
-        crate::ProjectMode::Local | crate::ProjectMode::RemoteLocal
-    );
+    // Always create project on backend
+    let (owner_type, owner_id) = if let Some(owner_str) = owner {
+        parse_owner(&owner_str)?
+    } else {
+        // Default to current user
+        let current_user = get_current_user(http_client, backend_url, &token).await?;
+        ("user".to_string(), current_user.id)
+    };
 
-    // Create project on backend if needed
-    if should_create_remote {
-        // Determine owner
-        let (owner_type, owner_id) = if let Some(owner_str) = owner {
-            let (otype, ovalue) = parse_owner(&owner_str)?;
-
-            // For user owner, we need to look up the ID from email
-            // For team owner, we can use the team name directly (backend will resolve)
-            if otype == "user" {
-                // TODO: Add user lookup endpoint or use email directly
-                (otype, ovalue)
-            } else {
-                (otype, ovalue)
-            }
-        } else {
-            // Default to current user
-            let current_user = get_current_user(http_client, backend_url, &token).await?;
-            ("user".to_string(), current_user.id)
-        };
-
-        #[derive(Serialize)]
-        #[serde(rename_all = "snake_case")]
-        enum OwnerType {
-            User(String),
-            Team(String),
-        }
-
-        let owner_payload = if owner_type == "user" {
-            OwnerType::User(owner_id)
-        } else {
-            OwnerType::Team(owner_id)
-        };
-
-        #[derive(Serialize)]
-        struct CreateRequest {
-            name: String,
-            access_class: String,
-            owner: OwnerType,
-            #[serde(skip_serializing_if = "Option::is_none")]
-            source_url: Option<String>,
-        }
-
-        let request = CreateRequest {
-            name: project_name.clone(),
-            access_class: project_access_class.clone(),
-            owner: owner_payload,
-            source_url: source_url.clone(),
-        };
-
-        let url = format!("{}/api/v1/projects", backend_url);
-        let response = http_client
-            .post(&url)
-            .header("Authorization", format!("Bearer {}", token))
-            .json(&request)
-            .send()
-            .await
-            .context("Failed to send create project request")?;
-
-        if response.status().is_success() {
-            let create_response: CreateProjectResponse = response
-                .json()
-                .await
-                .context("Failed to parse create project response")?;
-
-            println!(
-                "✓ Project '{}' created on backend successfully!",
-                create_response.project.name
-            );
-            println!("  ID: {}", create_response.project.id);
-            println!("  Status: {}", create_response.project.status);
-        } else {
-            let status = response.status();
-            let error_text = response
-                .text()
-                .await
-                .unwrap_or_else(|_| "Unknown error".to_string());
-            anyhow::bail!(
-                "Failed to create project (status {}): {}",
-                status,
-                error_text
-            );
-        }
+    #[derive(Serialize)]
+    #[serde(rename_all = "snake_case")]
+    enum OwnerType {
+        User(String),
+        Team(String),
     }
 
-    // Create/update local rise.toml if needed
-    if should_create_local {
+    let owner_payload = if owner_type == "user" {
+        OwnerType::User(owner_id)
+    } else {
+        OwnerType::Team(owner_id)
+    };
+
+    #[derive(Serialize)]
+    struct CreateRequest {
+        name: String,
+        access_class: String,
+        owner: OwnerType,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        source_url: Option<String>,
+    }
+
+    let request = CreateRequest {
+        name: project_name.clone(),
+        access_class: access_class.to_string(),
+        owner: owner_payload,
+        source_url: source_url.clone(),
+    };
+
+    let url = format!("{}/api/v1/projects", backend_url);
+    let response = http_client
+        .post(&url)
+        .header("Authorization", format!("Bearer {}", token))
+        .json(&request)
+        .send()
+        .await
+        .context("Failed to send create project request")?;
+
+    if response.status().is_success() {
+        let create_response: CreateProjectResponse = response
+            .json()
+            .await
+            .context("Failed to parse create project response")?;
+
+        println!(
+            "✓ Project '{}' created successfully!",
+            create_response.project.name
+        );
+        println!("  ID: {}", create_response.project.id);
+        println!("  Status: {}", create_response.project.status);
+    } else {
+        let status = response.status();
+        let error_text = response
+            .text()
+            .await
+            .unwrap_or_else(|_| "Unknown error".to_string());
+        anyhow::bail!(
+            "Failed to create project (status {}): {}",
+            status,
+            error_text
+        );
+    }
+
+    // Write rise.toml only if it doesn't already exist and --no-rise-toml was not set
+    if !rise_toml_exists && !no_rise_toml {
         let project_config = ProjectConfig {
             name: project_name.clone(),
-            access_class: project_access_class.clone(),
-            custom_domains: Vec::new(),
-            env: HashMap::new(),
-            source_url: source_url.clone(),
+            env: BTreeMap::new(),
         };
 
         let config_to_write = ProjectBuildConfig {
@@ -466,170 +404,10 @@ pub async fn update_project(
     access_class: Option<String>,
     owner: Option<String>,
     source_url: Option<Option<String>>,
-    sync: bool,
-    path: &str,
 ) -> Result<()> {
     let token = config
         .get_token()
         .ok_or_else(|| anyhow::anyhow!("Not logged in. Please run 'rise login' first."))?;
-
-    // Sync mode: Load rise.toml and push everything to backend
-    if sync {
-        use crate::build::config::load_full_project_config;
-        use crate::cli::environment::EnvironmentResponse;
-        use tracing::info;
-
-        let full_config = load_full_project_config(path)?
-            .ok_or_else(|| anyhow::anyhow!("No rise.toml found at {}", path))?;
-
-        let project_config = full_config
-            .project
-            .ok_or_else(|| anyhow::anyhow!("No [project] section found in rise.toml"))?;
-
-        let environments_config = full_config.environments;
-
-        info!("Syncing project metadata from rise.toml to backend...");
-
-        // Update project name and access_class
-        #[derive(Serialize)]
-        struct SyncUpdateRequest {
-            name: String,
-            access_class: String,
-            #[serde(skip_serializing_if = "Option::is_none")]
-            source_url: Option<Option<String>>,
-        }
-
-        let request = SyncUpdateRequest {
-            name: project_config.name.clone(),
-            access_class: project_config.access_class.clone(),
-            // In sync mode, always send source_url (even None to clear it)
-            source_url: Some(project_config.source_url.clone()),
-        };
-
-        let url = format!("{}/api/v1/projects/{}", backend_url, project_identifier);
-        let response = http_client
-            .put(&url)
-            .header("Authorization", format!("Bearer {}", token))
-            .json(&request)
-            .send()
-            .await
-            .context("Failed to send update project request")?;
-
-        if !response.status().is_success() {
-            let status = response.status();
-            let error_text = response
-                .text()
-                .await
-                .unwrap_or_else(|_| "Unknown error".to_string());
-            anyhow::bail!(
-                "Failed to update project (status {}): {}",
-                status,
-                error_text
-            );
-        }
-
-        let update_response: UpdateProjectResponse = response
-            .json()
-            .await
-            .context("Failed to parse update project response")?;
-
-        println!(
-            "✓ Project '{}' updated successfully!",
-            update_response.project.name
-        );
-
-        // Sync custom domains
-        if !project_config.custom_domains.is_empty() {
-            sync_custom_domains(
-                http_client,
-                backend_url,
-                &token,
-                &update_response.project.name,
-                &project_config.custom_domains,
-            )
-            .await?;
-        }
-
-        // Sync global environment variables
-        if !project_config.env.is_empty() {
-            sync_env_vars(
-                http_client,
-                backend_url,
-                &token,
-                &update_response.project.name,
-                &project_config.env,
-                None,
-            )
-            .await?;
-        }
-
-        // Sync per-environment variables
-        if !environments_config.is_empty() {
-            // Validate that all referenced environments exist on the backend
-            let envs_url = format!(
-                "{}/api/v1/projects/{}/environments",
-                backend_url, update_response.project.name
-            );
-            let envs_response = http_client
-                .get(&envs_url)
-                .bearer_auth(&token)
-                .send()
-                .await
-                .context("Failed to fetch project environments")?;
-
-            if !envs_response.status().is_success() {
-                let status = envs_response.status();
-                let error_text = envs_response
-                    .text()
-                    .await
-                    .unwrap_or_else(|_| "Unknown error".to_string());
-                anyhow::bail!(
-                    "Failed to fetch project environments (status {}): {}",
-                    status,
-                    error_text
-                );
-            }
-
-            let backend_envs: Vec<EnvironmentResponse> = envs_response
-                .json()
-                .await
-                .context("Failed to parse environments response")?;
-            let backend_env_names: std::collections::HashSet<&str> =
-                backend_envs.iter().map(|e| e.name.as_str()).collect();
-
-            let missing: Vec<&String> = environments_config
-                .keys()
-                .filter(|name| !backend_env_names.contains(name.as_str()))
-                .collect();
-            if !missing.is_empty() {
-                let mut missing_sorted: Vec<&str> = missing.iter().map(|s| s.as_str()).collect();
-                missing_sorted.sort();
-                anyhow::bail!(
-                    "Environments referenced in rise.toml do not exist on the backend: {}. \
-                     Create them first with 'rise environment create <name> -p {}'.",
-                    missing_sorted.join(", "),
-                    update_response.project.name
-                );
-            }
-
-            // Sync env vars for each environment
-            for (env_name, env_config) in &environments_config {
-                if !env_config.env.is_empty() {
-                    sync_env_vars(
-                        http_client,
-                        backend_url,
-                        &token,
-                        &update_response.project.name,
-                        &env_config.env,
-                        Some(env_name),
-                    )
-                    .await?;
-                }
-            }
-        }
-
-        return Ok(());
-    }
 
     #[derive(Serialize)]
     #[serde(rename_all = "snake_case")]
@@ -688,37 +466,6 @@ pub async fn update_project(
             update_response.project.name
         );
         println!("  Status: {}", update_response.project.status);
-
-        // Update local rise.toml if it exists
-        use crate::build::config::{load_full_project_config, write_project_config};
-        if let Some(mut full_config) = load_full_project_config(path)? {
-            if let Some(ref mut project_config) = full_config.project {
-                let mut updated = false;
-
-                // Update name in rise.toml if provided
-                if let Some(ref new_name) = name {
-                    project_config.name = new_name.clone();
-                    updated = true;
-                }
-
-                // Update access_class in rise.toml if provided
-                if let Some(ref new_access_class) = access_class {
-                    project_config.access_class = new_access_class.clone();
-                    updated = true;
-                }
-
-                // Update source_url in rise.toml if provided
-                if let Some(ref new_source_url) = source_url {
-                    project_config.source_url = new_source_url.clone();
-                    updated = true;
-                }
-
-                if updated {
-                    write_project_config(path, &full_config)?;
-                    println!("  Updated rise.toml");
-                }
-            }
-        }
     } else if response.status() == reqwest::StatusCode::NOT_FOUND {
         let error: ProjectErrorResponse = response
             .json()
@@ -795,149 +542,6 @@ pub async fn delete_project(
             status,
             error_text
         );
-    }
-
-    Ok(())
-}
-
-/// Sync custom domains from rise.toml to backend
-pub async fn sync_custom_domains(
-    http_client: &Client,
-    backend_url: &str,
-    token: &str,
-    project: &str,
-    desired_domains: &[String],
-) -> Result<()> {
-    use crate::cli::domain;
-    use tracing::warn;
-
-    // Fetch current domains from backend
-    let url = format!("{}/api/v1/projects/{}/domains", backend_url, project);
-    let response = http_client
-        .get(&url)
-        .bearer_auth(token)
-        .send()
-        .await
-        .context("Failed to fetch current domains")?;
-
-    let current_domains_response: DomainsResponse = if response.status().is_success() {
-        response.json().await.context("Failed to parse domains")?
-    } else {
-        DomainsResponse {
-            domains: Vec::new(),
-        }
-    };
-
-    let current_domains: Vec<String> = current_domains_response
-        .domains
-        .into_iter()
-        .map(|d| d.domain)
-        .collect();
-
-    // Add missing domains
-    for domain in desired_domains {
-        if !current_domains.contains(domain) {
-            println!("Adding domain '{}' from rise.toml", domain);
-            domain::add_domain(http_client, backend_url, token, project, domain, None).await?;
-        }
-    }
-
-    // Warn about unmanaged domains
-    for domain in &current_domains {
-        if !desired_domains.contains(domain) {
-            warn!(
-                "Domain '{}' exists in backend but not in rise.toml. \
-                 This domain is not managed by rise.toml. \
-                 Run 'rise domain remove {} {}' to remove it.",
-                domain, project, domain
-            );
-        }
-    }
-
-    Ok(())
-}
-
-/// Sync environment variables from rise.toml to backend
-pub async fn sync_env_vars(
-    http_client: &Client,
-    backend_url: &str,
-    token: &str,
-    project: &str,
-    desired_env: &std::collections::HashMap<String, String>,
-    environment: Option<&str>,
-) -> Result<()> {
-    use crate::cli::env;
-    use tracing::warn;
-
-    let scope_label = environment
-        .map(|e| format!(" (environment: {})", e))
-        .unwrap_or_default();
-
-    // Fetch current env vars from backend
-    let url = if let Some(env_name) = environment {
-        format!(
-            "{}/api/v1/projects/{}/env?environment={}",
-            backend_url,
-            project,
-            urlencoding::encode(env_name)
-        )
-    } else {
-        format!("{}/api/v1/projects/{}/env", backend_url, project)
-    };
-    let response = http_client
-        .get(&url)
-        .bearer_auth(token)
-        .send()
-        .await
-        .context("Failed to fetch current environment variables")?;
-
-    let current_env_response: EnvVarsResponse = if response.status().is_success() {
-        response.json().await.context("Failed to parse env vars")?
-    } else {
-        EnvVarsResponse {
-            env_vars: Vec::new(),
-        }
-    };
-
-    // Filter to only non-secret vars matching the requested scope
-    // (rise.toml only manages plain-text vars)
-    let current_non_secret_vars: Vec<String> = current_env_response
-        .env_vars
-        .into_iter()
-        .filter(|v| !v.is_secret && v.environment.as_deref() == environment)
-        .map(|v| v.key)
-        .collect();
-
-    // Set/update vars from rise.toml (always non-secret, non-retrievable)
-    for (key, value) in desired_env {
-        println!("Setting env var '{}' from rise.toml{}", key, scope_label);
-        env::set_env(
-            http_client,
-            backend_url,
-            token,
-            project,
-            key,
-            value,
-            false,
-            false,
-            environment,
-        )
-        .await?;
-    }
-
-    // Warn about unmanaged non-secret vars
-    let delete_env_flag = environment
-        .map(|e| format!(" -E {}", e))
-        .unwrap_or_default();
-    for key in &current_non_secret_vars {
-        if !desired_env.contains_key(key) {
-            warn!(
-                "Env var '{}' exists in backend{} but not in rise.toml. \
-                 This variable is not managed by rise.toml. \
-                 Run 'rise env delete {} {}{}' to remove it.",
-                key, scope_label, project, key, delete_env_flag
-            );
-        }
     }
 
     Ok(())

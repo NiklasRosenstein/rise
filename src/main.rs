@@ -207,25 +207,13 @@ enum Commands {
     Team(TeamCommands),
 }
 
-/// Project creation mode
-#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
-pub enum ProjectMode {
-    /// Create/update project on backend only
-    Remote,
-    /// Create/update rise.toml only (no backend interaction)
-    Local,
-    /// Create project on backend AND create rise.toml
-    #[value(name = "remote+local")]
-    RemoteLocal,
-}
-
 #[derive(Subcommand, Debug)]
 enum ProjectCommands {
     /// Create a new project
     #[command(visible_alias = "c")]
     #[command(visible_alias = "new")]
     Create {
-        /// Project name (required for remote and remote+local modes, optional for local mode)
+        /// Project name (read from rise.toml if not provided)
         name: Option<String>,
         /// Access class (e.g., public, private)
         #[arg(long, default_value = "public")]
@@ -239,10 +227,9 @@ enum ProjectCommands {
         /// Path where to create rise.toml (defaults to current directory)
         #[arg(long, default_value = ".")]
         path: String,
-        /// Mode: remote (backend only), local (rise.toml only), remote+local (both).
-        /// If unset: remote if rise.toml exists, remote+local otherwise
-        #[arg(long, value_enum)]
-        mode: Option<ProjectMode>,
+        /// Don't create a rise.toml file
+        #[arg(long)]
+        no_rise_toml: bool,
     },
     /// List all projects
     #[command(visible_alias = "ls")]
@@ -272,12 +259,6 @@ enum ProjectCommands {
         /// URL to where the project code lives (e.g. a GitHub/GitLab repository). Use empty string to clear.
         #[arg(long)]
         source_url: Option<String>,
-        /// Sync from rise.toml to backend (ignores other flags)
-        #[arg(long)]
-        sync: bool,
-        /// Path to rise.toml (defaults to current directory)
-        #[arg(long, default_value = ".")]
-        path: String,
     },
     /// Delete a project
     #[command(visible_alias = "del")]
@@ -642,9 +623,6 @@ enum EnvironmentCommands {
         /// Primary deployment group for this environment
         #[arg(long, short)]
         group: Option<String>,
-        /// Set as the default environment (fallback for unassociated groups)
-        #[arg(long)]
-        default: bool,
         /// Set as the production environment (gets the production URL)
         #[arg(long)]
         production: bool,
@@ -693,9 +671,6 @@ enum EnvironmentCommands {
         /// Set primary deployment group (use empty string to clear)
         #[arg(long, short)]
         group: Option<String>,
-        /// Set as the default environment
-        #[arg(long)]
-        default: Option<bool>,
         /// Set as the production environment
         #[arg(long)]
         production: Option<bool>,
@@ -942,7 +917,7 @@ async fn main() -> Result<()> {
                 owner,
                 source_url,
                 path,
-                mode,
+                no_rise_toml,
             } => {
                 project::create_project(
                     &http_client,
@@ -953,7 +928,7 @@ async fn main() -> Result<()> {
                     owner.clone(),
                     source_url.clone(),
                     path,
-                    mode,
+                    *no_rise_toml,
                 )
                 .await?;
             }
@@ -969,8 +944,6 @@ async fn main() -> Result<()> {
                 access_class,
                 owner,
                 source_url,
-                sync,
-                path,
             } => {
                 // Convert "--source-url ''" (empty string) to Some(None) to clear
                 let source_url_opt: Option<Option<String>> =
@@ -986,8 +959,6 @@ async fn main() -> Result<()> {
                     access_class.clone(),
                     owner.clone(),
                     source_url_opt,
-                    *sync,
-                    path,
                 )
                 .await?;
             }
@@ -1172,36 +1143,94 @@ async fn main() -> Result<()> {
                     }
                 }
 
-                // Collect runtime env overrides
-                let mut env_overrides = Vec::new();
+                // Load rise.toml config for env resolution and env var overrides
+                let toml_config = build::config::load_full_project_config(&args.path)
+                    .context("Failed to load rise.toml")?;
+
+                // Resolve environment: explicit --environment flag takes precedence,
+                // otherwise fall back to the `default = true` environment from rise.toml.
+                let resolved_environment = args.environment.clone().or_else(|| {
+                    toml_config.as_ref().and_then(|cfg| {
+                        cfg.environments
+                            .iter()
+                            .find(|(_, env)| env.default)
+                            .map(|(name, _)| name.clone())
+                    })
+                });
+
+                // Collect runtime env overrides with source tracking
+                // Priority: toml < cli (later overrides earlier for same key)
+                let mut env_overrides: Vec<deployment::EnvOverride> = Vec::new();
+
+                // 1. Collect [project.env] vars from rise.toml
+                if let Some(ref cfg) = toml_config {
+                    if let Some(ref project_config) = cfg.project {
+                        for (key, value) in &project_config.env {
+                            env_overrides.push(deployment::EnvOverride {
+                                key: key.clone(),
+                                value: value.clone(),
+                                is_secret: false,
+                                is_protected: false,
+                                source: Some("toml".to_string()),
+                            });
+                        }
+                    }
+
+                    // 2. Collect [environments.TARGET.env] vars (override global)
+                    // Apply per-environment toml overrides when the target environment is
+                    // known client-side (explicit --environment or toml default = true).
+                    if let Some(env_name) = resolved_environment.as_ref() {
+                        if let Some(env_config) = cfg.environments.get(env_name) {
+                            for (key, value) in &env_config.env {
+                                // Remove any existing override for this key (from project.env)
+                                env_overrides.retain(|o| o.key != *key);
+                                env_overrides.push(deployment::EnvOverride {
+                                    key: key.clone(),
+                                    value: value.clone(),
+                                    is_secret: false,
+                                    is_protected: false,
+                                    source: Some("toml".to_string()),
+                                });
+                            }
+                        }
+                    }
+                }
+
+                // 3. CLI overrides (override toml for same key)
 
                 // --env KEY=VALUE → plain text
                 for (key, value) in &args.env {
+                    env_overrides.retain(|o| o.key != *key);
                     env_overrides.push(deployment::EnvOverride {
                         key: key.clone(),
                         value: value.clone(),
                         is_secret: false,
                         is_protected: false,
+                        source: Some("cli".to_string()),
                     });
                 }
 
                 // --secret-env KEY=VALUE → secret, retrievable
                 for (key, value) in &args.secret_env {
+                    env_overrides.retain(|o| o.key != *key);
                     env_overrides.push(deployment::EnvOverride {
                         key: key.clone(),
                         value: value.clone(),
                         is_secret: true,
                         is_protected: false,
+                        source: Some("cli".to_string()),
                     });
                 }
 
                 // --protected-env KEY=VALUE → secret, NOT retrievable
                 for (key, value) in &args.protected_env {
+                    env_overrides.retain(|o| o.key != *key);
                     env_overrides.push(deployment::EnvOverride {
                         key: key.clone(),
                         value: value.clone(),
                         is_secret: true,
                         is_protected: true,
+                        source: Some("cli".to_string()),
                     });
                 }
 
@@ -1213,11 +1242,13 @@ async fn main() -> Result<()> {
                     let parsed = cli::env::parse_env_file(&contents)
                         .with_context(|| format!("Failed to parse env file: {}", env_file_path))?;
                     for var in parsed {
+                        env_overrides.retain(|o| o.key != var.key);
                         env_overrides.push(deployment::EnvOverride {
                             key: var.key,
                             value: var.value,
                             is_secret: var.is_secret,
                             is_protected: var.is_secret, // secrets from file are protected by default
+                            source: Some("cli".to_string()),
                         });
                     }
                 }
@@ -1236,7 +1267,7 @@ async fn main() -> Result<()> {
                         path: &args.path,
                         image: args.image.as_deref(),
                         group: args.group.as_deref(),
-                        environment: args.environment.as_deref(),
+                        environment: resolved_environment.as_deref(),
                         expires_in: args.expire.as_deref(),
                         http_port: args.http_port,
                         build_args: &args.build_args,
@@ -1530,15 +1561,8 @@ async fn main() -> Result<()> {
                     domain,
                 } => {
                     let project_name = resolve_project_name(project.clone(), path)?;
-                    domain::add_domain(
-                        &http_client,
-                        &backend_url,
-                        &token,
-                        &project_name,
-                        domain,
-                        Some(path),
-                    )
-                    .await?;
+                    domain::add_domain(&http_client, &backend_url, &token, &project_name, domain)
+                        .await?;
                 }
                 DomainCommands::List { project, path } => {
                     let project_name = resolve_project_name(project.clone(), path)?;
@@ -1556,7 +1580,6 @@ async fn main() -> Result<()> {
                         &token,
                         &project_name,
                         domain,
-                        Some(path),
                     )
                     .await?;
                 }

@@ -428,6 +428,7 @@ pub struct EnvOverride {
     pub value: String,
     pub is_secret: bool,
     pub is_protected: bool,
+    pub source: Option<String>,
 }
 
 /// Options for creating a deployment
@@ -951,12 +952,16 @@ async fn call_create_deployment_api(
         let overrides: Vec<serde_json::Value> = env_overrides
             .iter()
             .map(|o| {
-                serde_json::json!({
+                let mut v = serde_json::json!({
                     "key": o.key,
                     "value": o.value,
                     "is_secret": o.is_secret,
                     "is_protected": o.is_protected,
-                })
+                });
+                if let Some(ref source) = o.source {
+                    v["source"] = serde_json::json!(source);
+                }
+                v
             })
             .collect();
         payload["env_overrides"] = serde_json::json!(overrides);

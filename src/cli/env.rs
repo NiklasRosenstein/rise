@@ -12,6 +12,7 @@ struct EnvVarResponse {
     is_protected: bool,
     #[serde(default)]
     environment: Option<String>,
+    source: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -589,14 +590,17 @@ pub async fn list_deployment_env(
             Cell::new("KEY").add_attribute(Attribute::Bold),
             Cell::new("VALUE").add_attribute(Attribute::Bold),
             Cell::new("TYPE").add_attribute(Attribute::Bold),
+            Cell::new("SOURCE").add_attribute(Attribute::Bold),
         ]);
 
     for var in env_vars_response.env_vars {
         let var_type = if var.is_secret { "secret" } else { "plain" };
+        let source = var.source.as_deref().unwrap_or("-");
         table.add_row(vec![
             Cell::new(&var.key),
             Cell::new(&var.value),
             Cell::new(var_type),
+            Cell::new(source),
         ]);
     }
 

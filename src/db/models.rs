@@ -1,6 +1,7 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use sqlx::FromRow;
+use std::borrow::Cow;
 use uuid::Uuid;
 
 /// User model - represents authenticated users from Dex
@@ -118,7 +119,6 @@ pub struct Environment {
     pub project_id: Uuid,
     pub name: String,
     pub primary_deployment_group: Option<String>,
-    pub is_default: bool,
     pub is_production: bool,
     pub color: String,
     pub created_at: DateTime<Utc>,
@@ -246,6 +246,65 @@ pub struct ProjectEnvVar {
     pub updated_at: DateTime<Utc>,
 }
 
+/// Provenance of a deployment environment variable.
+///
+/// Stored as TEXT in the database. Parsed/validated via `EnvVarSource`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum EnvVarSource {
+    /// Rise system variables (PORT, RISE_ISSUER, RISE_APP_URL, etc.)
+    System,
+    /// Copied from project-level env vars with no environment scope
+    Global,
+    /// Copied from project-level env vars scoped to a specific environment
+    Env(String),
+    /// Injected by an extension (OAuth, RDS, Snowflake, etc.)
+    Extension,
+    /// From rise.toml configuration file
+    Toml,
+    /// From CLI flags (--env, --secret-env, --protected-env, --env-file)
+    Cli,
+}
+
+impl EnvVarSource {
+    /// Serialize to the string stored in the database.
+    pub fn as_str(&self) -> Cow<'_, str> {
+        match self {
+            Self::System => Cow::Borrowed("system"),
+            Self::Global => Cow::Borrowed("global"),
+            Self::Env(name) => Cow::Owned(format!("env:{}", name)),
+            Self::Extension => Cow::Borrowed("extension"),
+            Self::Toml => Cow::Borrowed("toml"),
+            Self::Cli => Cow::Borrowed("cli"),
+        }
+    }
+
+    /// Parse from the string stored in the database.
+    pub fn parse(s: &str) -> Option<Self> {
+        match s {
+            "system" => Some(Self::System),
+            "global" => Some(Self::Global),
+            "extension" => Some(Self::Extension),
+            "toml" => Some(Self::Toml),
+            "cli" => Some(Self::Cli),
+            _ => s
+                .strip_prefix("env:")
+                .map(|name| Self::Env(name.to_string())),
+        }
+    }
+
+    /// Returns the set of source values that are allowed from client requests.
+    /// Server-managed sources (system, global, env:*, extension) are not accepted from clients.
+    pub fn is_client_allowed(&self) -> bool {
+        matches!(self, Self::Toml | Self::Cli)
+    }
+}
+
+impl std::fmt::Display for EnvVarSource {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.as_str())
+    }
+}
+
 /// Deployment environment variable
 #[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
 pub struct DeploymentEnvVar {
@@ -256,6 +315,9 @@ pub struct DeploymentEnvVar {
     pub value: String,
     pub is_secret: bool,
     pub is_protected: bool,
+    /// Provenance tracking for where this env var came from.
+    /// Stored as TEXT, parsed via [`EnvVarSource`].
+    pub source: String,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
@@ -282,4 +344,46 @@ pub struct ProjectExtension {
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
     pub deleted_at: Option<DateTime<Utc>>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn env_var_source_roundtrip() {
+        let variants = [
+            EnvVarSource::System,
+            EnvVarSource::Global,
+            EnvVarSource::Env("staging".to_string()),
+            EnvVarSource::Extension,
+            EnvVarSource::Toml,
+            EnvVarSource::Cli,
+        ];
+        for variant in &variants {
+            let s = variant.as_str();
+            let parsed = EnvVarSource::parse(&s).unwrap_or_else(|| {
+                panic!("parse failed for {:?} (serialized as {:?})", variant, s)
+            });
+            assert_eq!(&parsed, variant);
+        }
+    }
+
+    #[test]
+    fn env_var_source_parse_unknown_returns_none() {
+        assert_eq!(EnvVarSource::parse("unknown"), None);
+        assert_eq!(EnvVarSource::parse(""), None);
+        assert_eq!(EnvVarSource::parse("env"), None);
+    }
+
+    #[test]
+    fn env_var_source_is_client_allowed() {
+        assert!(EnvVarSource::Toml.is_client_allowed());
+        assert!(EnvVarSource::Cli.is_client_allowed());
+
+        assert!(!EnvVarSource::System.is_client_allowed());
+        assert!(!EnvVarSource::Global.is_client_allowed());
+        assert!(!EnvVarSource::Env("prod".to_string()).is_client_allowed());
+        assert!(!EnvVarSource::Extension.is_client_allowed());
+    }
 }

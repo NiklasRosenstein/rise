@@ -155,7 +155,7 @@ export function EnvironmentsList({ projectName }) {
     const [error, setError] = useState(null);
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [editingEnv, setEditingEnv] = useState(null);
-    const [formData, setFormData] = useState({ name: '', primary_deployment_group: '', is_default: false, is_production: false, color: 'green' });
+    const [formData, setFormData] = useState({ name: '', primary_deployment_group: '', is_production: false, color: 'green' });
     const [confirmDialogOpen, setConfirmDialogOpen] = useState(false);
     const [envToDelete, setEnvToDelete] = useState(null);
     const [deleting, setDeleting] = useState(false);
@@ -179,7 +179,7 @@ export function EnvironmentsList({ projectName }) {
 
     const handleAddClick = () => {
         setEditingEnv(null);
-        setFormData({ name: '', primary_deployment_group: '', is_default: false, is_production: false, color: 'green' });
+        setFormData({ name: '', primary_deployment_group: '', is_production: false, color: 'green' });
         setIsModalOpen(true);
     };
 
@@ -188,7 +188,6 @@ export function EnvironmentsList({ projectName }) {
         setFormData({
             name: env.name,
             primary_deployment_group: env.primary_deployment_group || '',
-            is_default: env.is_default,
             is_production: env.is_production,
             color: env.color || 'green',
         });
@@ -211,7 +210,6 @@ export function EnvironmentsList({ projectName }) {
             if (editingEnv) {
                 await api.updateEnvironment(projectName, editingEnv.name, {
                     primary_deployment_group: formData.primary_deployment_group || null,
-                    is_default: formData.is_default,
                     is_production: formData.is_production,
                     color: formData.color,
                 });
@@ -220,7 +218,6 @@ export function EnvironmentsList({ projectName }) {
                 await api.createEnvironment(projectName, {
                     name: formData.name,
                     primary_deployment_group: formData.primary_deployment_group || null,
-                    is_default: formData.is_default,
                     is_production: formData.is_production,
                     color: formData.color,
                 });
@@ -288,7 +285,6 @@ export function EnvironmentsList({ projectName }) {
                                         <div className="flex items-center gap-2">
                                             <EnvironmentColorDot color={env.color} />
                                             <span>{env.name}</span>
-                                            {env.is_default && <MonoTag>default</MonoTag>}
                                             {env.is_production && <MonoTag>production</MonoTag>}
                                         </div>
                                     </MonoTd>
@@ -307,7 +303,7 @@ export function EnvironmentsList({ projectName }) {
                                                 variant="danger"
                                                 size="sm"
                                                 onClick={(e) => { e.stopPropagation(); handleDeleteClick(env); }}
-                                                disabled={env.is_default || env.is_production}
+                                                disabled={env.is_production}
                                             >
                                                 Delete
                                             </Button>
@@ -346,15 +342,6 @@ export function EnvironmentsList({ projectName }) {
                         The deployment group that maps to this environment. Leave empty if not applicable.
                     </p>
                     <div className="flex gap-6 mt-2">
-                        <label className="flex items-center gap-2 cursor-pointer">
-                            <input
-                                type="checkbox"
-                                checked={formData.is_default}
-                                onChange={(e) => setFormData({ ...formData, is_default: e.target.checked })}
-                                className="w-4 h-4 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500"
-                            />
-                            <span className="text-sm text-gray-700 dark:text-gray-300">Default</span>
-                        </label>
                         <label className="flex items-center gap-2 cursor-pointer">
                             <input
                                 type="checkbox"

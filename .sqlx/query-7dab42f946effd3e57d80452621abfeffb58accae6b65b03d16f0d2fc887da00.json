@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        SELECT id, deployment_id, key, value, is_secret, is_protected, created_at, updated_at\n        FROM deployment_env_vars\n        WHERE deployment_id = $1 AND key = $2\n        ",
+  "query": "\n        UPDATE environments\n        SET\n            name = COALESCE($2, name),\n            primary_deployment_group = CASE WHEN $3 THEN $4 ELSE primary_deployment_group END,\n            is_production = COALESCE($5, is_production),\n            color = COALESCE($6, color),\n            updated_at = NOW()\n        WHERE id = $1\n        RETURNING id, project_id, name, primary_deployment_group, is_production, color, created_at, updated_at\n        ",
   "describe": {
     "columns": [
       {
@@ -10,28 +10,28 @@
       },
       {
         "ordinal": 1,
-        "name": "deployment_id",
+        "name": "project_id",
         "type_info": "Uuid"
       },
       {
         "ordinal": 2,
-        "name": "key",
+        "name": "name",
         "type_info": "Text"
       },
       {
         "ordinal": 3,
-        "name": "value",
+        "name": "primary_deployment_group",
         "type_info": "Text"
       },
       {
         "ordinal": 4,
-        "name": "is_secret",
+        "name": "is_production",
         "type_info": "Bool"
       },
       {
         "ordinal": 5,
-        "name": "is_protected",
-        "type_info": "Bool"
+        "name": "color",
+        "type_info": "Text"
       },
       {
         "ordinal": 6,
@@ -47,6 +47,10 @@
     "parameters": {
       "Left": [
         "Uuid",
+        "Text",
+        "Bool",
+        "Text",
+        "Bool",
         "Text"
       ]
     },
@@ -54,12 +58,12 @@
       false,
       false,
       false,
-      false,
+      true,
       false,
       false,
       false,
       false
     ]
   },
-  "hash": "6723a084174e8bff5782dd9224fcc7cab8e3ffac62ad5a08f24ededfe0e7a48a"
+  "hash": "7dab42f946effd3e57d80452621abfeffb58accae6b65b03d16f0d2fc887da00"
 }
