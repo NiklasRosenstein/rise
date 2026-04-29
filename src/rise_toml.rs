@@ -4,7 +4,7 @@
 //! (for generating a JSON Schema endpoint).
 
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 
 /// Root structure for rise.toml / .rise.toml configuration file
 #[derive(Debug, Deserialize, Serialize, Default)]
@@ -23,7 +23,7 @@ pub struct ProjectBuildConfig {
 
     /// Per-environment configuration (optional)
     #[serde(default)]
-    pub environments: HashMap<String, EnvironmentConfig>,
+    pub environments: BTreeMap<String, EnvironmentConfig>,
 }
 
 /// Per-environment configuration
@@ -36,7 +36,7 @@ pub struct EnvironmentConfig {
 
     /// Plain-text environment variables scoped to this environment
     #[serde(default)]
-    pub env: HashMap<String, String>,
+    pub env: BTreeMap<String, String>,
 }
 
 /// Project metadata configuration
@@ -48,7 +48,7 @@ pub struct ProjectConfig {
 
     /// Plain-text environment variables (non-secret)
     #[serde(default)]
-    pub env: HashMap<String, String>,
+    pub env: BTreeMap<String, String>,
 }
 
 /// Build configuration options for a project

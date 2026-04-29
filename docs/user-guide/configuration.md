@@ -95,25 +95,20 @@ env.LOG_LEVEL = "debug"
 env.DATABASE_URL = "postgres://prod-db/mydb"
 ```
 
-## Project Creation Modes
-
-When creating a project, you can control where configuration is stored:
+## Project Creation
 
 ```bash
-# Auto-detect: remote if rise.toml exists, remote+local otherwise
+# Create project on backend and write rise.toml
 rise project create my-app
 
-# Backend only (no rise.toml created)
-rise project create my-app --mode remote
+# Create project on backend only (no rise.toml written)
+rise project create my-app --no-rise-toml
 
-# rise.toml only (no backend interaction)
-rise project create my-app --mode local
-
-# Both backend and rise.toml
-rise project create my-app --mode remote+local
+# If rise.toml already exists, the project name is read from it
+rise project create
 ```
 
-If a `rise.toml` already exists, `rise project create` reads the project name from it and defaults to `--mode remote`.
+If a `rise.toml` already exists, it is never overwritten — the project is created on the backend using the name from the file.
 
 ## Configuration Precedence
 

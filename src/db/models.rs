@@ -1,6 +1,7 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use sqlx::FromRow;
+use std::borrow::Cow;
 use uuid::Uuid;
 
 /// User model - represents authenticated users from Dex
@@ -266,14 +267,14 @@ pub enum EnvVarSource {
 
 impl EnvVarSource {
     /// Serialize to the string stored in the database.
-    pub fn as_str(&self) -> String {
+    pub fn as_str(&self) -> Cow<'_, str> {
         match self {
-            Self::System => "system".to_string(),
-            Self::Global => "global".to_string(),
-            Self::Env(name) => format!("env:{}", name),
-            Self::Extension => "extension".to_string(),
-            Self::Toml => "toml".to_string(),
-            Self::Cli => "cli".to_string(),
+            Self::System => Cow::Borrowed("system"),
+            Self::Global => Cow::Borrowed("global"),
+            Self::Env(name) => Cow::Owned(format!("env:{}", name)),
+            Self::Extension => Cow::Borrowed("extension"),
+            Self::Toml => Cow::Borrowed("toml"),
+            Self::Cli => Cow::Borrowed("cli"),
         }
     }
 
@@ -285,8 +286,9 @@ impl EnvVarSource {
             "extension" => Some(Self::Extension),
             "toml" => Some(Self::Toml),
             "cli" => Some(Self::Cli),
-            s if s.starts_with("env:") => Some(Self::Env(s[4..].to_string())),
-            _ => None,
+            _ => s
+                .strip_prefix("env:")
+                .map(|name| Self::Env(name.to_string())),
         }
     }
 
@@ -315,7 +317,7 @@ pub struct DeploymentEnvVar {
     pub is_protected: bool,
     /// Provenance tracking for where this env var came from.
     /// Stored as TEXT, parsed via [`EnvVarSource`].
-    pub source: Option<String>,
+    pub source: String,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
@@ -342,4 +344,46 @@ pub struct ProjectExtension {
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
     pub deleted_at: Option<DateTime<Utc>>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn env_var_source_roundtrip() {
+        let variants = [
+            EnvVarSource::System,
+            EnvVarSource::Global,
+            EnvVarSource::Env("staging".to_string()),
+            EnvVarSource::Extension,
+            EnvVarSource::Toml,
+            EnvVarSource::Cli,
+        ];
+        for variant in &variants {
+            let s = variant.as_str();
+            let parsed = EnvVarSource::parse(&s).unwrap_or_else(|| {
+                panic!("parse failed for {:?} (serialized as {:?})", variant, s)
+            });
+            assert_eq!(&parsed, variant);
+        }
+    }
+
+    #[test]
+    fn env_var_source_parse_unknown_returns_none() {
+        assert_eq!(EnvVarSource::parse("unknown"), None);
+        assert_eq!(EnvVarSource::parse(""), None);
+        assert_eq!(EnvVarSource::parse("env"), None);
+    }
+
+    #[test]
+    fn env_var_source_is_client_allowed() {
+        assert!(EnvVarSource::Toml.is_client_allowed());
+        assert!(EnvVarSource::Cli.is_client_allowed());
+
+        assert!(!EnvVarSource::System.is_client_allowed());
+        assert!(!EnvVarSource::Global.is_client_allowed());
+        assert!(!EnvVarSource::Env("prod".to_string()).is_client_allowed());
+        assert!(!EnvVarSource::Extension.is_client_allowed());
+    }
 }

@@ -99,7 +99,7 @@ pub fn write_project_config(app_path: &str, config: &ProjectBuildConfig) -> Resu
 mod tests {
     use super::*;
     use crate::rise_toml::EnvironmentConfig;
-    use std::collections::HashMap;
+    use std::collections::BTreeMap;
 
     #[test]
     fn test_load_config_with_unused_fields() {
@@ -226,14 +226,14 @@ FOO = "bar"
             version: Some(1),
             project: Some(ProjectConfig {
                 name: "roundtrip-app".to_string(),
-                env: HashMap::from([("GLOBAL".to_string(), "val".to_string())]),
+                env: BTreeMap::from([("GLOBAL".to_string(), "val".to_string())]),
             }),
             build: None,
-            environments: HashMap::from([(
+            environments: BTreeMap::from([(
                 "staging".to_string(),
                 EnvironmentConfig {
                     default: true,
-                    env: HashMap::from([("STAGE_VAR".to_string(), "stage_val".to_string())]),
+                    env: BTreeMap::from([("STAGE_VAR".to_string(), "stage_val".to_string())]),
                 },
             )]),
         };

@@ -235,7 +235,7 @@ async fn insert_rise_env_vars(
             value,
             false, // Not a secret
             false, // is_protected
-            Some("system"),
+            "system",
         )
         .await
         .internal_err(format!("Failed to insert {}", key))?;
@@ -307,7 +307,7 @@ async fn apply_env_overrides(
             &value_to_store,
             env_override.is_secret,
             is_protected,
-            Some(&source_str),
+            &source_str,
         )
         .await
         .internal_err(format!("Failed to set env override '{}'", env_override.key))?;
@@ -862,7 +862,7 @@ pub async fn create_deployment(
             &final_http_port.to_string(),
             false, // not a secret
             false, // is_protected
-            Some("system"),
+            "system",
         )
         .await
         .internal_err("Failed to insert PORT env var")?;
@@ -971,7 +971,7 @@ pub async fn create_deployment(
                 &effective_http_port.to_string(),
                 false,
                 false,
-                Some("system"),
+                "system",
             )
             .await
             .internal_err("Failed to insert PORT env var")?;
@@ -1060,7 +1060,7 @@ pub async fn create_deployment(
             &effective_http_port.to_string(),
             false, // not a secret
             false, // is_protected
-            Some("system"),
+            "system",
         )
         .await
         .internal_err("Failed to insert PORT env var")?;
@@ -1149,7 +1149,7 @@ pub async fn create_deployment(
             &effective_http_port.to_string(),
             false, // not a secret
             false, // is_protected
-            Some("system"),
+            "system",
         )
         .await
         .internal_err("Failed to insert PORT env var")?;

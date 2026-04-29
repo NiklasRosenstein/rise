@@ -12,7 +12,6 @@ struct EnvVarResponse {
     is_protected: bool,
     #[serde(default)]
     environment: Option<String>,
-    #[serde(default)]
     source: Option<String>,
 }
 

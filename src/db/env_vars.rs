@@ -348,7 +348,7 @@ pub async fn upsert_deployment_env_var(
     value: &str,
     is_secret: bool,
     is_protected: bool,
-    source: Option<&str>,
+    source: &str,
 ) -> Result<DeploymentEnvVar> {
     let env_var = sqlx::query_as!(
         DeploymentEnvVar,
@@ -481,7 +481,7 @@ mod tests {
             "secret-value",
             true,
             false,
-            None,
+            "system",
         )
         .await
         .expect("Failed to insert deployment env var");
@@ -589,6 +589,6 @@ mod tests {
         assert_eq!(dep_vars.len(), 1);
         assert_eq!(dep_vars[0].key, "DB_URL");
         assert_eq!(dep_vars[0].value, "staging-db");
-        assert_eq!(dep_vars[0].source.as_deref(), Some("env:staging"));
+        assert_eq!(dep_vars[0].source, "env:staging");
     }
 }

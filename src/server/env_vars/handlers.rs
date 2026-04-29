@@ -437,7 +437,7 @@ pub async fn list_deployment_env_vars(
                     var.value,
                     var.is_secret,
                     var.is_protected,
-                    var.source,
+                    Some(var.source),
                 )
             } else {
                 // Return plaintext or decrypted value
@@ -447,7 +447,7 @@ pub async fn list_deployment_env_vars(
                     is_secret: var.is_secret,
                     is_protected: var.is_protected,
                     environment: None,
-                    source: var.source,
+                    source: Some(var.source),
                 }
             },
         );
