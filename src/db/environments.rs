@@ -161,6 +161,43 @@ pub async fn find_by_id(pool: &PgPool, id: Uuid) -> Result<Option<Environment>> 
     Ok(env)
 }
 
+/// Clear `is_default` and/or `is_production` flags from other environments in the
+/// same project. Used by both [`update`] and [`create_with_flag_swap`] to ensure
+/// the partial unique indexes are never violated.
+///
+/// `exclude_id` is the environment being updated (or `Uuid::nil()` during create).
+async fn clear_exclusive_flags(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    project_id: Uuid,
+    exclude_id: Uuid,
+    set_default: bool,
+    set_production: bool,
+) -> Result<()> {
+    if set_default {
+        sqlx::query!(
+            "UPDATE environments SET is_default = false, updated_at = NOW() WHERE project_id = $1 AND id != $2 AND is_default = true",
+            project_id,
+            exclude_id
+        )
+        .execute(&mut **tx)
+        .await
+        .context("Failed to clear is_default flag")?;
+    }
+
+    if set_production {
+        sqlx::query!(
+            "UPDATE environments SET is_production = false, updated_at = NOW() WHERE project_id = $1 AND id != $2 AND is_production = true",
+            project_id,
+            exclude_id
+        )
+        .execute(&mut **tx)
+        .await
+        .context("Failed to clear is_production flag")?;
+    }
+
+    Ok(())
+}
+
 /// Update an environment.
 ///
 /// Uses a transaction to atomically swap `is_default` and `is_production` flags
@@ -178,29 +215,14 @@ pub async fn update(
 ) -> Result<Environment> {
     let mut tx = pool.begin().await.context("Failed to begin transaction")?;
 
-    // If setting is_default=true, clear it from any other environment in the same project
-    if is_default == Some(true) {
-        sqlx::query!(
-            "UPDATE environments SET is_default = false, updated_at = NOW() WHERE project_id = $1 AND id != $2 AND is_default = true",
-            project_id,
-            id
-        )
-        .execute(&mut *tx)
-        .await
-        .context("Failed to clear is_default flag")?;
-    }
-
-    // If setting is_production=true, clear it from any other environment in the same project
-    if is_production == Some(true) {
-        sqlx::query!(
-            "UPDATE environments SET is_production = false, updated_at = NOW() WHERE project_id = $1 AND id != $2 AND is_production = true",
-            project_id,
-            id
-        )
-        .execute(&mut *tx)
-        .await
-        .context("Failed to clear is_production flag")?;
-    }
+    clear_exclusive_flags(
+        &mut tx,
+        project_id,
+        id,
+        is_default == Some(true),
+        is_production == Some(true),
+    )
+    .await?;
 
     let env = sqlx::query_as!(
         Environment,
@@ -227,6 +249,38 @@ pub async fn update(
     .fetch_one(&mut *tx)
     .await
     .context("Failed to update environment")?;
+
+    tx.commit().await.context("Failed to commit transaction")?;
+
+    Ok(env)
+}
+
+/// Create a new environment, atomically swapping `is_default`/`is_production` flags
+/// from other environments in the same project when those flags are set.
+#[allow(clippy::too_many_arguments)]
+pub async fn create_with_flag_swap(
+    pool: &PgPool,
+    project_id: Uuid,
+    name: &str,
+    primary_deployment_group: Option<&str>,
+    is_default: bool,
+    is_production: bool,
+    color: &str,
+) -> Result<Environment> {
+    let mut tx = pool.begin().await.context("Failed to begin transaction")?;
+
+    clear_exclusive_flags(&mut tx, project_id, Uuid::nil(), is_default, is_production).await?;
+
+    let env = create(
+        &mut *tx,
+        project_id,
+        name,
+        primary_deployment_group,
+        is_default,
+        is_production,
+        color,
+    )
+    .await?;
 
     tx.commit().await.context("Failed to commit transaction")?;
 
@@ -398,6 +452,69 @@ mod tests {
         assert!(!prod.is_default);
         // But prod should still be production
         assert!(prod.is_production);
+
+        Ok(())
+    }
+
+    #[sqlx::test]
+    async fn test_create_with_flag_swap(pool: PgPool) -> Result<()> {
+        let user = users::create(&pool, "env-test@example.com").await?;
+        let project = projects::create(
+            &pool,
+            "env-test-project",
+            ProjectStatus::Stopped,
+            "public".to_string(),
+            Some(user.id),
+            None,
+            None,
+        )
+        .await?;
+
+        // Create initial default+production env
+        let prod = create_default_for_project(&pool, project.id).await?;
+        assert!(prod.is_default);
+        assert!(prod.is_production);
+
+        // Create a new env with is_default=true — should swap the flag
+        let staging = create_with_flag_swap(
+            &pool,
+            project.id,
+            "staging",
+            Some("staging"),
+            true,
+            false,
+            "blue",
+        )
+        .await?;
+        assert!(staging.is_default);
+        assert!(!staging.is_production);
+
+        // Verify prod is no longer default but still production
+        let prod = find_by_id(&pool, prod.id).await?.unwrap();
+        assert!(!prod.is_default);
+        assert!(prod.is_production);
+
+        // Create another env with is_production=true — should swap from prod
+        let canary = create_with_flag_swap(
+            &pool,
+            project.id,
+            "canary",
+            Some("canary"),
+            false,
+            true,
+            "yellow",
+        )
+        .await?;
+        assert!(!canary.is_default);
+        assert!(canary.is_production);
+
+        // Verify prod lost production flag
+        let prod = find_by_id(&pool, prod.id).await?.unwrap();
+        assert!(!prod.is_production);
+
+        // Verify staging still has default
+        let staging = find_by_id(&pool, staging.id).await?.unwrap();
+        assert!(staging.is_default);
 
         Ok(())
     }
