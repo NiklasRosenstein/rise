@@ -106,11 +106,16 @@ pub struct WebhookQuery {
     token: Option<String>,
 }
 
-fn validate_webhook_token(
-    state: &AppState,
-    provided: &Option<String>,
+/// Validate a webhook token against an expected value.
+///
+/// - If `expected` is `None`, no authentication is required (returns Ok).
+/// - If `expected` is `Some` but `provided` is `None`, returns Forbidden.
+/// - Uses constant-time comparison to prevent timing attacks.
+fn check_webhook_token(
+    expected: Option<&str>,
+    provided: Option<&str>,
 ) -> Result<(), (StatusCode, &'static str)> {
-    let Some(expected) = &state.metacontroller_webhook_token else {
+    let Some(expected) = expected else {
         return Ok(());
     };
     let Some(provided) = provided else {
@@ -121,6 +126,16 @@ fn validate_webhook_token(
     } else {
         Err((StatusCode::FORBIDDEN, "Invalid webhook token"))
     }
+}
+
+fn validate_webhook_token(
+    state: &AppState,
+    provided: &Option<String>,
+) -> Result<(), (StatusCode, &'static str)> {
+    check_webhook_token(
+        state.metacontroller_webhook_token.as_deref(),
+        provided.as_deref(),
+    )
 }
 
 // ── Sync webhook handler ───────────────────────────────────────────────
@@ -199,20 +214,18 @@ async fn process_sync(
         }
     };
 
-    // 2. Load all deployments for this project
-    let all_deployments = db_deployments::list_for_project(&state.db_pool, project.id).await?;
+    // 2. Load non-terminal deployments for this project (avoids loading full history)
+    let non_terminal_deployments =
+        db_deployments::list_non_terminal_for_project(&state.db_pool, project.id).await?;
 
-    // Split into non-terminal and terminal
-    let non_terminal: Vec<&Deployment> = all_deployments
-        .iter()
-        .filter(|d| !state_machine::is_terminal(&d.status))
-        .collect();
+    let non_terminal: Vec<&Deployment> = non_terminal_deployments.iter().collect();
 
     // 3. Perform status transitions based on observed K8s state
     perform_status_transitions(state, &project, &non_terminal, observed).await?;
 
-    // 4. Re-load deployments since statuses may have changed
-    let all_deployments = db_deployments::list_for_project(&state.db_pool, project.id).await?;
+    // 4. Re-load non-terminal deployments since statuses may have changed
+    let all_deployments =
+        db_deployments::list_non_terminal_for_project(&state.db_pool, project.id).await?;
     let project = match db_projects::find_by_id(&state.db_pool, project.id).await? {
         Some(p) => p,
         None => {
@@ -227,18 +240,13 @@ async fn process_sync(
         }
     };
 
-    // 5. Get ResourceBuilder
+    // 5. Get ResourceBuilder — returning an error (HTTP 500) if not configured,
+    // so Metacontroller does NOT apply an empty children list which would
+    // garbage-collect all resources.
     let resource_builder = match &state.resource_builder {
         Some(rb) => rb,
         None => {
-            return Ok(SyncResponse {
-                status: serde_json::json!({
-                    "error": "no resource builder configured",
-                    "lastSyncTime": Utc::now().to_rfc3339(),
-                }),
-                children: vec![],
-                resync_after_seconds: Some(300.0),
-            });
+            anyhow::bail!("No resource builder configured — cannot compute desired children");
         }
     };
 
@@ -282,7 +290,9 @@ async fn perform_status_transitions(
             continue;
         }
 
-        // Handle Cancelling — mark as Cancelled immediately (no infra to clean up)
+        // Handle Cancelling — mark as Cancelled immediately.
+        // Any K8s resources created during Deploying will be garbage-collected by
+        // Metacontroller since `should_have_infrastructure` returns false for Cancelled.
         if deployment.status == DeploymentStatus::Cancelling {
             info!(
                 deployment_id = %deployment.deployment_id,
@@ -498,18 +508,7 @@ async fn check_deployment_health_from_observed(
                     deployment_id = %deployment.deployment_id,
                     "Deployment has irrecoverable pod error: {}", error_msg
                 );
-                // If previously healthy, preserve as Unhealthy
-                if deployment.first_healthy_at.is_some()
-                    && state_machine::is_valid_transition(
-                        &deployment.status,
-                        &DeploymentStatus::Unhealthy,
-                    )
-                {
-                    db_deployments::mark_unhealthy(&state.db_pool, deployment.id, error_msg)
-                        .await?;
-                } else {
-                    db_deployments::mark_failed(&state.db_pool, deployment.id, &error_msg).await?;
-                }
+                db_deployments::mark_failed(&state.db_pool, deployment.id, &error_msg).await?;
                 db_projects::update_calculated_status(&state.db_pool, project.id).await?;
             } else if is_ready {
                 info!(
@@ -1279,7 +1278,9 @@ pub async fn handle_finalize(
         Ok(response) => (StatusCode::OK, Json(response)).into_response(),
         Err(e) => {
             error!(project = %project_name, "Finalize webhook error: {:?}", e);
-            // On error, still finalize to avoid blocking deletion
+            // Return finalized: false so Metacontroller retries on transient errors
+            // (e.g., DB connectivity). This avoids leaving deployment records in
+            // non-terminal states while Metacontroller deletes all resources.
             (
                 StatusCode::OK,
                 Json(FinalizeResponse {
@@ -1287,7 +1288,7 @@ pub async fn handle_finalize(
                         "error": format!("{:#}", e),
                     }),
                     children: vec![],
-                    finalized: true,
+                    finalized: false,
                 }),
             )
                 .into_response()
@@ -1303,9 +1304,10 @@ async fn process_finalize(
 
     if let Some(project) = db_projects::find_by_name(&state.db_pool, project_name).await? {
         // Mark all non-terminal deployments as Stopped
-        let deployments = db_deployments::list_for_project(&state.db_pool, project.id).await?;
+        let deployments =
+            db_deployments::list_non_terminal_for_project(&state.db_pool, project.id).await?;
         for deployment in deployments {
-            if !state_machine::is_terminal(&deployment.status) {
+            {
                 info!(
                     deployment_id = %deployment.deployment_id,
                     "Finalize: marking deployment as Stopped"
@@ -1336,4 +1338,175 @@ async fn process_finalize(
         children: vec![],
         finalized: true,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::db::models::DeploymentStatus;
+
+    // ── should_have_infrastructure ─────────────────────────────────────
+
+    #[test]
+    fn test_should_have_infrastructure_for_active_states() {
+        let statuses_with_infra = [
+            DeploymentStatus::Pushed,
+            DeploymentStatus::Deploying,
+            DeploymentStatus::Healthy,
+            DeploymentStatus::Unhealthy,
+        ];
+        for status in &statuses_with_infra {
+            let d = test_deployment(status.clone());
+            assert!(
+                should_have_infrastructure(&d),
+                "{:?} should have infrastructure",
+                status
+            );
+        }
+    }
+
+    #[test]
+    fn test_should_not_have_infrastructure_for_terminal_and_pre_push_states() {
+        let statuses_without_infra = [
+            DeploymentStatus::Pending,
+            DeploymentStatus::Building,
+            DeploymentStatus::Pushing,
+            DeploymentStatus::Cancelling,
+            DeploymentStatus::Cancelled,
+            DeploymentStatus::Terminating,
+            DeploymentStatus::Stopped,
+            DeploymentStatus::Superseded,
+            DeploymentStatus::Failed,
+            DeploymentStatus::Expired,
+        ];
+        for status in &statuses_without_infra {
+            let d = test_deployment(status.clone());
+            assert!(
+                !should_have_infrastructure(&d),
+                "{:?} should NOT have infrastructure",
+                status
+            );
+        }
+    }
+
+    // ── check_webhook_token ────────────────────────────────────────────
+
+    #[test]
+    fn test_token_validation_no_expected_token() {
+        // No token configured → always passes
+        assert!(check_webhook_token(None, None).is_ok());
+        assert!(check_webhook_token(None, Some("anything")).is_ok());
+    }
+
+    #[test]
+    fn test_token_validation_missing_provided_token() {
+        let result = check_webhook_token(Some("secret"), None);
+        assert!(result.is_err());
+        let (status, msg) = result.unwrap_err();
+        assert_eq!(status, StatusCode::FORBIDDEN);
+        assert_eq!(msg, "Missing webhook token");
+    }
+
+    #[test]
+    fn test_token_validation_invalid_token() {
+        let result = check_webhook_token(Some("secret"), Some("wrong"));
+        assert!(result.is_err());
+        let (status, msg) = result.unwrap_err();
+        assert_eq!(status, StatusCode::FORBIDDEN);
+        assert_eq!(msg, "Invalid webhook token");
+    }
+
+    #[test]
+    fn test_token_validation_valid_token() {
+        assert!(check_webhook_token(Some("secret"), Some("secret")).is_ok());
+    }
+
+    #[test]
+    fn test_token_validation_empty_strings() {
+        // Empty expected with empty provided should match
+        assert!(check_webhook_token(Some(""), Some("")).is_ok());
+        // Empty expected with non-empty provided should not match
+        assert!(check_webhook_token(Some(""), Some("x")).is_err());
+    }
+
+    // ── FinalizeResponse serialization ─────────────────────────────────
+
+    #[test]
+    fn test_finalize_response_serialization() {
+        let response = FinalizeResponse {
+            status: serde_json::json!({}),
+            children: vec![],
+            finalized: true,
+        };
+        let json = serde_json::to_value(&response).unwrap();
+        assert_eq!(json["finalized"], true);
+        assert_eq!(json["children"], serde_json::json!([]));
+    }
+
+    #[test]
+    fn test_finalize_response_not_finalized() {
+        let response = FinalizeResponse {
+            status: serde_json::json!({"error": "db down"}),
+            children: vec![],
+            finalized: false,
+        };
+        let json = serde_json::to_value(&response).unwrap();
+        assert_eq!(json["finalized"], false);
+    }
+
+    // ── SyncResponse serialization ─────────────────────────────────────
+
+    #[test]
+    fn test_sync_response_omits_resync_when_none() {
+        let response = SyncResponse {
+            status: serde_json::json!({}),
+            children: vec![],
+            resync_after_seconds: None,
+        };
+        let json = serde_json::to_value(&response).unwrap();
+        assert!(!json.as_object().unwrap().contains_key("resyncAfterSeconds"));
+    }
+
+    #[test]
+    fn test_sync_response_includes_resync_when_set() {
+        let response = SyncResponse {
+            status: serde_json::json!({}),
+            children: vec![],
+            resync_after_seconds: Some(30.0),
+        };
+        let json = serde_json::to_value(&response).unwrap();
+        assert_eq!(json["resyncAfterSeconds"], 30.0);
+    }
+
+    // ── Helper ─────────────────────────────────────────────────────────
+
+    fn test_deployment(status: DeploymentStatus) -> Deployment {
+        Deployment {
+            id: uuid::Uuid::nil(),
+            deployment_id: "20260429-000000".to_string(),
+            project_id: uuid::Uuid::nil(),
+            created_by_id: uuid::Uuid::nil(),
+            status,
+            deployment_group: "default".to_string(),
+            environment_id: None,
+            expires_at: None,
+            termination_reason: None,
+            completed_at: None,
+            error_message: None,
+            build_logs: None,
+            controller_metadata: serde_json::Value::Null,
+            image: None,
+            image_digest: None,
+            rolled_back_from_deployment_id: None,
+            http_port: 8080,
+            needs_reconcile: false,
+            is_active: false,
+            deploying_started_at: None,
+            first_healthy_at: None,
+            job_url: None,
+            pull_request_url: None,
+            created_at: chrono::Utc::now(),
+            updated_at: chrono::Utc::now(),
+        }
+    }
 }

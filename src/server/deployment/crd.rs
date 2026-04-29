@@ -43,6 +43,11 @@ pub struct RiseProjectStatus {
 /// which Metacontroller detects and triggers a sync webhook call.
 const TRIGGER_ANNOTATION: &str = "rise.dev/trigger";
 
+/// Annotation key set on a RiseProject CRD after adoption of pre-existing child
+/// resources has completed. Prevents re-adoption from being skipped if the backend
+/// restarts mid-adoption (CRD exists but children not fully labeled).
+const ADOPTED_ANNOTATION: &str = "rise.dev/adopted";
+
 /// Create or update a `RiseProject` CRD for the given project.
 /// Called when a project is created.
 pub async fn ensure_rise_project(client: &Client, project_name: &str) -> anyhow::Result<()> {
@@ -149,13 +154,29 @@ pub async fn backfill_rise_projects(
     let existing_names: HashSet<String> =
         existing_crds.items.iter().map(|r| r.name_any()).collect();
 
+    // Build a set of CRDs that already have the adoption-completed annotation
+    let adopted_names: HashSet<String> = existing_crds
+        .items
+        .iter()
+        .filter(|r| {
+            r.metadata
+                .annotations
+                .as_ref()
+                .is_some_and(|a| a.contains_key(ADOPTED_ANNOTATION))
+        })
+        .map(|r| r.name_any())
+        .collect();
+
     // 2. List all active (non-Deleting, non-Terminated) projects from the database
     let active_projects = crate::db::projects::list_active(db_pool).await?;
 
-    // 3. Find projects missing a CRD and create them
+    // 3. Create missing CRDs and adopt existing children
     let mut created = 0u32;
+    let mut adopted = 0u32;
     for project in &active_projects {
-        if !existing_names.contains(&project.name) {
+        let crd_existed = existing_names.contains(&project.name);
+
+        if !crd_existed {
             if let Err(e) = ensure_rise_project(client, &project.name).await {
                 warn!(
                     project = %project.name,
@@ -164,25 +185,39 @@ pub async fn backfill_rise_projects(
                 continue;
             }
             created += 1;
+        }
 
-            // Adopt pre-existing child resources for newly-created CRDs
-            if adopt_existing {
-                if let Err(e) =
-                    adopt_children_for_project(client, &project.name, namespace_format).await
-                {
-                    warn!(
-                        project = %project.name,
-                        "Failed to adopt existing resources: {:?}", e
-                    );
-                }
+        // Adopt pre-existing child resources if adoption was not completed previously.
+        // This handles restarts mid-adoption: the CRD exists but children may not be
+        // fully labeled with the controller-uid.
+        if adopt_existing && !adopted_names.contains(&project.name) {
+            if let Err(e) =
+                adopt_children_for_project(client, &project.name, namespace_format).await
+            {
+                warn!(
+                    project = %project.name,
+                    "Failed to adopt existing resources: {:?}", e
+                );
+                continue;
             }
+
+            // Mark adoption as completed so we skip it on future restarts
+            if let Err(e) = mark_adoption_completed(&api, &project.name).await {
+                warn!(
+                    project = %project.name,
+                    "Failed to mark adoption as completed: {:?}", e
+                );
+            }
+            adopted += 1;
         }
     }
 
-    if created > 0 {
+    if created > 0 || adopted > 0 {
         info!(
-            "Backfilled {} RiseProject CRD(s) ({} active projects, {} already existed)",
+            "Backfilled {} RiseProject CRD(s), adopted resources for {} project(s) \
+             ({} active projects, {} already existed)",
             created,
+            adopted,
             active_projects.len(),
             existing_names.len()
         );
@@ -194,6 +229,20 @@ pub async fn backfill_rise_projects(
         );
     }
 
+    Ok(())
+}
+
+/// Mark a RiseProject CRD as having completed adoption of pre-existing resources.
+async fn mark_adoption_completed(api: &Api<RiseProject>, project_name: &str) -> anyhow::Result<()> {
+    let patch = serde_json::json!({
+        "metadata": {
+            "annotations": {
+                ADOPTED_ANNOTATION: chrono::Utc::now().to_rfc3339(),
+            },
+        },
+    });
+    api.patch(project_name, &PatchParams::default(), &Patch::Merge(patch))
+        .await?;
     Ok(())
 }
 

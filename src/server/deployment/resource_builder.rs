@@ -55,18 +55,6 @@ pub const IRRECOVERABLE_CONTAINER_REASONS: &[&str] = &[
     "RunContainerError",
 ];
 
-/// Critical event reasons that indicate deployment should fail
-#[allow(dead_code)]
-pub const CRITICAL_EVENT_REASONS: &[&str] = &[
-    "FailedCreate",
-    "FailedKillPod",
-    "FailedPostStartHook",
-    "FailedPreStopHook",
-];
-
-#[allow(dead_code)]
-pub const MIN_EVENT_COUNT_FOR_CRITICAL: i32 = 3;
-
 /// Helper enum for probe type
 #[derive(Debug, Clone, Copy)]
 enum ProbeType {
