@@ -1157,17 +1157,20 @@ async fn main() -> Result<()> {
                 }
 
                 // Load rise.toml config for env resolution and env var overrides
-                let toml_config =
-                    build::config::load_full_project_config(&args.path).unwrap_or(None);
+                let toml_config = build::config::load_full_project_config(&args.path)?;
 
-                // Resolve environment from rise.toml if --environment not specified
+                // Resolve environment from rise.toml if --environment not specified.
+                // Only use rise.toml's default when --group is also not specified,
+                // otherwise let the server resolve the environment from the group mapping.
                 let resolved_environment = if args.environment.is_some() {
                     args.environment.clone()
-                } else if let Some(ref cfg) = toml_config {
-                    cfg.environments
-                        .iter()
-                        .find(|(_, env)| env.default)
-                        .map(|(name, _)| name.clone())
+                } else if args.group.is_none() {
+                    toml_config.as_ref().and_then(|cfg| {
+                        cfg.environments
+                            .iter()
+                            .find(|(_, env)| env.default)
+                            .map(|(name, _)| name.clone())
+                    })
                 } else {
                     None
                 };
