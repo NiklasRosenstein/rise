@@ -413,7 +413,7 @@ Content-Type: application/x-www-form-urlencoded
 ```
 
 **Error Codes:**
-- `invalid_request` (400): Missing or invalid parameters, or both `client_secret` and `code_verifier` provided
+- `invalid_request` (400): Missing or invalid parameters (e.g., neither `client_secret` nor `code_verifier` provided)
 - `invalid_client` (401): Invalid client_id or client_secret
 - `invalid_grant` (400): Invalid/expired code, or PKCE validation failed
 - `unsupported_grant_type` (400): Unknown grant_type
