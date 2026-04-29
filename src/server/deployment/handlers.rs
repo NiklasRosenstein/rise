@@ -441,7 +441,8 @@ async fn convert_deployment(
 ///   then try fallback_environment from rise.toml; then auto-resolve (0 envs → none,
 ///   1 env → use it, 2+ → error).
 /// - If neither specified: if the project has exactly one environment, use it.
-///   If zero, use the default group with no environment. If more than one, error.
+///   If zero, use the default group with no environment. If more than one,
+///   try fallback_environment from rise.toml; otherwise error.
 async fn resolve_deployment_target(
     pool: &sqlx::PgPool,
     project_id: uuid::Uuid,
@@ -522,9 +523,29 @@ async fn resolve_deployment_target(
                         .unwrap_or_else(|| models::DEFAULT_DEPLOYMENT_GROUP.to_string());
                     Ok((group, Some(env)))
                 }
-                _ => Err(ServerError::bad_request(
-                    "Multiple environments configured. Specify --environment (-E) to select one.",
-                )),
+                _ => {
+                    // Multiple environments: use fallback from rise.toml if available
+                    if let Some(fb_env_name) = fallback_environment {
+                        let fb_env = environments::find_by_name(pool, project_id, fb_env_name)
+                            .await
+                            .internal_err("Failed to look up fallback environment")?
+                            .ok_or_else(|| {
+                                ServerError::not_found(format!(
+                                    "Fallback environment '{}' not found",
+                                    fb_env_name
+                                ))
+                            })?;
+                        let group = fb_env
+                            .primary_deployment_group
+                            .clone()
+                            .unwrap_or_else(|| models::DEFAULT_DEPLOYMENT_GROUP.to_string());
+                        Ok((group, Some(fb_env)))
+                    } else {
+                        Err(ServerError::bad_request(
+                            "Multiple environments configured. Specify --environment (-E) to select one.",
+                        ))
+                    }
+                }
             }
         }
     }
