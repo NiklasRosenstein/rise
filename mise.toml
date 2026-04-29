@@ -195,7 +195,13 @@ sudo cat /etc/rancher/k3s/k3s.yaml > ~/.kube/config
 kubectl apply -f https://raw.githubusercontent.com/projectcalico/calico/v3.31.4/manifests/operator-crds.yaml --server-side --force-conflicts
 kubectl apply -f https://raw.githubusercontent.com/projectcalico/calico/v3.31.4/manifests/tigera-operator.yaml --server-side --force-conflicts
 kubectl apply -f https://raw.githubusercontent.com/projectcalico/calico/v3.31.4/manifests/custom-resources.yaml --server-side --force-conflicts
-helm upgrade --install --repo https://kubernetes.github.io/ingress-nginx ingress-nginx --namespace ingress-nginx ingress-nginx --create-namespace
+helm upgrade --install ingress-nginx ingress-nginx \
+  --repo https://kubernetes.github.io/ingress-nginx \
+  --namespace ingress-nginx --create-namespace \
+  --set controller.hostPort.enabled=true \
+  --set controller.hostPort.ports.http=8080 \
+  --set controller.hostPort.ports.https=8443 \
+  --set controller.service.type=ClusterIP
 
 set +x
 echo
