@@ -31,7 +31,7 @@ pub async fn create_environment(
     let user = auth.user()?;
     ensure_project_access_or_admin(&state, user, &project).await?;
 
-    let env = db_environments::create(
+    let env = db_environments::create_with_flag_swap(
         &state.db_pool,
         project.id,
         &payload.name,
@@ -42,7 +42,7 @@ pub async fn create_environment(
     )
     .await
     .map_err(|e| {
-        let msg = e.to_string();
+        let msg = format!("{e:#}");
         if msg.contains("duplicate key") || msg.contains("unique constraint") {
             if msg.contains("primary_deployment_group") {
                 ServerError::new(
@@ -179,6 +179,13 @@ pub async fn update_environment(
         .internal_err("Failed to get environment")?
         .ok_or_else(|| ServerError::not_found(format!("Environment '{}' not found", env_name)))?;
 
+    // Prevent unsetting is_default when this is the only default environment
+    if payload.is_default == Some(false) && env.is_default {
+        return Err(ServerError::bad_request(
+            "Cannot unset the default flag. Set another environment as default instead.",
+        ));
+    }
+
     let updated = db_environments::update(
         &state.db_pool,
         env.id,
@@ -194,7 +201,7 @@ pub async fn update_environment(
     )
     .await
     .map_err(|e| {
-        let msg = e.to_string();
+        let msg = format!("{e:#}");
         if msg.contains("duplicate key") || msg.contains("unique constraint") {
             if msg.contains("primary_deployment_group") {
                 ServerError::new(

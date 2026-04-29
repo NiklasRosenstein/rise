@@ -233,6 +233,56 @@ pub async fn update(
     Ok(env)
 }
 
+/// Create a new environment, atomically swapping `is_default`/`is_production` flags
+/// from other environments in the same project when those flags are set.
+#[allow(clippy::too_many_arguments)]
+pub async fn create_with_flag_swap(
+    pool: &PgPool,
+    project_id: Uuid,
+    name: &str,
+    primary_deployment_group: Option<&str>,
+    is_default: bool,
+    is_production: bool,
+    color: &str,
+) -> Result<Environment> {
+    let mut tx = pool.begin().await.context("Failed to begin transaction")?;
+
+    if is_default {
+        sqlx::query!(
+            "UPDATE environments SET is_default = false, updated_at = NOW() WHERE project_id = $1 AND is_default = true",
+            project_id
+        )
+        .execute(&mut *tx)
+        .await
+        .context("Failed to clear is_default flag")?;
+    }
+
+    if is_production {
+        sqlx::query!(
+            "UPDATE environments SET is_production = false, updated_at = NOW() WHERE project_id = $1 AND is_production = true",
+            project_id
+        )
+        .execute(&mut *tx)
+        .await
+        .context("Failed to clear is_production flag")?;
+    }
+
+    let env = create(
+        &mut *tx,
+        project_id,
+        name,
+        primary_deployment_group,
+        is_default,
+        is_production,
+        color,
+    )
+    .await?;
+
+    tx.commit().await.context("Failed to commit transaction")?;
+
+    Ok(env)
+}
+
 /// Delete an environment by ID.
 ///
 /// Returns an error if the environment has `is_default` or `is_production` set, since those
@@ -398,6 +448,69 @@ mod tests {
         assert!(!prod.is_default);
         // But prod should still be production
         assert!(prod.is_production);
+
+        Ok(())
+    }
+
+    #[sqlx::test]
+    async fn test_create_with_flag_swap(pool: PgPool) -> Result<()> {
+        let user = users::create(&pool, "env-test@example.com").await?;
+        let project = projects::create(
+            &pool,
+            "env-test-project",
+            ProjectStatus::Stopped,
+            "public".to_string(),
+            Some(user.id),
+            None,
+            None,
+        )
+        .await?;
+
+        // Create initial default+production env
+        let prod = create_default_for_project(&pool, project.id).await?;
+        assert!(prod.is_default);
+        assert!(prod.is_production);
+
+        // Create a new env with is_default=true — should swap the flag
+        let staging = create_with_flag_swap(
+            &pool,
+            project.id,
+            "staging",
+            Some("staging"),
+            true,
+            false,
+            "blue",
+        )
+        .await?;
+        assert!(staging.is_default);
+        assert!(!staging.is_production);
+
+        // Verify prod is no longer default but still production
+        let prod = find_by_id(&pool, prod.id).await?.unwrap();
+        assert!(!prod.is_default);
+        assert!(prod.is_production);
+
+        // Create another env with is_production=true — should swap from prod
+        let canary = create_with_flag_swap(
+            &pool,
+            project.id,
+            "canary",
+            Some("canary"),
+            false,
+            true,
+            "yellow",
+        )
+        .await?;
+        assert!(!canary.is_default);
+        assert!(canary.is_production);
+
+        // Verify prod lost production flag
+        let prod = find_by_id(&pool, prod.id).await?.unwrap();
+        assert!(!prod.is_production);
+
+        // Verify staging still has default
+        let staging = find_by_id(&pool, staging.id).await?.unwrap();
+        assert!(staging.is_default);
 
         Ok(())
     }

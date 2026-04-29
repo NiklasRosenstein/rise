@@ -433,11 +433,12 @@ async fn convert_deployment(
 /// Resolve the deployment target (group + environment) from request parameters.
 ///
 /// Rules:
+/// - If both specified: use both as-is.
 /// - If environment specified, no group: use environment's primary deployment group.
 /// - If group specified, no environment: look up environment whose primary group matches;
 ///   if none found, fall back to the project's default environment.
-/// - If both specified: use both as-is.
-/// - If neither specified: use "default" group, resolve environment from primary group mapping.
+/// - If neither specified: use the default environment's primary group. Fails if no default
+///   environment is configured.
 async fn resolve_deployment_target(
     pool: &sqlx::PgPool,
     project_id: uuid::Uuid,
@@ -489,27 +490,21 @@ async fn resolve_deployment_target(
                 Ok((group.to_string(), default_env))
             }
         }
-        // Neither specified: use the default environment's primary group, or fall back to "default"
+        // Neither specified: use the default environment's primary group
         (None, None) => {
-            // First, check if there's a default environment with a primary group
             let default_env = environments::find_default(pool, project_id)
                 .await
-                .internal_err("Failed to look up default environment")?;
-            if let Some(env) = default_env {
-                let group = env
-                    .primary_deployment_group
-                    .clone()
-                    .unwrap_or_else(|| models::DEFAULT_DEPLOYMENT_GROUP.to_string());
-                Ok((group, Some(env)))
-            } else {
-                // No default environment — fall back to "default" group and try to find
-                // an environment whose primary group is "default"
-                let group = models::DEFAULT_DEPLOYMENT_GROUP;
-                let env = environments::find_by_primary_group(pool, project_id, group)
-                    .await
-                    .internal_err("Failed to look up environment by group")?;
-                Ok((group.to_string(), env))
-            }
+                .internal_err("Failed to look up default environment")?
+                .ok_or_else(|| {
+                    ServerError::bad_request(
+                        "No default environment configured for this project. Specify --environment explicitly.",
+                    )
+                })?;
+            let group = default_env
+                .primary_deployment_group
+                .clone()
+                .unwrap_or_else(|| models::DEFAULT_DEPLOYMENT_GROUP.to_string());
+            Ok((group, Some(default_env)))
         }
     }
 }
