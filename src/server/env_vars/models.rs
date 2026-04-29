@@ -35,7 +35,13 @@ pub struct EnvVarResponse {
 
 impl EnvVarResponse {
     /// Create response from database model, masking secrets
-    pub fn from_db_model(key: String, value: String, is_secret: bool, is_protected: bool) -> Self {
+    pub fn from_db_model(
+        key: String,
+        value: String,
+        is_secret: bool,
+        is_protected: bool,
+        source: Option<String>,
+    ) -> Self {
         let displayed_value = if is_secret {
             "••••••••".to_string()
         } else {
@@ -48,7 +54,7 @@ impl EnvVarResponse {
             is_secret,
             is_protected,
             environment: None,
-            source: None,
+            source,
         }
     }
 }

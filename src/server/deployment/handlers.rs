@@ -252,11 +252,16 @@ async fn insert_rise_env_vars(
 ///
 /// Encrypts secret values and upserts each override into the deployment's env vars.
 /// Called after copying project/source env vars and before upserting PORT.
+///
+/// Only client-allowed source values (`toml`, `cli`) are accepted. Unknown or
+/// server-managed source values are replaced with `cli`.
 async fn apply_env_overrides(
     state: &AppState,
     deployment_id: uuid::Uuid,
     overrides: &[models::EnvOverride],
 ) -> Result<(), ServerError> {
+    use crate::db::models::EnvVarSource;
+
     if overrides.is_empty() {
         return Ok(());
     }
@@ -269,6 +274,15 @@ async fn apply_env_overrides(
 
     for env_override in overrides {
         let is_protected = validate_env_override(env_override)?;
+
+        // Validate source: only client-allowed values (toml, cli) are accepted.
+        // Default to "cli" if missing or invalid.
+        let source = env_override
+            .source
+            .as_deref()
+            .and_then(EnvVarSource::parse)
+            .filter(|s| s.is_client_allowed())
+            .unwrap_or(EnvVarSource::Cli);
 
         // Encrypt if secret
         let value_to_store = if env_override.is_secret {
@@ -285,6 +299,7 @@ async fn apply_env_overrides(
             env_override.value.clone()
         };
 
+        let source_str = source.as_str();
         crate::db::env_vars::upsert_deployment_env_var(
             &state.db_pool,
             deployment_id,
@@ -292,7 +307,7 @@ async fn apply_env_overrides(
             &value_to_store,
             env_override.is_secret,
             is_protected,
-            env_override.source.as_deref(),
+            Some(&source_str),
         )
         .await
         .internal_err(format!("Failed to set env override '{}'", env_override.key))?;
@@ -507,9 +522,12 @@ async fn resolve_deployment_target(
                     .internal_err("Failed to list environments")?;
                 match all_envs.len() {
                     0 => Ok((group.to_string(), None)),
-                    1 => Ok((group.to_string(), Some(all_envs.into_iter().next().unwrap()))),
+                    1 => Ok((
+                        group.to_string(),
+                        Some(all_envs.into_iter().next().unwrap()),
+                    )),
                     _ => Err(ServerError::bad_request(
-                        "Multiple environments configured. Specify --environment (-E) to select one.",
+                        "Multiple environments configured. Specify an environment to select one.",
                     )),
                 }
             }
@@ -548,7 +566,7 @@ async fn resolve_deployment_target(
                         Ok((group, Some(fb_env)))
                     } else {
                         Err(ServerError::bad_request(
-                            "Multiple environments configured. Specify --environment (-E) to select one.",
+                            "Multiple environments configured. Specify an environment to select one.",
                         ))
                     }
                 }
@@ -851,6 +869,7 @@ pub async fn create_deployment(
                 project.id,
                 new_deployment.id,
                 new_deployment.environment_id,
+                resolved_environment.as_ref().map(|e| e.name.as_str()),
             )
             .await
             .internal_err("Failed to copy environment variables")?;
@@ -961,6 +980,7 @@ pub async fn create_deployment(
                 project.id,
                 deployment.id,
                 deployment.environment_id,
+                resolved_environment.as_ref().map(|e| e.name.as_str()),
             )
             .await
             .internal_err("Failed to copy environment variables")?;
@@ -1047,6 +1067,7 @@ pub async fn create_deployment(
             project.id,
             deployment.id,
             deployment.environment_id,
+            resolved_environment.as_ref().map(|e| e.name.as_str()),
         )
         .await
         .internal_err("Failed to copy environment variables")?;
@@ -1135,6 +1156,7 @@ pub async fn create_deployment(
             project.id,
             deployment.id,
             deployment.environment_id,
+            resolved_environment.as_ref().map(|e| e.name.as_str()),
         )
         .await
         .internal_err("Failed to copy environment variables")?;

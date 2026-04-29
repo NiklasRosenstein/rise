@@ -245,6 +245,64 @@ pub struct ProjectEnvVar {
     pub updated_at: DateTime<Utc>,
 }
 
+/// Provenance of a deployment environment variable.
+///
+/// Stored as TEXT in the database. Parsed/validated via `EnvVarSource`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum EnvVarSource {
+    /// Rise system variables (PORT, RISE_ISSUER, RISE_APP_URL, etc.)
+    System,
+    /// Copied from project-level env vars with no environment scope
+    Global,
+    /// Copied from project-level env vars scoped to a specific environment
+    Env(String),
+    /// Injected by an extension (OAuth, RDS, Snowflake, etc.)
+    Extension,
+    /// From rise.toml configuration file
+    Toml,
+    /// From CLI flags (--env, --secret-env, --protected-env, --env-file)
+    Cli,
+}
+
+impl EnvVarSource {
+    /// Serialize to the string stored in the database.
+    pub fn as_str(&self) -> String {
+        match self {
+            Self::System => "system".to_string(),
+            Self::Global => "global".to_string(),
+            Self::Env(name) => format!("env:{}", name),
+            Self::Extension => "extension".to_string(),
+            Self::Toml => "toml".to_string(),
+            Self::Cli => "cli".to_string(),
+        }
+    }
+
+    /// Parse from the string stored in the database.
+    pub fn parse(s: &str) -> Option<Self> {
+        match s {
+            "system" => Some(Self::System),
+            "global" => Some(Self::Global),
+            "extension" => Some(Self::Extension),
+            "toml" => Some(Self::Toml),
+            "cli" => Some(Self::Cli),
+            s if s.starts_with("env:") => Some(Self::Env(s[4..].to_string())),
+            _ => None,
+        }
+    }
+
+    /// Returns the set of source values that are allowed from client requests.
+    /// Server-managed sources (system, global, env:*, extension) are not accepted from clients.
+    pub fn is_client_allowed(&self) -> bool {
+        matches!(self, Self::Toml | Self::Cli)
+    }
+}
+
+impl std::fmt::Display for EnvVarSource {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.as_str())
+    }
+}
+
 /// Deployment environment variable
 #[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
 pub struct DeploymentEnvVar {
@@ -255,7 +313,8 @@ pub struct DeploymentEnvVar {
     pub value: String,
     pub is_secret: bool,
     pub is_protected: bool,
-    /// Provenance tracking: where this env var came from (e.g. "system", "project", "extension", "toml", "cli")
+    /// Provenance tracking for where this env var came from.
+    /// Stored as TEXT, parsed via [`EnvVarSource`].
     pub source: Option<String>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,

@@ -1583,15 +1583,8 @@ async fn main() -> Result<()> {
                     domain,
                 } => {
                     let project_name = resolve_project_name(project.clone(), path)?;
-                    domain::add_domain(
-                        &http_client,
-                        &backend_url,
-                        &token,
-                        &project_name,
-                        domain,
-                        Some(path),
-                    )
-                    .await?;
+                    domain::add_domain(&http_client, &backend_url, &token, &project_name, domain)
+                        .await?;
                 }
                 DomainCommands::List { project, path } => {
                     let project_name = resolve_project_name(project.clone(), path)?;
@@ -1609,7 +1602,6 @@ async fn main() -> Result<()> {
                         &token,
                         &project_name,
                         domain,
-                        Some(path),
                     )
                     .await?;
                 }

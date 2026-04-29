@@ -123,6 +123,7 @@ pub async fn set_project_env_var(
         env_var.value,
         env_var.is_secret,
         env_var.is_protected,
+        None,
     );
     response.environment = params.get("environment").cloned();
     Ok(Json(response))
@@ -197,7 +198,7 @@ pub async fn list_project_env_vars(
 
         let mut response = if var.is_secret && (!include_unprotected || var.is_protected) {
             // Mask protected secrets
-            EnvVarResponse::from_db_model(var.key, var.value, var.is_secret, var.is_protected)
+            EnvVarResponse::from_db_model(var.key, var.value, var.is_secret, var.is_protected, None)
         } else {
             // Return plaintext or decrypted value
             EnvVarResponse {
@@ -362,6 +363,7 @@ pub async fn move_project_env_var(
         env_var.value,
         env_var.is_secret,
         env_var.is_protected,
+        None,
     );
     response.environment = payload.to_environment;
     Ok(Json(response))
@@ -430,14 +432,13 @@ pub async fn list_deployment_env_vars(
         env_vars.push(
             if var.is_secret && (!include_unprotected || var.is_protected) {
                 // Mask protected secrets
-                let mut resp = EnvVarResponse::from_db_model(
+                EnvVarResponse::from_db_model(
                     var.key,
                     var.value,
                     var.is_secret,
                     var.is_protected,
-                );
-                resp.source = var.source;
-                resp
+                    var.source,
+                )
             } else {
                 // Return plaintext or decrypted value
                 EnvVarResponse {
@@ -631,12 +632,23 @@ pub async fn preview_deployment_env_vars(
 
     // 1. Load user-set project vars (resolve environment from query param)
     let preview_env_id = resolve_environment_id(&state.db_pool, project.id, &params).await?;
+    let preview_env_name = params.get("environment").cloned();
+    let env_source = preview_env_name
+        .as_ref()
+        .map(|name| format!("env:{}", name));
 
     let db_vars = db_env_vars::list_project_env_vars(&state.db_pool, project.id, preview_env_id)
         .await
         .internal_err("Failed to list environment variables")?;
 
     for var in db_vars {
+        // Determine source: global if no environment_id, env:<name> if scoped
+        let source = Some(if var.environment_id.is_some() {
+            env_source.clone().unwrap_or_else(|| "global".to_string())
+        } else {
+            "global".to_string()
+        });
+
         if var.is_secret && !var.is_protected {
             // Unprotected secret — decrypt for preview
             let decrypted = match &state.encryption_provider {
@@ -658,7 +670,7 @@ pub async fn preview_deployment_env_vars(
                     is_secret: true,
                     is_protected: false,
                     environment: None,
-                    source: None,
+                    source,
                 },
             );
         } else if var.is_secret {
@@ -671,7 +683,7 @@ pub async fn preview_deployment_env_vars(
                     is_secret: true,
                     is_protected: true,
                     environment: None,
-                    source: None,
+                    source,
                 },
             );
         } else {
@@ -684,7 +696,7 @@ pub async fn preview_deployment_env_vars(
                     is_secret: false,
                     is_protected: false,
                     environment: None,
-                    source: None,
+                    source,
                 },
             );
         }

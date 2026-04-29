@@ -29,7 +29,6 @@ pub async fn add_domain(
     token: &str,
     project: &str,
     domain: &str,
-    app_path: Option<&str>,
 ) -> Result<()> {
     let url = format!("{}/api/v1/projects/{}/domains", backend_url, project);
 
@@ -62,16 +61,6 @@ pub async fn add_domain(
         domain, project
     );
 
-    // Update rise.toml to persist the domain if app_path is provided
-    if let Some(path) = app_path {
-        update_rise_toml_add_domain(path, project, domain)?;
-    }
-
-    Ok(())
-}
-
-/// Helper function to add domain to rise.toml (no-op: domains are no longer stored in rise.toml)
-fn update_rise_toml_add_domain(_app_path: &str, _project: &str, _domain: &str) -> Result<()> {
     Ok(())
 }
 
@@ -139,7 +128,6 @@ pub async fn remove_domain(
     token: &str,
     project: &str,
     domain: &str,
-    app_path: Option<&str>,
 ) -> Result<()> {
     let url = format!(
         "{}/api/v1/projects/{}/domains/{}",
@@ -170,15 +158,5 @@ pub async fn remove_domain(
         domain, project
     );
 
-    // Update rise.toml to remove the domain if app_path is provided
-    if let Some(path) = app_path {
-        update_rise_toml_remove_domain(path, domain)?;
-    }
-
-    Ok(())
-}
-
-/// Helper function to remove domain from rise.toml (no-op: domains are no longer stored in rise.toml)
-fn update_rise_toml_remove_domain(_app_path: &str, _domain: &str) -> Result<()> {
     Ok(())
 }

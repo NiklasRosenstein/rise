@@ -519,18 +519,6 @@ pub async fn update_project(
             update_response.project.name
         );
         println!("  Status: {}", update_response.project.status);
-
-        // Update project name in local rise.toml if it exists and name changed
-        if let Some(ref new_name) = name {
-            use crate::build::config::{load_full_project_config, write_project_config};
-            if let Some(mut full_config) = load_full_project_config(".")? {
-                if let Some(ref mut project_config) = full_config.project {
-                    project_config.name = new_name.clone();
-                    write_project_config(".", &full_config)?;
-                    println!("  Updated rise.toml");
-                }
-            }
-        }
     } else if response.status() == reqwest::StatusCode::NOT_FOUND {
         let error: ProjectErrorResponse = response
             .json()
