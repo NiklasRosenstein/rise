@@ -437,15 +437,17 @@ async fn convert_deployment(
 /// Rules:
 /// - If both specified: use both as-is.
 /// - If environment specified, no group: use environment's primary deployment group.
-/// - If group specified, no environment: look up environment whose primary group matches.
+/// - If group specified, no environment: look up environment whose primary group matches;
+///   then try fallback_environment from rise.toml; then auto-resolve (0 envs → none,
+///   1 env → use it, 2+ → error).
 /// - If neither specified: if the project has exactly one environment, use it.
 ///   If zero, use the default group with no environment. If more than one, error.
-///   (Backwards compat for older CLIs that relied on find_default.)
 async fn resolve_deployment_target(
     pool: &sqlx::PgPool,
     project_id: uuid::Uuid,
     requested_environment: Option<&str>,
     requested_group: Option<&str>,
+    fallback_environment: Option<&str>,
 ) -> Result<(String, Option<crate::db::models::Environment>), ServerError> {
     use crate::db::environments;
 
@@ -482,7 +484,28 @@ async fn resolve_deployment_target(
             let env = environments::find_by_primary_group(pool, project_id, group)
                 .await
                 .internal_err("Failed to look up environment by group")?;
-            Ok((group.to_string(), env))
+            if env.is_some() {
+                Ok((group.to_string(), env))
+            } else if let Some(fb_env_name) = fallback_environment {
+                // Group has no primary environment mapping; use fallback from rise.toml
+                let fb_env = environments::find_by_name(pool, project_id, fb_env_name)
+                    .await
+                    .internal_err("Failed to look up fallback environment")?;
+                Ok((group.to_string(), fb_env))
+            } else {
+                // No primary group match and no fallback from rise.toml.
+                // Auto-resolve like the (None, None) case.
+                let all_envs = environments::list_for_project(pool, project_id)
+                    .await
+                    .internal_err("Failed to list environments")?;
+                match all_envs.len() {
+                    0 => Ok((group.to_string(), None)),
+                    1 => Ok((group.to_string(), Some(all_envs.into_iter().next().unwrap()))),
+                    _ => Err(ServerError::bad_request(
+                        "Multiple environments configured. Specify --environment (-E) to select one.",
+                    )),
+                }
+            }
         }
         // Neither specified: auto-resolve from available environments
         (None, None) => {
@@ -631,6 +654,7 @@ pub async fn create_deployment(
         project.id,
         payload.environment.as_deref(),
         payload.group.as_deref(),
+        payload.fallback_environment.as_deref(),
     )
     .await?;
 
@@ -2060,7 +2084,7 @@ mod tests {
             .unwrap();
 
         // Neither environment nor group specified → should auto-select the single env
-        let (group, env) = super::resolve_deployment_target(&pool, project.id, None, None)
+        let (group, env) = super::resolve_deployment_target(&pool, project.id, None, None, None)
             .await
             .unwrap();
         assert_eq!(group, "staging");
@@ -2102,7 +2126,7 @@ mod tests {
         .unwrap();
 
         // Neither environment nor group specified → should fail with multiple envs
-        let err = super::resolve_deployment_target(&pool, project.id, None, None)
+        let err = super::resolve_deployment_target(&pool, project.id, None, None, None)
             .await
             .unwrap_err();
         assert_eq!(err.status, StatusCode::BAD_REQUEST);
