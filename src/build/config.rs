@@ -5,7 +5,7 @@ use std::path::Path;
 use tracing::{debug, info, warn};
 
 // Re-export shared config types from rise_toml module
-pub use crate::rise_toml::*;
+pub use crate::rise_toml::{ProjectBuildConfig, ProjectConfig};
 
 /// Load full project configuration from rise.toml or .rise.toml
 ///
@@ -84,6 +84,7 @@ pub fn write_project_config(app_path: &str, config: &ProjectBuildConfig) -> Resu
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::rise_toml::EnvironmentConfig;
     use std::collections::HashMap;
 
     #[test]

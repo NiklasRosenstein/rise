@@ -59,7 +59,7 @@ pub struct ProjectConfig {
     pub source_url: Option<String>,
 }
 
-pub fn default_access_class() -> String {
+pub(crate) fn default_access_class() -> String {
     "public".to_string()
 }
 
