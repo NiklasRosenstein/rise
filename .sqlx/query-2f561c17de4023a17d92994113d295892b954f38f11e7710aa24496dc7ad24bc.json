@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        SELECT id, deployment_id, key, value, is_secret, is_protected, created_at, updated_at\n        FROM deployment_env_vars\n        WHERE deployment_id = $1\n        ORDER BY key ASC\n        ",
+  "query": "\n        INSERT INTO deployment_env_vars (deployment_id, key, value, is_secret, is_protected, source)\n        VALUES ($1, $2, $3, $4, $5, $6)\n        ON CONFLICT (deployment_id, key)\n        DO UPDATE SET\n            value = EXCLUDED.value,\n            is_secret = EXCLUDED.is_secret,\n            is_protected = EXCLUDED.is_protected,\n            source = EXCLUDED.source,\n            updated_at = NOW()\n        RETURNING id, deployment_id, key, value, is_secret, is_protected, source, created_at, updated_at\n        ",
   "describe": {
     "columns": [
       {
@@ -35,18 +35,28 @@
       },
       {
         "ordinal": 6,
+        "name": "source",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 7,
         "name": "created_at",
         "type_info": "Timestamptz"
       },
       {
-        "ordinal": 7,
+        "ordinal": 8,
         "name": "updated_at",
         "type_info": "Timestamptz"
       }
     ],
     "parameters": {
       "Left": [
-        "Uuid"
+        "Uuid",
+        "Text",
+        "Text",
+        "Bool",
+        "Bool",
+        "Text"
       ]
     },
     "nullable": [
@@ -57,8 +67,9 @@
       false,
       false,
       false,
+      false,
       false
     ]
   },
-  "hash": "6ce78857d8a0509b7dc46b9c13ad04e0837b6f8b3778965905b22187f50d56c7"
+  "hash": "2f561c17de4023a17d92994113d295892b954f38f11e7710aa24496dc7ad24bc"
 }

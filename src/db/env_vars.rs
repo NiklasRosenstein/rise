@@ -216,27 +216,36 @@ pub async fn delete_project_env_var(
 ///
 /// For each key, if an environment-specific value exists for the target environment, it takes
 /// priority over the global value. Global vars (environment_id IS NULL) are used as the base.
+///
+/// The `source` column tracks provenance: `global` for project-level vars and `env:<name>`
+/// for environment-scoped vars that won the DISTINCT ON resolution.
 pub async fn copy_project_env_vars_to_deployment(
     pool: &PgPool,
     project_id: Uuid,
     deployment_id: Uuid,
     environment_id: Option<Uuid>,
+    environment_name: Option<&str>,
 ) -> Result<u64> {
     let result = if let Some(env_id) = environment_id {
+        let env_source = environment_name
+            .map(|name| format!("env:{}", name))
+            .unwrap_or_else(|| "global".to_string());
         sqlx::query!(
             r#"
             WITH resolved AS (
-                SELECT DISTINCT ON (key) key, value, is_secret, is_protected
+                SELECT DISTINCT ON (key) key, value, is_secret, is_protected,
+                    CASE WHEN environment_id IS NOT NULL THEN $4 ELSE 'global' END as source
                 FROM project_env_vars
                 WHERE project_id = $2 AND (environment_id IS NULL OR environment_id = $3)
                 ORDER BY key, CASE WHEN environment_id IS NOT NULL THEN 0 ELSE 1 END
             )
-            INSERT INTO deployment_env_vars (deployment_id, key, value, is_secret, is_protected)
-            SELECT $1, key, value, is_secret, is_protected FROM resolved
+            INSERT INTO deployment_env_vars (deployment_id, key, value, is_secret, is_protected, source)
+            SELECT $1, key, value, is_secret, is_protected, source FROM resolved
             "#,
             deployment_id,
             project_id,
-            env_id
+            env_id,
+            env_source
         )
         .execute(pool)
         .await
@@ -245,8 +254,8 @@ pub async fn copy_project_env_vars_to_deployment(
         // No environment context: only copy global vars (environment_id IS NULL)
         sqlx::query!(
             r#"
-            INSERT INTO deployment_env_vars (deployment_id, key, value, is_secret, is_protected)
-            SELECT $1, key, value, is_secret, is_protected
+            INSERT INTO deployment_env_vars (deployment_id, key, value, is_secret, is_protected, source)
+            SELECT $1, key, value, is_secret, is_protected, 'global'
             FROM project_env_vars
             WHERE project_id = $2 AND environment_id IS NULL
             "#,
@@ -270,8 +279,8 @@ pub async fn copy_deployment_env_vars_to_deployment(
 ) -> Result<u64> {
     let result = sqlx::query!(
         r#"
-        INSERT INTO deployment_env_vars (deployment_id, key, value, is_secret, is_protected)
-        SELECT $1, key, value, is_secret, is_protected
+        INSERT INTO deployment_env_vars (deployment_id, key, value, is_secret, is_protected, source)
+        SELECT $1, key, value, is_secret, is_protected, source
         FROM deployment_env_vars
         WHERE deployment_id = $2
         "#,
@@ -294,7 +303,7 @@ pub async fn list_deployment_env_vars(
     let env_vars = sqlx::query_as!(
         DeploymentEnvVar,
         r#"
-        SELECT id, deployment_id, key, value, is_secret, is_protected, created_at, updated_at
+        SELECT id, deployment_id, key, value, is_secret, is_protected, source, created_at, updated_at
         FROM deployment_env_vars
         WHERE deployment_id = $1
         ORDER BY key ASC
@@ -317,7 +326,7 @@ pub async fn get_deployment_env_var(
     let env_var = sqlx::query_as!(
         DeploymentEnvVar,
         r#"
-        SELECT id, deployment_id, key, value, is_secret, is_protected, created_at, updated_at
+        SELECT id, deployment_id, key, value, is_secret, is_protected, source, created_at, updated_at
         FROM deployment_env_vars
         WHERE deployment_id = $1 AND key = $2
         "#,
@@ -339,25 +348,28 @@ pub async fn upsert_deployment_env_var(
     value: &str,
     is_secret: bool,
     is_protected: bool,
+    source: &str,
 ) -> Result<DeploymentEnvVar> {
     let env_var = sqlx::query_as!(
         DeploymentEnvVar,
         r#"
-        INSERT INTO deployment_env_vars (deployment_id, key, value, is_secret, is_protected)
-        VALUES ($1, $2, $3, $4, $5)
+        INSERT INTO deployment_env_vars (deployment_id, key, value, is_secret, is_protected, source)
+        VALUES ($1, $2, $3, $4, $5, $6)
         ON CONFLICT (deployment_id, key)
         DO UPDATE SET
             value = EXCLUDED.value,
             is_secret = EXCLUDED.is_secret,
             is_protected = EXCLUDED.is_protected,
+            source = EXCLUDED.source,
             updated_at = NOW()
-        RETURNING id, deployment_id, key, value, is_secret, is_protected, created_at, updated_at
+        RETURNING id, deployment_id, key, value, is_secret, is_protected, source, created_at, updated_at
         "#,
         deployment_id,
         key,
         value,
         is_secret,
-        is_protected
+        is_protected,
+        source
     )
     .fetch_one(pool)
     .await
@@ -462,9 +474,17 @@ mod tests {
         .await
         .expect("Failed to create test deployment");
 
-        upsert_deployment_env_var(&pool, deployment.id, "BAZ", "secret-value", true, false)
-            .await
-            .expect("Failed to insert deployment env var");
+        upsert_deployment_env_var(
+            &pool,
+            deployment.id,
+            "BAZ",
+            "secret-value",
+            true,
+            false,
+            "system",
+        )
+        .await
+        .expect("Failed to insert deployment env var");
 
         let env_var = get_deployment_env_var(&pool, deployment.id, "BAZ")
             .await
@@ -500,7 +520,6 @@ mod tests {
             project.id,
             "staging",
             Some("staging"),
-            false,
             false,
             "green",
         )
@@ -554,9 +573,15 @@ mod tests {
         .await
         .unwrap();
 
-        copy_project_env_vars_to_deployment(&pool, project.id, deployment.id, Some(env.id))
-            .await
-            .unwrap();
+        copy_project_env_vars_to_deployment(
+            &pool,
+            project.id,
+            deployment.id,
+            Some(env.id),
+            Some("staging"),
+        )
+        .await
+        .unwrap();
 
         let dep_vars = list_deployment_env_vars(&pool, deployment.id)
             .await
@@ -564,5 +589,6 @@ mod tests {
         assert_eq!(dep_vars.len(), 1);
         assert_eq!(dep_vars[0].key, "DB_URL");
         assert_eq!(dep_vars[0].value, "staging-db");
+        assert_eq!(dep_vars[0].source, "env:staging");
     }
 }

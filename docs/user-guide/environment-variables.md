@@ -147,7 +147,7 @@ See [Building Images](builds.md#build-time-arguments) for build-time variable de
 
 ## Variables in rise.toml
 
-You can define plain-text environment variables in `rise.toml`:
+You can define plain-text environment variables in `rise.toml`. These are applied as **deployment overrides** when you run `rise deploy` — they are not synced to the project-level env vars on the backend.
 
 ```toml
 [project]
@@ -157,8 +157,6 @@ name = "my-app"
 LOG_LEVEL = "info"
 APP_MODE = "production"
 ```
-
-These are synced to the backend when you run `rise project create` or `rise project update --sync`.
 
 ### Per-Environment Variables in rise.toml
 
@@ -172,14 +170,19 @@ name = "my-app"
 LOG_LEVEL = "info"
 DATABASE_URL = "postgres://localhost/mydb"
 
-[environments.staging.env]
-DATABASE_URL = "postgres://staging-db/mydb"
-LOG_LEVEL = "debug"
+[environments.staging]
+default = true
+env.DATABASE_URL = "postgres://staging-db/mydb"
+env.LOG_LEVEL = "debug"
 
-[environments.production.env]
-DATABASE_URL = "postgres://prod-db/mydb"
+[environments.production]
+env.DATABASE_URL = "postgres://prod-db/mydb"
 ```
 
-When you run `rise project update --sync`, both global and per-environment variables are pushed to the backend. Environments referenced in `rise.toml` must already exist on the backend -- sync will not auto-create them.
+When deploying, variables are merged in this order (later overrides earlier):
 
-Only plain-text variables can be managed in `rise.toml`. Secrets must be set via the CLI (`rise env set --secret`).
+1. `[project.env]` variables (source: `toml`)
+2. `[environments.<target>.env]` variables for the target environment (source: `toml`)
+3. CLI deploy-time overrides (`-e`, `--secret-env`, `--protected-env`, `--env-file`) (source: `cli`)
+
+Only plain-text variables can be managed in `rise.toml`. Secrets must be set via the CLI (`rise env set --secret`) or passed at deploy time (`--secret-env`, `--protected-env`).

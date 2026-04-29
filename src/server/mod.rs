@@ -107,6 +107,10 @@ pub async fn run_server(settings: settings::Settings) -> Result<()> {
     let public_routes = Router::new()
         .route("/health", axum::routing::get(health_check))
         .route("/version", axum::routing::get(version_info))
+        .route(
+            "/schema/rise-toml/v1",
+            axum::routing::get(rise_toml_schema_v1),
+        )
         .merge(auth::routes::public_routes());
 
     // Auth-only routes (require authentication but NOT platform access)
@@ -350,6 +354,11 @@ async fn version_info() -> axum::Json<serde_json::Value> {
         "version": env!("CARGO_PKG_VERSION"),
         "repository": env!("CARGO_PKG_REPOSITORY"),
     }))
+}
+
+async fn rise_toml_schema_v1() -> axum::Json<serde_json::Value> {
+    let schema = schemars::schema_for!(crate::rise_toml::ProjectBuildConfig);
+    axum::Json(schema.to_value())
 }
 
 /// Wait for a shutdown signal (SIGTERM or SIGINT)

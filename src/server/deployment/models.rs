@@ -192,6 +192,8 @@ pub struct EnvOverride {
     pub is_secret: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub is_protected: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source: Option<String>,
 }
 
 // Request to create a deployment

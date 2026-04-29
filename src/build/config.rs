@@ -1,104 +1,11 @@
 // Project-level build configuration (rise.toml / .rise.toml)
 
 use anyhow::Result;
-use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 use std::path::Path;
 use tracing::{debug, info, warn};
 
-/// Root structure for rise.toml / .rise.toml configuration file
-#[derive(Debug, Deserialize, Serialize, Default)]
-pub struct ProjectBuildConfig {
-    /// Optional version (must be 1 if present)
-    pub version: Option<u32>,
-
-    /// Project metadata (optional)
-    #[serde(default)]
-    pub project: Option<ProjectConfig>,
-
-    /// Build configuration (optional)
-    #[serde(default)]
-    pub build: Option<BuildConfig>,
-
-    /// Per-environment configuration (optional)
-    #[serde(default)]
-    pub environments: HashMap<String, EnvironmentConfig>,
-}
-
-/// Per-environment configuration
-#[derive(Debug, Deserialize, Serialize, Clone, Default)]
-pub struct EnvironmentConfig {
-    /// Plain-text environment variables scoped to this environment
-    #[serde(default)]
-    pub env: HashMap<String, String>,
-}
-
-/// Project metadata configuration
-#[derive(Debug, Deserialize, Serialize, Clone)]
-pub struct ProjectConfig {
-    /// Project name
-    pub name: String,
-
-    /// Access class (e.g., public, private)
-    #[serde(default = "default_access_class", alias = "visibility")]
-    pub access_class: String,
-
-    /// Custom domains
-    #[serde(default)]
-    pub custom_domains: Vec<String>,
-
-    /// Plain-text environment variables (non-secret)
-    #[serde(default)]
-    pub env: HashMap<String, String>,
-
-    /// URL to where the project code lives (e.g. a GitHub/GitLab repository)
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub source_url: Option<String>,
-}
-
-fn default_access_class() -> String {
-    "public".to_string()
-}
-
-/// Build configuration options for a project
-#[derive(Debug, Deserialize, Serialize, Default)]
-pub struct BuildConfig {
-    /// Build backend (docker, docker:build, docker:buildx, buildctl, pack, railpack[:buildx], railpack:buildctl)
-    pub backend: Option<String>,
-
-    /// Buildpack builder to use (only for pack backend)
-    pub builder: Option<String>,
-
-    /// Buildpack(s) to use (only for pack backend)
-    pub buildpacks: Option<Vec<String>>,
-
-    /// Build arguments to pass to the build
-    /// Format: KEY=VALUE or KEY (to pass from environment)
-    #[serde(alias = "env")]
-    pub args: Option<Vec<String>>,
-
-    /// Container CLI to use (docker or podman)
-    pub container_cli: Option<String>,
-
-    /// Enable managed BuildKit daemon with SSL certificate support
-    pub managed_buildkit: Option<bool>,
-
-    /// Path to Dockerfile (relative to rise.toml location). Defaults to "Dockerfile" or "Containerfile"
-    pub dockerfile: Option<String>,
-
-    /// Default build context (docker/podman only) - the context directory for the build
-    /// This is the path argument to `docker build <path>`. Defaults to rise.toml location.
-    /// Path is relative to the rise.toml file location.
-    pub build_context: Option<String>,
-
-    /// Build contexts (docker/podman only) - additional named contexts for multi-stage builds
-    /// Format: { "name" = "path" } where path is relative to the rise.toml file location
-    #[serde(default)]
-    pub build_contexts: Option<HashMap<String, String>>,
-
-    /// Disable build cache
-    pub no_cache: Option<bool>,
-}
+// Re-export shared config types from rise_toml module
+pub use crate::rise_toml::{ProjectBuildConfig, ProjectConfig};
 
 /// Load full project configuration from rise.toml or .rise.toml
 ///
@@ -157,6 +64,20 @@ pub fn load_full_project_config(app_path: &str) -> Result<Option<ProjectBuildCon
             debug!("No version specified in rise.toml, using latest");
         }
 
+        // Validate at most one environment has default = true
+        let default_envs: Vec<&str> = config
+            .environments
+            .iter()
+            .filter(|(_, env)| env.default)
+            .map(|(name, _)| name.as_str())
+            .collect();
+        if default_envs.len() > 1 {
+            anyhow::bail!(
+                "Multiple environments have default = true: {}. Only one is allowed.",
+                default_envs.join(", ")
+            );
+        }
+
         Ok(Some(config))
     } else {
         Ok(None)
@@ -177,6 +98,8 @@ pub fn write_project_config(app_path: &str, config: &ProjectBuildConfig) -> Resu
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::rise_toml::EnvironmentConfig;
+    use std::collections::BTreeMap;
 
     #[test]
     fn test_load_config_with_unused_fields() {
@@ -192,7 +115,6 @@ version = 1
 
 [project]
 name = "test-project"
-access_class = "private"
 
 [build]
 backend = "docker"
@@ -304,16 +226,14 @@ FOO = "bar"
             version: Some(1),
             project: Some(ProjectConfig {
                 name: "roundtrip-app".to_string(),
-                access_class: "public".to_string(),
-                custom_domains: Vec::new(),
-                env: HashMap::from([("GLOBAL".to_string(), "val".to_string())]),
-                source_url: None,
+                env: BTreeMap::from([("GLOBAL".to_string(), "val".to_string())]),
             }),
             build: None,
-            environments: HashMap::from([(
+            environments: BTreeMap::from([(
                 "staging".to_string(),
                 EnvironmentConfig {
-                    env: HashMap::from([("STAGE_VAR".to_string(), "stage_val".to_string())]),
+                    default: true,
+                    env: BTreeMap::from([("STAGE_VAR".to_string(), "stage_val".to_string())]),
                 },
             )]),
         };
@@ -331,6 +251,7 @@ FOO = "bar"
             "val"
         );
         let staging = loaded.environments.get("staging").unwrap();
+        assert!(staging.default);
         assert_eq!(staging.env.get("STAGE_VAR").unwrap(), "stage_val");
     }
 
@@ -348,7 +269,6 @@ version = 1
 
 [project]
 name = "clean-project"
-access_class = "public"
 
 [build]
 backend = "pack"
@@ -368,6 +288,65 @@ builder = "heroku/builder:24"
         assert_eq!(config.version, Some(1));
         assert!(config.project.is_some());
         assert_eq!(config.project.as_ref().unwrap().name, "clean-project");
-        assert_eq!(config.project.as_ref().unwrap().access_class, "public");
+    }
+
+    #[test]
+    fn test_load_config_rejects_multiple_defaults() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let rise_toml_path = temp_dir.path().join("rise.toml");
+
+        std::fs::write(
+            &rise_toml_path,
+            r#"
+[project]
+name = "multi-default"
+
+[environments.staging]
+default = true
+
+[environments.production]
+default = true
+"#,
+        )
+        .unwrap();
+
+        let result = load_full_project_config(temp_dir.path().to_str().unwrap());
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(
+            err.contains("Multiple environments have default = true"),
+            "unexpected error: {}",
+            err
+        );
+    }
+
+    #[test]
+    fn test_load_config_with_default_environment() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let rise_toml_path = temp_dir.path().join("rise.toml");
+
+        std::fs::write(
+            &rise_toml_path,
+            r#"
+[project]
+name = "default-env"
+
+[environments.staging]
+default = true
+env.NODE_ENV = "development"
+
+[environments.production]
+env.NODE_ENV = "production"
+"#,
+        )
+        .unwrap();
+
+        let result = load_full_project_config(temp_dir.path().to_str().unwrap());
+        assert!(result.is_ok());
+        let config = result.unwrap().unwrap();
+        let staging = config.environments.get("staging").unwrap();
+        assert!(staging.default);
+        let production = config.environments.get("production").unwrap();
+        assert!(!production.default);
     }
 }

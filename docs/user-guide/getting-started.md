@@ -53,7 +53,6 @@ The `rise.toml` file ties your local directory to the project, so subsequent com
 ```toml
 [project]
 name = "my-app"
-access_class = "public"
 ```
 
 See [Project Configuration](configuration.md) for all options.

@@ -1,0 +1,2 @@
+# Treat SQLX offline query cache as binary — suppresses noisy diffs in PRs
+.sqlx/*.json binary linguist-generated
