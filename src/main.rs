@@ -11,6 +11,9 @@ mod build;
 #[cfg(feature = "cli")]
 mod cli;
 
+#[cfg(any(feature = "cli", feature = "backend"))]
+mod rise_toml;
+
 #[cfg(feature = "backend")]
 mod db;
 #[cfg(feature = "backend")]

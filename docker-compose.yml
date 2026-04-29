@@ -1,3 +1,5 @@
+name: rise
+
 volumes:
   registry_data:
   postgres_data:

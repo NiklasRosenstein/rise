@@ -31,3 +31,4 @@ todo.txt
 buildpack-samples/
 tmp/
 .playwright-mcp/
+.worktrees
