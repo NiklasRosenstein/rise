@@ -118,7 +118,6 @@ pub struct Environment {
     pub project_id: Uuid,
     pub name: String,
     pub primary_deployment_group: Option<String>,
-    pub is_default: bool,
     pub is_production: bool,
     pub color: String,
     pub created_at: DateTime<Utc>,
@@ -256,6 +255,8 @@ pub struct DeploymentEnvVar {
     pub value: String,
     pub is_secret: bool,
     pub is_protected: bool,
+    /// Provenance tracking: where this env var came from (e.g. "system", "project", "extension", "toml", "cli")
+    pub source: Option<String>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }

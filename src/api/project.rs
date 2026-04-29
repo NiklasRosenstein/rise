@@ -113,33 +113,6 @@ pub struct UpdateProjectRequest {
     pub source_url: Option<Option<String>>,
 }
 
-/// Domain item in list response
-#[derive(Debug, Deserialize)]
-pub struct DomainItem {
-    pub domain: String,
-}
-
-/// Response from domains list endpoint
-#[derive(Debug, Deserialize)]
-pub struct DomainsResponse {
-    pub domains: Vec<DomainItem>,
-}
-
-/// Environment variable item
-#[derive(Debug, Deserialize)]
-pub struct EnvVarItem {
-    pub key: String,
-    pub is_secret: bool,
-    #[serde(default)]
-    pub environment: Option<String>,
-}
-
-/// Response from env vars list endpoint
-#[derive(Debug, Deserialize)]
-pub struct EnvVarsResponse {
-    pub env_vars: Vec<EnvVarItem>,
-}
-
 /// Current user information
 #[derive(Debug, Deserialize)]
 pub struct MeResponse {

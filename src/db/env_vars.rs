@@ -231,8 +231,8 @@ pub async fn copy_project_env_vars_to_deployment(
                 WHERE project_id = $2 AND (environment_id IS NULL OR environment_id = $3)
                 ORDER BY key, CASE WHEN environment_id IS NOT NULL THEN 0 ELSE 1 END
             )
-            INSERT INTO deployment_env_vars (deployment_id, key, value, is_secret, is_protected)
-            SELECT $1, key, value, is_secret, is_protected FROM resolved
+            INSERT INTO deployment_env_vars (deployment_id, key, value, is_secret, is_protected, source)
+            SELECT $1, key, value, is_secret, is_protected, 'project' FROM resolved
             "#,
             deployment_id,
             project_id,
@@ -245,8 +245,8 @@ pub async fn copy_project_env_vars_to_deployment(
         // No environment context: only copy global vars (environment_id IS NULL)
         sqlx::query!(
             r#"
-            INSERT INTO deployment_env_vars (deployment_id, key, value, is_secret, is_protected)
-            SELECT $1, key, value, is_secret, is_protected
+            INSERT INTO deployment_env_vars (deployment_id, key, value, is_secret, is_protected, source)
+            SELECT $1, key, value, is_secret, is_protected, 'project'
             FROM project_env_vars
             WHERE project_id = $2 AND environment_id IS NULL
             "#,
@@ -270,8 +270,8 @@ pub async fn copy_deployment_env_vars_to_deployment(
 ) -> Result<u64> {
     let result = sqlx::query!(
         r#"
-        INSERT INTO deployment_env_vars (deployment_id, key, value, is_secret, is_protected)
-        SELECT $1, key, value, is_secret, is_protected
+        INSERT INTO deployment_env_vars (deployment_id, key, value, is_secret, is_protected, source)
+        SELECT $1, key, value, is_secret, is_protected, source
         FROM deployment_env_vars
         WHERE deployment_id = $2
         "#,
@@ -294,7 +294,7 @@ pub async fn list_deployment_env_vars(
     let env_vars = sqlx::query_as!(
         DeploymentEnvVar,
         r#"
-        SELECT id, deployment_id, key, value, is_secret, is_protected, created_at, updated_at
+        SELECT id, deployment_id, key, value, is_secret, is_protected, source, created_at, updated_at
         FROM deployment_env_vars
         WHERE deployment_id = $1
         ORDER BY key ASC
@@ -317,7 +317,7 @@ pub async fn get_deployment_env_var(
     let env_var = sqlx::query_as!(
         DeploymentEnvVar,
         r#"
-        SELECT id, deployment_id, key, value, is_secret, is_protected, created_at, updated_at
+        SELECT id, deployment_id, key, value, is_secret, is_protected, source, created_at, updated_at
         FROM deployment_env_vars
         WHERE deployment_id = $1 AND key = $2
         "#,
@@ -339,25 +339,28 @@ pub async fn upsert_deployment_env_var(
     value: &str,
     is_secret: bool,
     is_protected: bool,
+    source: Option<&str>,
 ) -> Result<DeploymentEnvVar> {
     let env_var = sqlx::query_as!(
         DeploymentEnvVar,
         r#"
-        INSERT INTO deployment_env_vars (deployment_id, key, value, is_secret, is_protected)
-        VALUES ($1, $2, $3, $4, $5)
+        INSERT INTO deployment_env_vars (deployment_id, key, value, is_secret, is_protected, source)
+        VALUES ($1, $2, $3, $4, $5, $6)
         ON CONFLICT (deployment_id, key)
         DO UPDATE SET
             value = EXCLUDED.value,
             is_secret = EXCLUDED.is_secret,
             is_protected = EXCLUDED.is_protected,
+            source = EXCLUDED.source,
             updated_at = NOW()
-        RETURNING id, deployment_id, key, value, is_secret, is_protected, created_at, updated_at
+        RETURNING id, deployment_id, key, value, is_secret, is_protected, source, created_at, updated_at
         "#,
         deployment_id,
         key,
         value,
         is_secret,
-        is_protected
+        is_protected,
+        source
     )
     .fetch_one(pool)
     .await
@@ -462,9 +465,17 @@ mod tests {
         .await
         .expect("Failed to create test deployment");
 
-        upsert_deployment_env_var(&pool, deployment.id, "BAZ", "secret-value", true, false)
-            .await
-            .expect("Failed to insert deployment env var");
+        upsert_deployment_env_var(
+            &pool,
+            deployment.id,
+            "BAZ",
+            "secret-value",
+            true,
+            false,
+            None,
+        )
+        .await
+        .expect("Failed to insert deployment env var");
 
         let env_var = get_deployment_env_var(&pool, deployment.id, "BAZ")
             .await
@@ -500,7 +511,6 @@ mod tests {
             project.id,
             "staging",
             Some("staging"),
-            false,
             false,
             "green",
         )

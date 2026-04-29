@@ -235,6 +235,7 @@ async fn insert_rise_env_vars(
             value,
             false, // Not a secret
             false, // is_protected
+            Some("system"),
         )
         .await
         .internal_err(format!("Failed to insert {}", key))?;
@@ -291,6 +292,7 @@ async fn apply_env_overrides(
             &value_to_store,
             env_override.is_secret,
             is_protected,
+            env_override.source.as_deref(),
         )
         .await
         .internal_err(format!("Failed to set env override '{}'", env_override.key))?;
@@ -435,10 +437,10 @@ async fn convert_deployment(
 /// Rules:
 /// - If both specified: use both as-is.
 /// - If environment specified, no group: use environment's primary deployment group.
-/// - If group specified, no environment: look up environment whose primary group matches;
-///   if none found, fall back to the project's default environment.
-/// - If neither specified: use the default environment's primary group. Fails if no default
-///   environment is configured.
+/// - If group specified, no environment: look up environment whose primary group matches.
+/// - If neither specified: if the project has exactly one environment, use it.
+///   If zero, use the default group with no environment. If more than one, error.
+///   (Backwards compat for older CLIs that relied on find_default.)
 async fn resolve_deployment_target(
     pool: &sqlx::PgPool,
     project_id: uuid::Uuid,
@@ -480,31 +482,27 @@ async fn resolve_deployment_target(
             let env = environments::find_by_primary_group(pool, project_id, group)
                 .await
                 .internal_err("Failed to look up environment by group")?;
-            if let Some(env) = env {
-                Ok((group.to_string(), Some(env)))
-            } else {
-                // Fall back to default environment
-                let default_env = environments::find_default(pool, project_id)
-                    .await
-                    .internal_err("Failed to look up default environment")?;
-                Ok((group.to_string(), default_env))
-            }
+            Ok((group.to_string(), env))
         }
-        // Neither specified: use the default environment's primary group
+        // Neither specified: auto-resolve from available environments
         (None, None) => {
-            let default_env = environments::find_default(pool, project_id)
+            let all_envs = environments::list_for_project(pool, project_id)
                 .await
-                .internal_err("Failed to look up default environment")?
-                .ok_or_else(|| {
-                    ServerError::bad_request(
-                        "No default environment configured for this project. Specify an environment explicitly.",
-                    )
-                })?;
-            let group = default_env
-                .primary_deployment_group
-                .clone()
-                .unwrap_or_else(|| models::DEFAULT_DEPLOYMENT_GROUP.to_string());
-            Ok((group, Some(default_env)))
+                .internal_err("Failed to list environments")?;
+            match all_envs.len() {
+                0 => Ok((models::DEFAULT_DEPLOYMENT_GROUP.to_string(), None)),
+                1 => {
+                    let env = all_envs.into_iter().next().unwrap();
+                    let group = env
+                        .primary_deployment_group
+                        .clone()
+                        .unwrap_or_else(|| models::DEFAULT_DEPLOYMENT_GROUP.to_string());
+                    Ok((group, Some(env)))
+                }
+                _ => Err(ServerError::bad_request(
+                    "Multiple environments configured. Specify --environment (-E) to select one.",
+                )),
+            }
         }
     }
 }
@@ -818,6 +816,7 @@ pub async fn create_deployment(
             &final_http_port.to_string(),
             false, // not a secret
             false, // is_protected
+            Some("system"),
         )
         .await
         .internal_err("Failed to insert PORT env var")?;
@@ -925,6 +924,7 @@ pub async fn create_deployment(
                 &effective_http_port.to_string(),
                 false,
                 false,
+                Some("system"),
             )
             .await
             .internal_err("Failed to insert PORT env var")?;
@@ -1012,6 +1012,7 @@ pub async fn create_deployment(
             &effective_http_port.to_string(),
             false, // not a secret
             false, // is_protected
+            Some("system"),
         )
         .await
         .internal_err("Failed to insert PORT env var")?;
@@ -1099,6 +1100,7 @@ pub async fn create_deployment(
             &effective_http_port.to_string(),
             false, // not a secret
             false, // is_protected
+            Some("system"),
         )
         .await
         .internal_err("Failed to insert PORT env var")?;
@@ -1959,6 +1961,7 @@ mod tests {
             value: "3000".to_string(),
             is_secret: false,
             is_protected: Some(false),
+            source: None,
         })
         .unwrap_err();
 
@@ -1976,6 +1979,7 @@ mod tests {
             value: "value".to_string(),
             is_secret: false,
             is_protected: Some(true),
+            source: None,
         })
         .unwrap_err();
 
@@ -1993,6 +1997,7 @@ mod tests {
             value: "value".to_string(),
             is_secret: false,
             is_protected: Some(false),
+            source: None,
         })
         .unwrap_err();
 
@@ -2010,6 +2015,7 @@ mod tests {
             value: "secret".to_string(),
             is_secret: true,
             is_protected: None,
+            source: None,
         })
         .unwrap();
 
@@ -2023,13 +2029,14 @@ mod tests {
             value: "secret".to_string(),
             is_secret: true,
             is_protected: Some(false),
+            source: None,
         });
 
         assert!(!is_protected);
     }
 
     #[sqlx::test]
-    async fn resolve_deployment_target_fails_without_default_env(pool: sqlx::PgPool) {
+    async fn resolve_deployment_target_single_env_auto_selects(pool: sqlx::PgPool) {
         use crate::db::{environments, models::ProjectStatus, projects, users};
 
         let user = users::create(&pool, "deploy-test@example.com")
@@ -2037,7 +2044,7 @@ mod tests {
             .unwrap();
         let project = projects::create(
             &pool,
-            "no-default-project",
+            "single-env-project",
             ProjectStatus::Stopped,
             "public".to_string(),
             Some(user.id),
@@ -2047,26 +2054,60 @@ mod tests {
         .await
         .unwrap();
 
-        // Create an environment that is NOT default
-        environments::create(
+        // Create a single environment
+        environments::create(&pool, project.id, "staging", Some("staging"), false, "blue")
+            .await
+            .unwrap();
+
+        // Neither environment nor group specified → should auto-select the single env
+        let (group, env) = super::resolve_deployment_target(&pool, project.id, None, None)
+            .await
+            .unwrap();
+        assert_eq!(group, "staging");
+        assert_eq!(env.unwrap().name, "staging");
+    }
+
+    #[sqlx::test]
+    async fn resolve_deployment_target_fails_with_multiple_envs(pool: sqlx::PgPool) {
+        use crate::db::{environments, models::ProjectStatus, projects, users};
+
+        let user = users::create(&pool, "deploy-test@example.com")
+            .await
+            .unwrap();
+        let project = projects::create(
             &pool,
-            project.id,
-            "staging",
-            Some("staging"),
-            false,
-            false,
-            "blue",
+            "multi-env-project",
+            ProjectStatus::Stopped,
+            "public".to_string(),
+            Some(user.id),
+            None,
+            None,
         )
         .await
         .unwrap();
 
-        // Neither environment nor group specified → should fail
+        // Create two environments
+        environments::create(&pool, project.id, "staging", Some("staging"), false, "blue")
+            .await
+            .unwrap();
+        environments::create(
+            &pool,
+            project.id,
+            "production",
+            Some("default"),
+            true,
+            "green",
+        )
+        .await
+        .unwrap();
+
+        // Neither environment nor group specified → should fail with multiple envs
         let err = super::resolve_deployment_target(&pool, project.id, None, None)
             .await
             .unwrap_err();
         assert_eq!(err.status, StatusCode::BAD_REQUEST);
         assert!(
-            err.message.contains("No default environment"),
+            err.message.contains("Multiple environments"),
             "unexpected error message: {}",
             err.message
         );

@@ -28,6 +28,10 @@ pub struct ProjectBuildConfig {
 /// Per-environment configuration
 #[derive(Debug, Deserialize, Serialize, Clone, Default)]
 pub struct EnvironmentConfig {
+    /// Whether this is the default environment for local deployments
+    #[serde(default)]
+    pub default: bool,
+
     /// Plain-text environment variables scoped to this environment
     #[serde(default)]
     pub env: HashMap<String, String>,
@@ -39,25 +43,9 @@ pub struct ProjectConfig {
     /// Project name
     pub name: String,
 
-    /// Access class (e.g., public, private)
-    #[serde(default = "default_access_class", alias = "visibility")]
-    pub access_class: String,
-
-    /// Custom domains
-    #[serde(default)]
-    pub custom_domains: Vec<String>,
-
     /// Plain-text environment variables (non-secret)
     #[serde(default)]
     pub env: HashMap<String, String>,
-
-    /// URL to where the project code lives (e.g. a GitHub/GitLab repository)
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub source_url: Option<String>,
-}
-
-fn default_access_class() -> String {
-    "public".to_string()
 }
 
 /// Build configuration options for a project
@@ -157,6 +145,20 @@ pub fn load_full_project_config(app_path: &str) -> Result<Option<ProjectBuildCon
             debug!("No version specified in rise.toml, using latest");
         }
 
+        // Validate at most one environment has default = true
+        let default_envs: Vec<&str> = config
+            .environments
+            .iter()
+            .filter(|(_, env)| env.default)
+            .map(|(name, _)| name.as_str())
+            .collect();
+        if default_envs.len() > 1 {
+            anyhow::bail!(
+                "Multiple environments have default = true: {}. Only one is allowed.",
+                default_envs.join(", ")
+            );
+        }
+
         Ok(Some(config))
     } else {
         Ok(None)
@@ -184,7 +186,7 @@ mod tests {
         let temp_dir = tempfile::tempdir().unwrap();
         let rise_toml_path = temp_dir.path().join("rise.toml");
 
-        // Write a config with some unknown fields
+        // Write a config with some unknown fields (including legacy access_class)
         std::fs::write(
             &rise_toml_path,
             r#"
@@ -192,7 +194,6 @@ version = 1
 
 [project]
 name = "test-project"
-access_class = "private"
 
 [build]
 backend = "docker"
@@ -304,15 +305,13 @@ FOO = "bar"
             version: Some(1),
             project: Some(ProjectConfig {
                 name: "roundtrip-app".to_string(),
-                access_class: "public".to_string(),
-                custom_domains: Vec::new(),
                 env: HashMap::from([("GLOBAL".to_string(), "val".to_string())]),
-                source_url: None,
             }),
             build: None,
             environments: HashMap::from([(
                 "staging".to_string(),
                 EnvironmentConfig {
+                    default: true,
                     env: HashMap::from([("STAGE_VAR".to_string(), "stage_val".to_string())]),
                 },
             )]),
@@ -331,6 +330,7 @@ FOO = "bar"
             "val"
         );
         let staging = loaded.environments.get("staging").unwrap();
+        assert!(staging.default);
         assert_eq!(staging.env.get("STAGE_VAR").unwrap(), "stage_val");
     }
 
@@ -348,7 +348,6 @@ version = 1
 
 [project]
 name = "clean-project"
-access_class = "public"
 
 [build]
 backend = "pack"
@@ -368,6 +367,65 @@ builder = "heroku/builder:24"
         assert_eq!(config.version, Some(1));
         assert!(config.project.is_some());
         assert_eq!(config.project.as_ref().unwrap().name, "clean-project");
-        assert_eq!(config.project.as_ref().unwrap().access_class, "public");
+    }
+
+    #[test]
+    fn test_load_config_rejects_multiple_defaults() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let rise_toml_path = temp_dir.path().join("rise.toml");
+
+        std::fs::write(
+            &rise_toml_path,
+            r#"
+[project]
+name = "multi-default"
+
+[environments.staging]
+default = true
+
+[environments.production]
+default = true
+"#,
+        )
+        .unwrap();
+
+        let result = load_full_project_config(temp_dir.path().to_str().unwrap());
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(
+            err.contains("Multiple environments have default = true"),
+            "unexpected error: {}",
+            err
+        );
+    }
+
+    #[test]
+    fn test_load_config_with_default_environment() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let rise_toml_path = temp_dir.path().join("rise.toml");
+
+        std::fs::write(
+            &rise_toml_path,
+            r#"
+[project]
+name = "default-env"
+
+[environments.staging]
+default = true
+env.NODE_ENV = "development"
+
+[environments.production]
+env.NODE_ENV = "production"
+"#,
+        )
+        .unwrap();
+
+        let result = load_full_project_config(temp_dir.path().to_str().unwrap());
+        assert!(result.is_ok());
+        let config = result.unwrap().unwrap();
+        let staging = config.environments.get("staging").unwrap();
+        assert!(staging.default);
+        let production = config.environments.get("production").unwrap();
+        assert!(!production.default);
     }
 }

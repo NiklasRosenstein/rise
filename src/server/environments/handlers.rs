@@ -36,7 +36,6 @@ pub async fn create_environment(
         project.id,
         &payload.name,
         payload.primary_deployment_group.as_deref(),
-        payload.is_default,
         payload.is_production,
         &payload.color,
     )
@@ -54,11 +53,6 @@ pub async fn create_environment(
                             .as_deref()
                             .unwrap_or("(none)")
                     ),
-                )
-            } else if msg.contains("idx_environments_default") {
-                ServerError::new(
-                    StatusCode::CONFLICT,
-                    "Only one default environment is allowed per project",
                 )
             } else if msg.contains("idx_environments_production") {
                 ServerError::new(
@@ -179,13 +173,6 @@ pub async fn update_environment(
         .internal_err("Failed to get environment")?
         .ok_or_else(|| ServerError::not_found(format!("Environment '{}' not found", env_name)))?;
 
-    // Prevent unsetting is_default when this is the only default environment
-    if payload.is_default == Some(false) && env.is_default {
-        return Err(ServerError::bad_request(
-            "Cannot unset the default flag. Set another environment as default instead.",
-        ));
-    }
-
     let updated = db_environments::update(
         &state.db_pool,
         env.id,
@@ -195,7 +182,6 @@ pub async fn update_environment(
             .primary_deployment_group
             .as_ref()
             .map(|o| o.as_deref()),
-        payload.is_default,
         payload.is_production,
         payload.color.as_deref(),
     )
@@ -207,11 +193,6 @@ pub async fn update_environment(
                 ServerError::new(
                     StatusCode::CONFLICT,
                     "Deployment group is already the primary group of another environment",
-                )
-            } else if msg.contains("idx_environments_default") {
-                ServerError::new(
-                    StatusCode::CONFLICT,
-                    "Only one default environment is allowed per project",
                 )
             } else if msg.contains("idx_environments_production") {
                 ServerError::new(
@@ -266,12 +247,6 @@ pub async fn delete_environment(
         .await
         .internal_err("Failed to get environment")?
         .ok_or_else(|| ServerError::not_found(format!("Environment '{}' not found", env_name)))?;
-
-    if env.is_default {
-        return Err(ServerError::bad_request(
-            "Cannot delete the default environment. Set another environment as default first.",
-        ));
-    }
 
     if env.is_production {
         return Err(ServerError::bad_request(

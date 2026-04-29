@@ -9,7 +9,6 @@ use crate::config::Config;
 pub(crate) struct EnvironmentResponse {
     pub(crate) name: String,
     primary_deployment_group: Option<String>,
-    is_default: bool,
     is_production: bool,
     color: String,
     created_at: String,
@@ -22,8 +21,6 @@ struct CreateEnvironmentRequest {
     #[serde(skip_serializing_if = "Option::is_none")]
     primary_deployment_group: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    is_default: Option<bool>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     is_production: Option<bool>,
     color: String,
 }
@@ -34,8 +31,6 @@ struct UpdateEnvironmentRequest {
     name: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     primary_deployment_group: Option<Option<String>>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    is_default: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     is_production: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -58,7 +53,6 @@ pub async fn handle_environment_command(
             project,
             path,
             group,
-            default,
             production,
             color,
         } => {
@@ -70,7 +64,6 @@ pub async fn handle_environment_command(
                 &project_name,
                 name,
                 group.as_deref(),
-                *default,
                 *production,
                 color,
             )
@@ -94,7 +87,6 @@ pub async fn handle_environment_command(
             path,
             rename,
             group,
-            default,
             production,
             color,
         } => {
@@ -107,7 +99,6 @@ pub async fn handle_environment_command(
                 name,
                 rename.as_deref(),
                 group.as_deref(),
-                *default,
                 *production,
                 color.as_deref(),
             )
@@ -132,7 +123,6 @@ async fn create_environment(
     project: &str,
     name: &str,
     group: Option<&str>,
-    is_default: bool,
     is_production: bool,
     color: &str,
 ) -> Result<()> {
@@ -141,7 +131,6 @@ async fn create_environment(
     let payload = CreateEnvironmentRequest {
         name: name.to_string(),
         primary_deployment_group: group.map(|g| g.to_string()),
-        is_default: if is_default { Some(true) } else { None },
         is_production: if is_production { Some(true) } else { None },
         color: color.to_string(),
     };
@@ -174,9 +163,6 @@ async fn create_environment(
     );
     if let Some(ref g) = env.primary_deployment_group {
         println!("  Primary group: {}", g);
-    }
-    if env.is_default {
-        println!("  Default: yes");
     }
     if env.is_production {
         println!("  Production: yes");
@@ -227,7 +213,6 @@ async fn list_environments(
         .set_header(vec![
             Cell::new("NAME").add_attribute(Attribute::Bold),
             Cell::new("PRIMARY GROUP").add_attribute(Attribute::Bold),
-            Cell::new("DEFAULT").add_attribute(Attribute::Bold),
             Cell::new("PRODUCTION").add_attribute(Attribute::Bold),
             Cell::new("COLOR").add_attribute(Attribute::Bold),
         ]);
@@ -236,7 +221,6 @@ async fn list_environments(
         table.add_row(vec![
             Cell::new(&env.name),
             Cell::new(env.primary_deployment_group.as_deref().unwrap_or("-")),
-            Cell::new(if env.is_default { "yes" } else { "-" }),
             Cell::new(if env.is_production { "yes" } else { "-" }),
             Cell::new(&env.color),
         ]);
@@ -286,10 +270,6 @@ async fn show_environment(
         env.primary_deployment_group.as_deref().unwrap_or("-")
     );
     println!(
-        "Default:        {}",
-        if env.is_default { "yes" } else { "no" }
-    );
-    println!(
         "Production:     {}",
         if env.is_production { "yes" } else { "no" }
     );
@@ -309,7 +289,6 @@ async fn update_environment(
     name: &str,
     rename: Option<&str>,
     group: Option<&str>,
-    is_default: Option<bool>,
     is_production: Option<bool>,
     color: Option<&str>,
 ) -> Result<()> {
@@ -329,7 +308,6 @@ async fn update_environment(
     let payload = UpdateEnvironmentRequest {
         name: rename.map(|n| n.to_string()),
         primary_deployment_group,
-        is_default,
         is_production,
         color: color.map(|c| c.to_string()),
     };

@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        SELECT id, deployment_id, key, value, is_secret, is_protected, created_at, updated_at\n        FROM deployment_env_vars\n        WHERE deployment_id = $1 AND key = $2\n        ",
+  "query": "\n        SELECT id, project_id, name, primary_deployment_group, is_production, color, created_at, updated_at\n        FROM environments\n        WHERE project_id = $1 AND name = $2\n        ",
   "describe": {
     "columns": [
       {
@@ -10,28 +10,28 @@
       },
       {
         "ordinal": 1,
-        "name": "deployment_id",
+        "name": "project_id",
         "type_info": "Uuid"
       },
       {
         "ordinal": 2,
-        "name": "key",
+        "name": "name",
         "type_info": "Text"
       },
       {
         "ordinal": 3,
-        "name": "value",
+        "name": "primary_deployment_group",
         "type_info": "Text"
       },
       {
         "ordinal": 4,
-        "name": "is_secret",
+        "name": "is_production",
         "type_info": "Bool"
       },
       {
         "ordinal": 5,
-        "name": "is_protected",
-        "type_info": "Bool"
+        "name": "color",
+        "type_info": "Text"
       },
       {
         "ordinal": 6,
@@ -54,12 +54,12 @@
       false,
       false,
       false,
-      false,
+      true,
       false,
       false,
       false,
       false
     ]
   },
-  "hash": "6723a084174e8bff5782dd9224fcc7cab8e3ffac62ad5a08f24ededfe0e7a48a"
+  "hash": "8464e05b9dda5dcab2b421ed0f1db31a73100e18e47c79838a49baeeedd111e0"
 }

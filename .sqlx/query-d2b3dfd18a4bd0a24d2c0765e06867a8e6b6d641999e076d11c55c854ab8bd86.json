@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        UPDATE environments\n        SET\n            name = COALESCE($2, name),\n            primary_deployment_group = CASE WHEN $3 THEN $4 ELSE primary_deployment_group END,\n            is_default = COALESCE($5, is_default),\n            is_production = COALESCE($6, is_production),\n            color = COALESCE($7, color),\n            updated_at = NOW()\n        WHERE id = $1\n        RETURNING id, project_id, name, primary_deployment_group, is_default, is_production, color, created_at, updated_at\n        ",
+  "query": "\n        SELECT id, deployment_id, key, value, is_secret, is_protected, source, created_at, updated_at\n        FROM deployment_env_vars\n        WHERE deployment_id = $1 AND key = $2\n        ",
   "describe": {
     "columns": [
       {
@@ -10,32 +10,32 @@
       },
       {
         "ordinal": 1,
-        "name": "project_id",
+        "name": "deployment_id",
         "type_info": "Uuid"
       },
       {
         "ordinal": 2,
-        "name": "name",
+        "name": "key",
         "type_info": "Text"
       },
       {
         "ordinal": 3,
-        "name": "primary_deployment_group",
+        "name": "value",
         "type_info": "Text"
       },
       {
         "ordinal": 4,
-        "name": "is_default",
+        "name": "is_secret",
         "type_info": "Bool"
       },
       {
         "ordinal": 5,
-        "name": "is_production",
+        "name": "is_protected",
         "type_info": "Bool"
       },
       {
         "ordinal": 6,
-        "name": "color",
+        "name": "source",
         "type_info": "Text"
       },
       {
@@ -52,11 +52,6 @@
     "parameters": {
       "Left": [
         "Uuid",
-        "Text",
-        "Bool",
-        "Text",
-        "Bool",
-        "Bool",
         "Text"
       ]
     },
@@ -64,13 +59,13 @@
       false,
       false,
       false,
+      false,
+      false,
+      false,
       true,
-      false,
-      false,
-      false,
       false,
       false
     ]
   },
-  "hash": "29dfff451be9aaeccb96ce5390e856b242d746c5135711ee8db9618ec5059257"
+  "hash": "d2b3dfd18a4bd0a24d2c0765e06867a8e6b6d641999e076d11c55c854ab8bd86"
 }

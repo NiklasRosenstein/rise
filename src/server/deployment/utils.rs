@@ -155,6 +155,7 @@ pub async fn create_deployment_with_hooks(
                 &value,
                 is_secret,
                 is_protected,
+                Some("extension"),
             )
             .await
             {

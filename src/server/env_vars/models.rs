@@ -29,6 +29,8 @@ pub struct EnvVarResponse {
     pub is_protected: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub environment: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source: Option<String>,
 }
 
 impl EnvVarResponse {
@@ -46,6 +48,7 @@ impl EnvVarResponse {
             is_secret,
             is_protected,
             environment: None,
+            source: None,
         }
     }
 }

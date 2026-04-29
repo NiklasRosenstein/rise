@@ -206,6 +206,7 @@ pub async fn list_project_env_vars(
                 is_secret: var.is_secret,
                 is_protected: var.is_protected,
                 environment: None,
+                source: None,
             }
         };
         response.environment = environment;
@@ -429,7 +430,14 @@ pub async fn list_deployment_env_vars(
         env_vars.push(
             if var.is_secret && (!include_unprotected || var.is_protected) {
                 // Mask protected secrets
-                EnvVarResponse::from_db_model(var.key, var.value, var.is_secret, var.is_protected)
+                let mut resp = EnvVarResponse::from_db_model(
+                    var.key,
+                    var.value,
+                    var.is_secret,
+                    var.is_protected,
+                );
+                resp.source = var.source;
+                resp
             } else {
                 // Return plaintext or decrypted value
                 EnvVarResponse {
@@ -438,6 +446,7 @@ pub async fn list_deployment_env_vars(
                     is_secret: var.is_secret,
                     is_protected: var.is_protected,
                     environment: None,
+                    source: var.source,
                 }
             },
         );
@@ -649,6 +658,7 @@ pub async fn preview_deployment_env_vars(
                     is_secret: true,
                     is_protected: false,
                     environment: None,
+                    source: None,
                 },
             );
         } else if var.is_secret {
@@ -661,6 +671,7 @@ pub async fn preview_deployment_env_vars(
                     is_secret: true,
                     is_protected: true,
                     environment: None,
+                    source: None,
                 },
             );
         } else {
@@ -673,6 +684,7 @@ pub async fn preview_deployment_env_vars(
                     is_secret: false,
                     is_protected: false,
                     environment: None,
+                    source: None,
                 },
             );
         }
@@ -688,6 +700,7 @@ pub async fn preview_deployment_env_vars(
                 is_secret: false,
                 is_protected: false,
                 environment: None,
+                source: Some("system".to_string()),
             },
         );
     }
@@ -715,6 +728,7 @@ pub async fn preview_deployment_env_vars(
                         is_secret: false,
                         is_protected: false,
                         environment: None,
+                        source: Some("system".to_string()),
                     },
                 );
             }
@@ -741,6 +755,7 @@ pub async fn preview_deployment_env_vars(
                         is_secret: false,
                         is_protected: false,
                         environment: None,
+                        source: Some("system".to_string()),
                     },
                 );
             }
@@ -762,6 +777,7 @@ pub async fn preview_deployment_env_vars(
                             is_secret: false,
                             is_protected: false,
                             environment: None,
+                            source: Some("extension".to_string()),
                         },
                         InjectedEnvVarValue::Secret { decrypted, .. } => EnvVarResponse {
                             key: var.key.clone(),
@@ -769,6 +785,7 @@ pub async fn preview_deployment_env_vars(
                             is_secret: true,
                             is_protected: false,
                             environment: None,
+                            source: Some("extension".to_string()),
                         },
                         InjectedEnvVarValue::Protected { .. } => EnvVarResponse {
                             key: var.key.clone(),
@@ -776,6 +793,7 @@ pub async fn preview_deployment_env_vars(
                             is_secret: true,
                             is_protected: true,
                             environment: None,
+                            source: Some("extension".to_string()),
                         },
                     };
                     // Extension vars override user vars for the same key

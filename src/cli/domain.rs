@@ -3,10 +3,6 @@ use comfy_table::{modifiers::UTF8_ROUND_CORNERS, presets::UTF8_FULL, Cell, Table
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 
-use crate::build::config::{
-    load_full_project_config, write_project_config, ProjectBuildConfig, ProjectConfig,
-};
-
 #[derive(Debug, Deserialize)]
 #[allow(dead_code)]
 struct CustomDomainResponse {
@@ -74,34 +70,8 @@ pub async fn add_domain(
     Ok(())
 }
 
-/// Helper function to add domain to rise.toml
-fn update_rise_toml_add_domain(app_path: &str, project: &str, domain: &str) -> Result<()> {
-    // Load existing config or create new one
-    let mut config = load_full_project_config(app_path)?.unwrap_or(ProjectBuildConfig {
-        version: Some(1),
-        ..Default::default()
-    });
-
-    // Ensure project section exists
-    if config.project.is_none() {
-        config.project = Some(ProjectConfig {
-            name: project.to_string(),
-            access_class: "private".to_string(),
-            custom_domains: Vec::new(),
-            env: std::collections::HashMap::new(),
-            source_url: None,
-        });
-    }
-
-    // Add domain if not already present
-    if let Some(ref mut project_config) = config.project {
-        if !project_config.custom_domains.contains(&domain.to_string()) {
-            project_config.custom_domains.push(domain.to_string());
-            write_project_config(app_path, &config)?;
-            println!("✓ Updated rise.toml with custom domain '{}'", domain);
-        }
-    }
-
+/// Helper function to add domain to rise.toml (no-op: domains are no longer stored in rise.toml)
+fn update_rise_toml_add_domain(_app_path: &str, _project: &str, _domain: &str) -> Result<()> {
     Ok(())
 }
 
@@ -208,23 +178,7 @@ pub async fn remove_domain(
     Ok(())
 }
 
-/// Helper function to remove domain from rise.toml
-fn update_rise_toml_remove_domain(app_path: &str, domain: &str) -> Result<()> {
-    // Load existing config
-    if let Some(mut config) = load_full_project_config(app_path)? {
-        // Remove domain if present
-        if let Some(ref mut project_config) = config.project {
-            if let Some(pos) = project_config
-                .custom_domains
-                .iter()
-                .position(|d| d == domain)
-            {
-                project_config.custom_domains.remove(pos);
-                write_project_config(app_path, &config)?;
-                println!("✓ Removed custom domain '{}' from rise.toml", domain);
-            }
-        }
-    }
-
+/// Helper function to remove domain from rise.toml (no-op: domains are no longer stored in rise.toml)
+fn update_rise_toml_remove_domain(_app_path: &str, _domain: &str) -> Result<()> {
     Ok(())
 }

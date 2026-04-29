@@ -48,16 +48,4 @@ The first custom domain becomes the primary domain, used as the value of the `RI
 
 ## Domains in rise.toml
 
-You can also define custom domains in `rise.toml`:
-
-```toml
-[project]
-name = "my-app"
-custom_domains = ["myapp.example.com", "api.example.com"]
-```
-
-Sync to the backend with:
-
-```bash
-rise project update --sync
-```
+Custom domains are managed via the CLI (`rise domain add/remove`). They are not configured through `rise.toml`.

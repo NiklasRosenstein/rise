@@ -11,8 +11,6 @@ The `rise.toml` file defines your project metadata and build settings. Both `ris
 ```toml
 [project]
 name = "my-app"
-access_class = "public"
-custom_domains = ["myapp.example.com"]
 
 [project.env]
 LOG_LEVEL = "info"
@@ -21,9 +19,7 @@ LOG_LEVEL = "info"
 | Field | Type | Description |
 |-------|------|-------------|
 | `name` | String | Project name (used for URLs, registry paths, and as default for `-p` flag) |
-| `access_class` | String | Access class: `public` or `private` (default: `public`) |
-| `custom_domains` | Array | Custom domains for the project |
-| `env` | Object | Plain-text environment variables (set on backend during `project create` or `project update --sync`) |
+| `env` | Object | Plain-text environment variables applied as deployment overrides (source: `toml`) |
 
 ### `[build]` Section
 
@@ -49,20 +45,22 @@ args = ["NODE_ENV=production", "BUILD_VERSION"]
 
 ### `[environments.<name>]` Section
 
-Define per-environment settings. Currently supports environment-scoped variables. Environments must already exist on the backend (create them with `rise environment create`).
+Define per-environment settings. Set `default = true` on one environment to auto-select it when deploying without `--environment`.
 
 ```toml
-[environments.staging.env]
-DATABASE_URL = "postgres://staging-db/mydb"
-LOG_LEVEL = "debug"
+[environments.staging]
+default = true
+env.DATABASE_URL = "postgres://staging-db/mydb"
+env.LOG_LEVEL = "debug"
 
-[environments.production.env]
-DATABASE_URL = "postgres://prod-db/mydb"
+[environments.production]
+env.DATABASE_URL = "postgres://prod-db/mydb"
 ```
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `env` | Object | Plain-text environment variables scoped to this environment |
+| `default` | Boolean | If `true`, this environment is used when `--environment` is not specified. At most one environment may be default. |
+| `env` | Object | Plain-text environment variables scoped to this environment (applied as deployment overrides) |
 
 See [Environment Variables](environment-variables.md#per-environment-variables-in-risetoml) for details.
 
@@ -71,8 +69,6 @@ See [Environment Variables](environment-variables.md#per-environment-variables-i
 ```toml
 [project]
 name = "my-app"
-access_class = "private"
-custom_domains = ["myapp.example.com", "api.example.com"]
 
 [project.env]
 LOG_LEVEL = "info"
@@ -84,12 +80,13 @@ builder = "heroku/builder:24"
 buildpacks = ["heroku/nodejs", "heroku/procfile"]
 args = ["BP_NODE_VERSION=20"]
 
-[environments.staging.env]
-DATABASE_URL = "postgres://staging-db/mydb"
-LOG_LEVEL = "debug"
+[environments.staging]
+default = true
+env.DATABASE_URL = "postgres://staging-db/mydb"
+env.LOG_LEVEL = "debug"
 
-[environments.production.env]
-DATABASE_URL = "postgres://prod-db/mydb"
+[environments.production]
+env.DATABASE_URL = "postgres://prod-db/mydb"
 ```
 
 ## Project Creation Modes
@@ -111,16 +108,6 @@ rise project create my-app --mode remote+local
 ```
 
 If a `rise.toml` already exists, `rise project create` reads the project name from it and defaults to `--mode remote`.
-
-## Syncing Configuration
-
-Push your `rise.toml` settings (name, access class, custom domains, env vars) to the backend:
-
-```bash
-rise project update --sync
-```
-
-This reads the current `rise.toml` and updates the backend project to match.
 
 ## Configuration Precedence
 
