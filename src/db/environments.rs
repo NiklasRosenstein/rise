@@ -161,6 +161,43 @@ pub async fn find_by_id(pool: &PgPool, id: Uuid) -> Result<Option<Environment>> 
     Ok(env)
 }
 
+/// Clear `is_default` and/or `is_production` flags from other environments in the
+/// same project. Used by both [`update`] and [`create_with_flag_swap`] to ensure
+/// the partial unique indexes are never violated.
+///
+/// `exclude_id` is the environment being updated (or `Uuid::nil()` during create).
+async fn clear_exclusive_flags(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    project_id: Uuid,
+    exclude_id: Uuid,
+    set_default: bool,
+    set_production: bool,
+) -> Result<()> {
+    if set_default {
+        sqlx::query!(
+            "UPDATE environments SET is_default = false, updated_at = NOW() WHERE project_id = $1 AND id != $2 AND is_default = true",
+            project_id,
+            exclude_id
+        )
+        .execute(&mut **tx)
+        .await
+        .context("Failed to clear is_default flag")?;
+    }
+
+    if set_production {
+        sqlx::query!(
+            "UPDATE environments SET is_production = false, updated_at = NOW() WHERE project_id = $1 AND id != $2 AND is_production = true",
+            project_id,
+            exclude_id
+        )
+        .execute(&mut **tx)
+        .await
+        .context("Failed to clear is_production flag")?;
+    }
+
+    Ok(())
+}
+
 /// Update an environment.
 ///
 /// Uses a transaction to atomically swap `is_default` and `is_production` flags
@@ -178,29 +215,14 @@ pub async fn update(
 ) -> Result<Environment> {
     let mut tx = pool.begin().await.context("Failed to begin transaction")?;
 
-    // If setting is_default=true, clear it from any other environment in the same project
-    if is_default == Some(true) {
-        sqlx::query!(
-            "UPDATE environments SET is_default = false, updated_at = NOW() WHERE project_id = $1 AND id != $2 AND is_default = true",
-            project_id,
-            id
-        )
-        .execute(&mut *tx)
-        .await
-        .context("Failed to clear is_default flag")?;
-    }
-
-    // If setting is_production=true, clear it from any other environment in the same project
-    if is_production == Some(true) {
-        sqlx::query!(
-            "UPDATE environments SET is_production = false, updated_at = NOW() WHERE project_id = $1 AND id != $2 AND is_production = true",
-            project_id,
-            id
-        )
-        .execute(&mut *tx)
-        .await
-        .context("Failed to clear is_production flag")?;
-    }
+    clear_exclusive_flags(
+        &mut tx,
+        project_id,
+        id,
+        is_default == Some(true),
+        is_production == Some(true),
+    )
+    .await?;
 
     let env = sqlx::query_as!(
         Environment,
@@ -247,25 +269,7 @@ pub async fn create_with_flag_swap(
 ) -> Result<Environment> {
     let mut tx = pool.begin().await.context("Failed to begin transaction")?;
 
-    if is_default {
-        sqlx::query!(
-            "UPDATE environments SET is_default = false, updated_at = NOW() WHERE project_id = $1 AND is_default = true",
-            project_id
-        )
-        .execute(&mut *tx)
-        .await
-        .context("Failed to clear is_default flag")?;
-    }
-
-    if is_production {
-        sqlx::query!(
-            "UPDATE environments SET is_production = false, updated_at = NOW() WHERE project_id = $1 AND is_production = true",
-            project_id
-        )
-        .execute(&mut *tx)
-        .await
-        .context("Failed to clear is_production flag")?;
-    }
+    clear_exclusive_flags(&mut tx, project_id, Uuid::nil(), is_default, is_production).await?;
 
     let env = create(
         &mut *tx,

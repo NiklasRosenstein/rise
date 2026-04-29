@@ -497,7 +497,7 @@ async fn resolve_deployment_target(
                 .internal_err("Failed to look up default environment")?
                 .ok_or_else(|| {
                     ServerError::bad_request(
-                        "No default environment configured for this project. Specify --environment explicitly.",
+                        "No default environment configured for this project. Specify an environment explicitly.",
                     )
                 })?;
             let group = default_env
@@ -2026,5 +2026,49 @@ mod tests {
         });
 
         assert!(!is_protected);
+    }
+
+    #[sqlx::test]
+    async fn resolve_deployment_target_fails_without_default_env(pool: sqlx::PgPool) {
+        use crate::db::{environments, models::ProjectStatus, projects, users};
+
+        let user = users::create(&pool, "deploy-test@example.com")
+            .await
+            .unwrap();
+        let project = projects::create(
+            &pool,
+            "no-default-project",
+            ProjectStatus::Stopped,
+            "public".to_string(),
+            Some(user.id),
+            None,
+            None,
+        )
+        .await
+        .unwrap();
+
+        // Create an environment that is NOT default
+        environments::create(
+            &pool,
+            project.id,
+            "staging",
+            Some("staging"),
+            false,
+            false,
+            "blue",
+        )
+        .await
+        .unwrap();
+
+        // Neither environment nor group specified → should fail
+        let err = super::resolve_deployment_target(&pool, project.id, None, None)
+            .await
+            .unwrap_err();
+        assert_eq!(err.status, StatusCode::BAD_REQUEST);
+        assert!(
+            err.message.contains("No default environment"),
+            "unexpected error message: {}",
+            err.message
+        );
     }
 }
