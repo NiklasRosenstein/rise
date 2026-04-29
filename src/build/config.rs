@@ -107,7 +107,7 @@ mod tests {
         let temp_dir = tempfile::tempdir().unwrap();
         let rise_toml_path = temp_dir.path().join("rise.toml");
 
-        // Write a config with some unknown fields (including legacy access_class)
+        // Write a config with some unknown fields
         std::fs::write(
             &rise_toml_path,
             r#"

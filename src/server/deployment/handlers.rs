@@ -491,8 +491,14 @@ async fn resolve_deployment_target(
                 // Group has no primary environment mapping; use fallback from rise.toml
                 let fb_env = environments::find_by_name(pool, project_id, fb_env_name)
                     .await
-                    .internal_err("Failed to look up fallback environment")?;
-                Ok((group.to_string(), fb_env))
+                    .internal_err("Failed to look up fallback environment")?
+                    .ok_or_else(|| {
+                        ServerError::not_found(format!(
+                            "Fallback environment '{}' not found",
+                            fb_env_name
+                        ))
+                    })?;
+                Ok((group.to_string(), Some(fb_env)))
             } else {
                 // No primary group match and no fallback from rise.toml.
                 // Auto-resolve like the (None, None) case.
@@ -2156,5 +2162,144 @@ mod tests {
             "unexpected error message: {}",
             err.message
         );
+    }
+
+    #[sqlx::test]
+    async fn resolve_deployment_target_fallback_with_group(pool: sqlx::PgPool) {
+        use crate::db::{environments, models::ProjectStatus, projects, users};
+
+        let user = users::create(&pool, "deploy-test@example.com")
+            .await
+            .unwrap();
+        let project = projects::create(
+            &pool,
+            "fallback-group-project",
+            ProjectStatus::Stopped,
+            "public".to_string(),
+            Some(user.id),
+            None,
+            None,
+        )
+        .await
+        .unwrap();
+
+        // Create two environments
+        environments::create(&pool, project.id, "staging", Some("staging"), false, "blue")
+            .await
+            .unwrap();
+        environments::create(
+            &pool,
+            project.id,
+            "production",
+            Some("default"),
+            true,
+            "green",
+        )
+        .await
+        .unwrap();
+
+        // Group specified with no primary mapping, fallback provided → should use fallback
+        let (group, env) = super::resolve_deployment_target(
+            &pool,
+            project.id,
+            None,
+            Some("mr/123"),
+            Some("staging"),
+        )
+        .await
+        .unwrap();
+        assert_eq!(group, "mr/123");
+        assert_eq!(env.unwrap().name, "staging");
+    }
+
+    #[sqlx::test]
+    async fn resolve_deployment_target_fallback_not_found(pool: sqlx::PgPool) {
+        use crate::db::{environments, models::ProjectStatus, projects, users};
+
+        let user = users::create(&pool, "deploy-test@example.com")
+            .await
+            .unwrap();
+        let project = projects::create(
+            &pool,
+            "fallback-notfound-project",
+            ProjectStatus::Stopped,
+            "public".to_string(),
+            Some(user.id),
+            None,
+            None,
+        )
+        .await
+        .unwrap();
+
+        environments::create(
+            &pool,
+            project.id,
+            "production",
+            Some("default"),
+            true,
+            "green",
+        )
+        .await
+        .unwrap();
+
+        // Fallback references a non-existent environment → should error
+        let err = super::resolve_deployment_target(
+            &pool,
+            project.id,
+            None,
+            Some("mr/456"),
+            Some("nonexistent"),
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(err.status, StatusCode::NOT_FOUND);
+        assert!(
+            err.message.contains("nonexistent"),
+            "unexpected error message: {}",
+            err.message
+        );
+    }
+
+    #[sqlx::test]
+    async fn resolve_deployment_target_fallback_none_none(pool: sqlx::PgPool) {
+        use crate::db::{environments, models::ProjectStatus, projects, users};
+
+        let user = users::create(&pool, "deploy-test@example.com")
+            .await
+            .unwrap();
+        let project = projects::create(
+            &pool,
+            "fallback-nonenone-project",
+            ProjectStatus::Stopped,
+            "public".to_string(),
+            Some(user.id),
+            None,
+            None,
+        )
+        .await
+        .unwrap();
+
+        // Create two environments
+        environments::create(&pool, project.id, "staging", Some("staging"), false, "blue")
+            .await
+            .unwrap();
+        environments::create(
+            &pool,
+            project.id,
+            "production",
+            Some("default"),
+            true,
+            "green",
+        )
+        .await
+        .unwrap();
+
+        // Neither group nor environment, but fallback provided → should use fallback
+        let (group, env) =
+            super::resolve_deployment_target(&pool, project.id, None, None, Some("staging"))
+                .await
+                .unwrap();
+        assert_eq!(group, "staging");
+        assert_eq!(env.unwrap().name, "staging");
     }
 }

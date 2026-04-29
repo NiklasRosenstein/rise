@@ -1189,10 +1189,17 @@ async fn main() -> Result<()> {
                     }
 
                     // 2. Collect [environments.TARGET.env] vars (override global)
-                    // Use explicit --environment if set, otherwise fall back to toml default
-                    let target_env = resolved_environment
-                        .as_ref()
-                        .or(toml_default_environment.as_ref());
+                    // Only apply per-environment toml overrides when the environment is
+                    // known client-side: explicit --environment, or toml default when no
+                    // --group is specified. When --group is set without --environment, the
+                    // server resolves the environment, which may differ from the toml default.
+                    let target_env = resolved_environment.as_ref().or_else(|| {
+                        if args.group.is_none() {
+                            toml_default_environment.as_ref()
+                        } else {
+                            None
+                        }
+                    });
                     if let Some(env_name) = target_env {
                         if let Some(env_config) = cfg.environments.get(env_name) {
                             for (key, value) in &env_config.env {
