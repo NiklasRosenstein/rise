@@ -208,11 +208,6 @@ pub struct CreateDeploymentRequest {
     /// Target environment name. If omitted, resolved from the deployment group.
     #[serde(default)]
     pub environment: Option<String>,
-    /// Fallback environment name. Used when `environment` is not specified and the
-    /// deployment group has no primary environment mapping. Typically set from
-    /// the `default = true` environment in rise.toml.
-    #[serde(default)]
-    pub fallback_environment: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub expires_in: Option<String>, // Expiration duration (e.g., '7d', '2h', '30m')
     /// HTTP port the application listens on.

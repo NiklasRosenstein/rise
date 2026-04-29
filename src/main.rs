@@ -1159,15 +1159,15 @@ async fn main() -> Result<()> {
                 // Load rise.toml config for env resolution and env var overrides
                 let toml_config = build::config::load_full_project_config(&args.path)?;
 
-                // Resolve environment: explicit --environment flag goes as `environment`,
-                // rise.toml's `default = true` goes as `fallback_environment` for the
-                // server to use when the deployment group has no primary environment mapping.
-                let resolved_environment = args.environment.clone();
-                let toml_default_environment = toml_config.as_ref().and_then(|cfg| {
-                    cfg.environments
-                        .iter()
-                        .find(|(_, env)| env.default)
-                        .map(|(name, _)| name.clone())
+                // Resolve environment: explicit --environment flag takes precedence,
+                // otherwise fall back to the `default = true` environment from rise.toml.
+                let resolved_environment = args.environment.clone().or_else(|| {
+                    toml_config.as_ref().and_then(|cfg| {
+                        cfg.environments
+                            .iter()
+                            .find(|(_, env)| env.default)
+                            .map(|(name, _)| name.clone())
+                    })
                 });
 
                 // Collect runtime env overrides with source tracking
@@ -1189,18 +1189,9 @@ async fn main() -> Result<()> {
                     }
 
                     // 2. Collect [environments.TARGET.env] vars (override global)
-                    // Only apply per-environment toml overrides when the environment is
-                    // known client-side: explicit --environment, or toml default when no
-                    // --group is specified. When --group is set without --environment, the
-                    // server resolves the environment, which may differ from the toml default.
-                    let target_env = resolved_environment.as_ref().or_else(|| {
-                        if args.group.is_none() {
-                            toml_default_environment.as_ref()
-                        } else {
-                            None
-                        }
-                    });
-                    if let Some(env_name) = target_env {
+                    // Apply per-environment toml overrides when the target environment is
+                    // known client-side (explicit --environment or toml default = true).
+                    if let Some(env_name) = resolved_environment.as_ref() {
                         if let Some(env_config) = cfg.environments.get(env_name) {
                             for (key, value) in &env_config.env {
                                 // Remove any existing override for this key (from project.env)
@@ -1289,7 +1280,6 @@ async fn main() -> Result<()> {
                         image: args.image.as_deref(),
                         group: args.group.as_deref(),
                         environment: resolved_environment.as_deref(),
-                        fallback_environment: toml_default_environment.as_deref(),
                         expires_in: args.expire.as_deref(),
                         http_port: args.http_port,
                         build_args: &args.build_args,

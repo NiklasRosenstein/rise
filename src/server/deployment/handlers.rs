@@ -450,20 +450,18 @@ async fn convert_deployment(
 /// Resolve the deployment target (group + environment) from request parameters.
 ///
 /// Rules:
-/// - If both specified: use both as-is.
+/// - If both specified: use both, but validate that the group is not the primary
+///   deployment group of a *different* environment.
 /// - If environment specified, no group: use environment's primary deployment group.
 /// - If group specified, no environment: look up environment whose primary group matches;
-///   then try fallback_environment from rise.toml; then auto-resolve (0 envs → none,
-///   1 env → use it, 2+ → error).
+///   then auto-resolve (0 envs → none, 1 env → use it, 2+ → error).
 /// - If neither specified: if the project has exactly one environment, use it.
-///   If zero, use the default group with no environment. If more than one,
-///   try fallback_environment from rise.toml; otherwise error.
+///   If zero, use the default group with no environment. If more than one, error.
 async fn resolve_deployment_target(
     pool: &sqlx::PgPool,
     project_id: uuid::Uuid,
     requested_environment: Option<&str>,
     requested_group: Option<&str>,
-    fallback_environment: Option<&str>,
 ) -> Result<(String, Option<crate::db::models::Environment>), ServerError> {
     use crate::db::environments;
 
@@ -476,6 +474,18 @@ async fn resolve_deployment_target(
                 .ok_or_else(|| {
                     ServerError::not_found(format!("Environment '{}' not found", env_name))
                 })?;
+            // Validate: if the group is the primary group of another environment, reject
+            if let Some(primary_env) = environments::find_by_primary_group(pool, project_id, group)
+                .await
+                .internal_err("Failed to look up environment by group")?
+            {
+                if primary_env.name != env_name {
+                    return Err(ServerError::bad_request(format!(
+                        "Group '{}' is the primary deployment group of environment '{}', and cannot be used with environment '{}'.",
+                        group, primary_env.name, env_name
+                    )));
+                }
+            }
             Ok((group.to_string(), Some(env)))
         }
         // Environment only, no group
@@ -488,7 +498,7 @@ async fn resolve_deployment_target(
                 })?;
             let group = env.primary_deployment_group.clone().ok_or_else(|| {
                 ServerError::bad_request(format!(
-                    "Environment '{}' has no primary deployment group. Specify --group explicitly.",
+                    "Environment '{}' has no primary deployment group. Specify a deployment group explicitly.",
                     env_name
                 ))
             })?;
@@ -502,21 +512,8 @@ async fn resolve_deployment_target(
                 .internal_err("Failed to look up environment by group")?;
             if env.is_some() {
                 Ok((group.to_string(), env))
-            } else if let Some(fb_env_name) = fallback_environment {
-                // Group has no primary environment mapping; use fallback from rise.toml
-                let fb_env = environments::find_by_name(pool, project_id, fb_env_name)
-                    .await
-                    .internal_err("Failed to look up fallback environment")?
-                    .ok_or_else(|| {
-                        ServerError::not_found(format!(
-                            "Fallback environment '{}' not found",
-                            fb_env_name
-                        ))
-                    })?;
-                Ok((group.to_string(), Some(fb_env)))
             } else {
-                // No primary group match and no fallback from rise.toml.
-                // Auto-resolve like the (None, None) case.
+                // No primary group match. Auto-resolve from available environments.
                 let all_envs = environments::list_for_project(pool, project_id)
                     .await
                     .internal_err("Failed to list environments")?;
@@ -547,29 +544,9 @@ async fn resolve_deployment_target(
                         .unwrap_or_else(|| models::DEFAULT_DEPLOYMENT_GROUP.to_string());
                     Ok((group, Some(env)))
                 }
-                _ => {
-                    // Multiple environments: use fallback from rise.toml if available
-                    if let Some(fb_env_name) = fallback_environment {
-                        let fb_env = environments::find_by_name(pool, project_id, fb_env_name)
-                            .await
-                            .internal_err("Failed to look up fallback environment")?
-                            .ok_or_else(|| {
-                                ServerError::not_found(format!(
-                                    "Fallback environment '{}' not found",
-                                    fb_env_name
-                                ))
-                            })?;
-                        let group = fb_env
-                            .primary_deployment_group
-                            .clone()
-                            .unwrap_or_else(|| models::DEFAULT_DEPLOYMENT_GROUP.to_string());
-                        Ok((group, Some(fb_env)))
-                    } else {
-                        Err(ServerError::bad_request(
-                            "Multiple environments configured. Specify an environment to select one.",
-                        ))
-                    }
-                }
+                _ => Err(ServerError::bad_request(
+                    "Multiple environments configured. Specify an environment to select one.",
+                )),
             }
         }
     }
@@ -699,7 +676,6 @@ pub async fn create_deployment(
         project.id,
         payload.environment.as_deref(),
         payload.group.as_deref(),
-        payload.fallback_environment.as_deref(),
     )
     .await?;
 
@@ -2133,7 +2109,7 @@ mod tests {
             .unwrap();
 
         // Neither environment nor group specified → should auto-select the single env
-        let (group, env) = super::resolve_deployment_target(&pool, project.id, None, None, None)
+        let (group, env) = super::resolve_deployment_target(&pool, project.id, None, None)
             .await
             .unwrap();
         assert_eq!(group, "staging");
@@ -2175,7 +2151,7 @@ mod tests {
         .unwrap();
 
         // Neither environment nor group specified → should fail with multiple envs
-        let err = super::resolve_deployment_target(&pool, project.id, None, None, None)
+        let err = super::resolve_deployment_target(&pool, project.id, None, None)
             .await
             .unwrap_err();
         assert_eq!(err.status, StatusCode::BAD_REQUEST);
@@ -2187,7 +2163,7 @@ mod tests {
     }
 
     #[sqlx::test]
-    async fn resolve_deployment_target_fallback_with_group(pool: sqlx::PgPool) {
+    async fn resolve_deployment_target_group_only_multiple_envs_fails(pool: sqlx::PgPool) {
         use crate::db::{environments, models::ProjectStatus, projects, users};
 
         let user = users::create(&pool, "deploy-test@example.com")
@@ -2195,7 +2171,7 @@ mod tests {
             .unwrap();
         let project = projects::create(
             &pool,
-            "fallback-group-project",
+            "group-multi-env-project",
             ProjectStatus::Stopped,
             "public".to_string(),
             Some(user.id),
@@ -2220,70 +2196,20 @@ mod tests {
         .await
         .unwrap();
 
-        // Group specified with no primary mapping, fallback provided → should use fallback
-        let (group, env) = super::resolve_deployment_target(
-            &pool,
-            project.id,
-            None,
-            Some("mr/123"),
-            Some("staging"),
-        )
-        .await
-        .unwrap();
-        assert_eq!(group, "mr/123");
-        assert_eq!(env.unwrap().name, "staging");
-    }
-
-    #[sqlx::test]
-    async fn resolve_deployment_target_fallback_not_found(pool: sqlx::PgPool) {
-        use crate::db::{environments, models::ProjectStatus, projects, users};
-
-        let user = users::create(&pool, "deploy-test@example.com")
+        // Non-primary group with multiple envs → should fail
+        let err = super::resolve_deployment_target(&pool, project.id, None, Some("mr/123"))
             .await
-            .unwrap();
-        let project = projects::create(
-            &pool,
-            "fallback-notfound-project",
-            ProjectStatus::Stopped,
-            "public".to_string(),
-            Some(user.id),
-            None,
-            None,
-        )
-        .await
-        .unwrap();
-
-        environments::create(
-            &pool,
-            project.id,
-            "production",
-            Some("default"),
-            true,
-            "green",
-        )
-        .await
-        .unwrap();
-
-        // Fallback references a non-existent environment → should error
-        let err = super::resolve_deployment_target(
-            &pool,
-            project.id,
-            None,
-            Some("mr/456"),
-            Some("nonexistent"),
-        )
-        .await
-        .unwrap_err();
-        assert_eq!(err.status, StatusCode::NOT_FOUND);
+            .unwrap_err();
+        assert_eq!(err.status, StatusCode::BAD_REQUEST);
         assert!(
-            err.message.contains("nonexistent"),
+            err.message.contains("Multiple environments"),
             "unexpected error message: {}",
             err.message
         );
     }
 
     #[sqlx::test]
-    async fn resolve_deployment_target_fallback_none_none(pool: sqlx::PgPool) {
+    async fn resolve_deployment_target_cross_group_rejected(pool: sqlx::PgPool) {
         use crate::db::{environments, models::ProjectStatus, projects, users};
 
         let user = users::create(&pool, "deploy-test@example.com")
@@ -2291,7 +2217,53 @@ mod tests {
             .unwrap();
         let project = projects::create(
             &pool,
-            "fallback-nonenone-project",
+            "cross-group-project",
+            ProjectStatus::Stopped,
+            "public".to_string(),
+            Some(user.id),
+            None,
+            None,
+        )
+        .await
+        .unwrap();
+
+        environments::create(
+            &pool,
+            project.id,
+            "production",
+            Some("default"),
+            true,
+            "green",
+        )
+        .await
+        .unwrap();
+        environments::create(&pool, project.id, "staging", Some("staging"), false, "blue")
+            .await
+            .unwrap();
+
+        // "default" is primary of "production", but env is "staging" → should reject
+        let err =
+            super::resolve_deployment_target(&pool, project.id, Some("staging"), Some("default"))
+                .await
+                .unwrap_err();
+        assert_eq!(err.status, StatusCode::BAD_REQUEST);
+        assert!(
+            err.message.contains("primary deployment group"),
+            "unexpected error message: {}",
+            err.message
+        );
+    }
+
+    #[sqlx::test]
+    async fn resolve_deployment_target_none_none_multiple_envs_fails(pool: sqlx::PgPool) {
+        use crate::db::{environments, models::ProjectStatus, projects, users};
+
+        let user = users::create(&pool, "deploy-test@example.com")
+            .await
+            .unwrap();
+        let project = projects::create(
+            &pool,
+            "nonenone-multi-project",
             ProjectStatus::Stopped,
             "public".to_string(),
             Some(user.id),
@@ -2316,12 +2288,90 @@ mod tests {
         .await
         .unwrap();
 
-        // Neither group nor environment, but fallback provided → should use fallback
+        // Neither group nor environment with multiple envs → should fail
+        let err = super::resolve_deployment_target(&pool, project.id, None, None)
+            .await
+            .unwrap_err();
+        assert_eq!(err.status, StatusCode::BAD_REQUEST);
+        assert!(
+            err.message.contains("Multiple environments"),
+            "unexpected error message: {}",
+            err.message
+        );
+    }
+
+    #[sqlx::test]
+    async fn resolve_deployment_target_cross_group_ok(pool: sqlx::PgPool) {
+        use crate::db::{environments, models::ProjectStatus, projects, users};
+
+        let user = users::create(&pool, "deploy-test@example.com")
+            .await
+            .unwrap();
+        let project = projects::create(
+            &pool,
+            "cross-group-ok-project",
+            ProjectStatus::Stopped,
+            "public".to_string(),
+            Some(user.id),
+            None,
+            None,
+        )
+        .await
+        .unwrap();
+
+        environments::create(
+            &pool,
+            project.id,
+            "production",
+            Some("default"),
+            true,
+            "green",
+        )
+        .await
+        .unwrap();
+
+        // "default" is primary of "production", env is also "production" → should succeed
+        let (group, env) = super::resolve_deployment_target(
+            &pool,
+            project.id,
+            Some("production"),
+            Some("default"),
+        )
+        .await
+        .unwrap();
+        assert_eq!(group, "default");
+        assert_eq!(env.unwrap().name, "production");
+    }
+
+    #[sqlx::test]
+    async fn resolve_deployment_target_group_not_primary_single_env(pool: sqlx::PgPool) {
+        use crate::db::{environments, models::ProjectStatus, projects, users};
+
+        let user = users::create(&pool, "deploy-test@example.com")
+            .await
+            .unwrap();
+        let project = projects::create(
+            &pool,
+            "group-single-env-project",
+            ProjectStatus::Stopped,
+            "public".to_string(),
+            Some(user.id),
+            None,
+            None,
+        )
+        .await
+        .unwrap();
+
+        environments::create(&pool, project.id, "staging", Some("staging"), false, "blue")
+            .await
+            .unwrap();
+
+        // Non-primary group with single env → auto-resolve to that env
         let (group, env) =
-            super::resolve_deployment_target(&pool, project.id, None, None, Some("staging"))
+            super::resolve_deployment_target(&pool, project.id, None, Some("mr/123"))
                 .await
                 .unwrap();
-        assert_eq!(group, "staging");
+        assert_eq!(group, "mr/123");
         assert_eq!(env.unwrap().name, "staging");
     }
 }

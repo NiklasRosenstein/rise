@@ -438,9 +438,6 @@ pub struct DeploymentOptions<'a> {
     pub image: Option<&'a str>,
     pub group: Option<&'a str>,
     pub environment: Option<&'a str>,
-    /// Fallback environment from rise.toml `default = true`. Used by the server
-    /// when no explicit environment is specified and the group has no primary mapping.
-    pub fallback_environment: Option<&'a str>,
     pub expires_in: Option<&'a str>,
     /// HTTP port the application listens on.
     /// If None, server will use project's PORT env var or default to 8080.
@@ -517,7 +514,6 @@ pub async fn create_deployment(
         deploy_opts.image,
         deploy_opts.group,
         deploy_opts.environment,
-        deploy_opts.fallback_environment,
         deploy_opts.expires_in,
         deploy_opts.http_port,
         deploy_opts.from_deployment,
@@ -890,7 +886,6 @@ async fn call_create_deployment_api(
     image: Option<&str>,
     group: Option<&str>,
     environment: Option<&str>,
-    fallback_environment: Option<&str>,
     expires_in: Option<&str>,
     http_port: Option<u16>,
     from_deployment: Option<&str>,
@@ -924,11 +919,6 @@ async fn call_create_deployment_api(
     // Add environment field if provided
     if let Some(env_name) = environment {
         payload["environment"] = serde_json::json!(env_name);
-    }
-
-    // Add fallback_environment field if provided (from rise.toml default)
-    if let Some(fb_env_name) = fallback_environment {
-        payload["fallback_environment"] = serde_json::json!(fb_env_name);
     }
 
     // Add expires_in field if provided
