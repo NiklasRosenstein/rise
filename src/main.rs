@@ -207,25 +207,13 @@ enum Commands {
     Team(TeamCommands),
 }
 
-/// Project creation mode
-#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
-pub enum ProjectMode {
-    /// Create/update project on backend only
-    Remote,
-    /// Create/update rise.toml only (no backend interaction)
-    Local,
-    /// Create project on backend AND create rise.toml
-    #[value(name = "remote+local")]
-    RemoteLocal,
-}
-
 #[derive(Subcommand, Debug)]
 enum ProjectCommands {
     /// Create a new project
     #[command(visible_alias = "c")]
     #[command(visible_alias = "new")]
     Create {
-        /// Project name (required for remote and remote+local modes, optional for local mode)
+        /// Project name (read from rise.toml if not provided)
         name: Option<String>,
         /// Access class (e.g., public, private)
         #[arg(long, default_value = "public")]
@@ -239,10 +227,9 @@ enum ProjectCommands {
         /// Path where to create rise.toml (defaults to current directory)
         #[arg(long, default_value = ".")]
         path: String,
-        /// Mode: remote (backend only), local (rise.toml only), remote+local (both).
-        /// If unset: remote if rise.toml exists, remote+local otherwise
-        #[arg(long, value_enum)]
-        mode: Option<ProjectMode>,
+        /// Don't create a rise.toml file
+        #[arg(long)]
+        no_rise_toml: bool,
     },
     /// List all projects
     #[command(visible_alias = "ls")]
@@ -930,7 +917,7 @@ async fn main() -> Result<()> {
                 owner,
                 source_url,
                 path,
-                mode,
+                no_rise_toml,
             } => {
                 project::create_project(
                     &http_client,
@@ -941,7 +928,7 @@ async fn main() -> Result<()> {
                     owner.clone(),
                     source_url.clone(),
                     path,
-                    mode,
+                    *no_rise_toml,
                 )
                 .await?;
             }
@@ -1157,7 +1144,8 @@ async fn main() -> Result<()> {
                 }
 
                 // Load rise.toml config for env resolution and env var overrides
-                let toml_config = build::config::load_full_project_config(&args.path)?;
+                let toml_config = build::config::load_full_project_config(&args.path)
+                    .context("Failed to load rise.toml")?;
 
                 // Resolve environment: explicit --environment flag takes precedence,
                 // otherwise fall back to the `default = true` environment from rise.toml.
