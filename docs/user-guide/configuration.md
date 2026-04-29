@@ -6,7 +6,11 @@ Rise projects are configured through a `rise.toml` file in your project director
 
 The `rise.toml` file defines your project metadata and build settings. Both `rise.toml` and `.rise.toml` are supported — if both exist, `rise.toml` takes precedence (with a warning).
 
-A [JSON Schema](https://rise.example.com/api/v1/schema/rise-toml/v1) is available for editor auto-completion and validation.
+A [JSON Schema](https://rise.example.com/api/v1/schema/rise-toml/v1) is available for editor auto-completion and validation. To enable it in editors that support the [Taplo](https://taplo.tamasfe.dev/) TOML language server, add this comment as the first line of your `rise.toml`:
+
+```toml
+#:schema https://rise.example.com/api/v1/schema/rise-toml/v1
+```
 
 ### `[project]` Section
 
