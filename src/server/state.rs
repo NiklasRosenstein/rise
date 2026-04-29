@@ -29,9 +29,9 @@ use crate::server::deployment::controller::DeploymentBackend;
 
 /// Minimal state for controllers - database access and encryption
 #[derive(Clone)]
-#[allow(dead_code)]
 pub struct ControllerState {
     pub db_pool: PgPool,
+    #[allow(dead_code)]
     pub encryption_provider: Option<Arc<dyn EncryptionProvider>>,
 }
 

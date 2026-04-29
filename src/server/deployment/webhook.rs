@@ -158,16 +158,14 @@ pub async fn handle_sync(
         Ok(response) => (StatusCode::OK, Json(response)).into_response(),
         Err(e) => {
             error!(project = %project_name, "Sync webhook error: {:?}", e);
+            // Return 500 so Metacontroller treats this as a failed sync and does NOT
+            // apply the (empty) children list, which would garbage-collect all resources.
             (
-                StatusCode::OK,
-                Json(SyncResponse {
-                    status: serde_json::json!({
-                        "error": format!("{:#}", e),
-                        "lastSyncTime": Utc::now().to_rfc3339(),
-                    }),
-                    children: vec![],
-                    resync_after_seconds: Some(300.0),
-                }),
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({
+                    "error": format!("{:#}", e),
+                    "lastSyncTime": Utc::now().to_rfc3339(),
+                })),
             )
                 .into_response()
         }
