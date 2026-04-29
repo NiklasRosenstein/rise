@@ -1267,18 +1267,12 @@ async fn token_endpoint_inner(
 
     match req.grant_type.as_str() {
         "authorization_code" => {
-            // authorization_code grant: REQUIRE client_secret OR code_verifier (PKCE)
+            // authorization_code grant: REQUIRE client_secret OR code_verifier (PKCE), or both.
+            // Confidential clients may use PKCE as additional protection (recommended by OAuth 2.1).
             if !has_client_secret && !has_code_verifier {
                 return Err(oauth2_error(
                     "invalid_request",
-                    Some("Missing client authentication: provide either client_secret (confidential clients) or code_verifier (public clients with PKCE)".to_string()),
-                ));
-            }
-            // For authorization_code grant, client_secret and code_verifier are mutually exclusive
-            if has_client_secret && has_code_verifier {
-                return Err(oauth2_error(
-                    "invalid_request",
-                    Some("Client authentication methods are mutually exclusive: provide either client_secret (confidential clients) or code_verifier (public clients), not both".to_string()),
+                    Some("Missing client authentication: provide client_secret, code_verifier (PKCE), or both".to_string()),
                 ));
             }
         }
@@ -1362,15 +1356,6 @@ async fn handle_authorization_code_grant(
     extension_name: String,
     req: TokenRequest,
 ) -> Result<Response, (StatusCode, Json<OAuth2ErrorResponse>)> {
-    // SECURITY: Ensure mutual exclusivity of authentication methods
-    // This is defensive programming - the check should already have happened in token_endpoint_inner
-    if req.client_secret.is_some() && req.code_verifier.is_some() {
-        return Err(oauth2_error(
-            "invalid_request",
-            Some("Authentication methods must be mutually exclusive".to_string()),
-        ));
-    }
-
     // Validate required parameters
     let code = req.code.ok_or_else(|| {
         oauth2_error(

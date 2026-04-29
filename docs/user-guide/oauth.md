@@ -381,12 +381,10 @@ Content-Type: application/x-www-form-urlencoded
 - `grant_type` (required): Must be `"authorization_code"`
 - `code` (required): Authorization code from callback
 - `client_id` (required): Rise client ID from environment variable `{EXTENSION}_CLIENT_ID`
-- **Client authentication (choose ONE method - mutually exclusive):**
-  - **Confidential clients (backend apps):**
-    - `client_secret` (required): Rise client secret from environment variable `{EXTENSION}_CLIENT_SECRET`
-  - **Public clients (SPAs with PKCE):**
-    - `code_verifier` (required): PKCE code verifier (proves client initiated the flow)
-  - **Note:** Providing both `client_secret` and `code_verifier` will result in an `invalid_request` error
+- **Client authentication (at least one required):**
+  - `client_secret`: Rise client secret (confidential clients)
+  - `code_verifier`: PKCE code verifier (proves client initiated the flow)
+  - Both may be provided together for defense-in-depth (recommended by OAuth 2.1)
 
 **For refresh_token grant (refresh access token):**
 - `grant_type` (required): Must be `"refresh_token"`
