@@ -560,7 +560,13 @@ export function ServiceAccountsList({ projectName }) {
                                         .join(', ')}
                                 </MonoTd>
                                 <MonoTd className="px-6 py-4 text-sm text-gray-700 dark:text-gray-300">
-                                    {sa.allowed_environments ? sa.allowed_environments.join(', ') : 'All'}
+                                    {sa.allowed_environments ? sa.allowed_environments.map((envName, i) => (
+                                        <span key={envName} className="inline-flex items-center gap-1.5">
+                                            {i > 0 && ', '}
+                                            <EnvironmentColorDot color={environments.find(e => e.name === envName)?.color} />
+                                            {envName}
+                                        </span>
+                                    )) : 'All'}
                                 </MonoTd>
                                 <MonoTd className="px-6 py-4 whitespace-nowrap text-sm text-gray-700 dark:text-gray-300">{formatDate(sa.created_at)}</MonoTd>
                                 <MonoTd className="px-6 py-4 text-sm">
@@ -949,19 +955,28 @@ export function DomainsList({ projectName, defaultUrl = null }) {
     );
 }
 
-function EnvVarSourceTag({ source }) {
+const ENV_VAR_SOURCE_COLORS = {
+    system: 'gray',
+    global: 'green',
+    extension: 'purple',
+    toml: 'yellow',
+    cli: 'blue',
+};
+
+function EnvVarSourceTag({ source, environments = [] }) {
     if (!source) return null;
-    if (source.startsWith('env:')) {
-        return <MonoTag color="blue">{source.slice(4)}</MonoTag>;
+    const envPrefix = 'env:';
+    if (source.startsWith(envPrefix)) {
+        const envName = source.slice(envPrefix.length);
+        const envColor = environments.find(e => e.name === envName)?.color;
+        return (
+            <span className="inline-flex items-center gap-1.5">
+                <EnvironmentColorDot color={envColor} />
+                <MonoTag color="blue">{envName}</MonoTag>
+            </span>
+        );
     }
-    const colorMap = {
-        system: 'gray',
-        global: 'green',
-        extension: 'purple',
-        toml: 'yellow',
-        cli: 'blue',
-    };
-    return <MonoTag color={colorMap[source] || 'gray'}>{source}</MonoTag>;
+    return <MonoTag color={ENV_VAR_SOURCE_COLORS[source] || 'gray'}>{source}</MonoTag>;
 }
 
 // Environment Variables Component
@@ -992,13 +1007,12 @@ export function EnvVarsList({ projectName, deploymentId }) {
         is_protected: type === 'protected',
     });
 
-    // Load environments for filter dropdown (project-level only)
+    // Load environments for filter dropdown and source color dots
     useEffect(() => {
-        if (deploymentId) return;
         api.getProjectEnvironments(projectName)
             .then(data => setEnvironments(data || []))
             .catch(() => {});
-    }, [projectName, deploymentId]);
+    }, [projectName]);
 
     const loadEnvVars = useCallback(async () => {
         try {
@@ -1196,7 +1210,7 @@ export function EnvVarsList({ projectName, deploymentId }) {
                                 </MonoTd>
                                 {deploymentId && (
                                     <MonoTd className="px-6 py-4 text-sm">
-                                        <EnvVarSourceTag source={env.source} />
+                                        <EnvVarSourceTag source={env.source} environments={environments} />
                                     </MonoTd>
                                 )}
                                 {showEnvColumn && (
