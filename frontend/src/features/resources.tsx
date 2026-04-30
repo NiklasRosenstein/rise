@@ -949,6 +949,21 @@ export function DomainsList({ projectName, defaultUrl = null }) {
     );
 }
 
+function EnvVarSourceTag({ source }) {
+    if (!source) return null;
+    if (source.startsWith('env:')) {
+        return <MonoTag color="blue">{source.slice(4)}</MonoTag>;
+    }
+    const colorMap = {
+        system: 'gray',
+        global: 'green',
+        extension: 'purple',
+        toml: 'yellow',
+        cli: 'blue',
+    };
+    return <MonoTag color={colorMap[source] || 'gray'}>{source}</MonoTag>;
+}
+
 // Environment Variables Component
 export function EnvVarsList({ projectName, deploymentId }) {
     const [envVars, setEnvVars] = useState([]);
@@ -1109,6 +1124,9 @@ export function EnvVarsList({ projectName, deploymentId }) {
                             <MonoTh className="px-6 py-3 text-left">Key</MonoTh>
                             <MonoTh className="px-6 py-3 text-left">Value</MonoTh>
                             <MonoTh className="px-6 py-3 text-left">Type</MonoTh>
+                            {deploymentId && (
+                                <MonoTh className="px-6 py-3 text-left">Source</MonoTh>
+                            )}
                             {showEnvColumn && (
                                 <MonoTh className="px-6 py-3 text-left">Environment</MonoTh>
                             )}
@@ -1119,7 +1137,7 @@ export function EnvVarsList({ projectName, deploymentId }) {
                     </MonoTableHead>
                     <MonoTableBody>
                         {envVars.length === 0 ? (
-                            <MonoTableEmptyRow colSpan={deploymentId ? 3 : (showEnvColumn ? 5 : 4)}>No environment variables configured.</MonoTableEmptyRow>
+                            <MonoTableEmptyRow colSpan={deploymentId ? 4 : (showEnvColumn ? 5 : 4)}>No environment variables configured.</MonoTableEmptyRow>
                         ) : (
                             envVars.map(env => (
                             <MonoTableRow key={`${env.key}-${env.environment || ''}`} interactive className="transition-colors">
@@ -1176,6 +1194,11 @@ export function EnvVarsList({ projectName, deploymentId }) {
                                         <MonoTag color="gray">plain</MonoTag>
                                     )}
                                 </MonoTd>
+                                {deploymentId && (
+                                    <MonoTd className="px-6 py-4 text-sm">
+                                        <EnvVarSourceTag source={env.source} />
+                                    </MonoTd>
+                                )}
                                 {showEnvColumn && (
                                     <MonoTd className="px-6 py-4 text-sm text-gray-700 dark:text-gray-300">
                                         {env.environment ? (
