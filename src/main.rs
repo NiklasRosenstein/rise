@@ -24,12 +24,16 @@ mod server;
 use cli::*;
 
 /// Resolve project name from explicit argument or rise.toml fallback.
-///
-/// When `preloaded_config` is provided, it is used instead of loading from disk.
-/// This avoids duplicate loads (and duplicate log/warning output) when the caller
+#[cfg(feature = "cli")]
+fn resolve_project_name(explicit_project: Option<String>, path: &str) -> Result<String> {
+    resolve_project_name_with_config(explicit_project, path, None)
+}
+
+/// Like [`resolve_project_name`] but accepts a preloaded config to avoid
+/// duplicate disk loads (and duplicate log/warning output) when the caller
 /// has already loaded the config for other purposes.
 #[cfg(feature = "cli")]
-fn resolve_project_name(
+fn resolve_project_name_with_config(
     explicit_project: Option<String>,
     path: &str,
     preloaded_config: Option<&build::config::ProjectBuildConfig>,
@@ -994,7 +998,7 @@ async fn main() -> Result<()> {
                         identifier,
                         path,
                     } => {
-                        let project_name = resolve_project_name(project.clone(), path, None)?;
+                        let project_name = resolve_project_name(project.clone(), path)?;
                         cli::project::add_app_user(
                             &http_client,
                             &backend_url,
@@ -1009,7 +1013,7 @@ async fn main() -> Result<()> {
                         identifier,
                         path,
                     } => {
-                        let project_name = resolve_project_name(project.clone(), path, None)?;
+                        let project_name = resolve_project_name(project.clone(), path)?;
                         cli::project::remove_app_user(
                             &http_client,
                             &backend_url,
@@ -1020,7 +1024,7 @@ async fn main() -> Result<()> {
                         .await?;
                     }
                     AppUserCommands::List { project, path } => {
-                        let project_name = resolve_project_name(project.clone(), path, None)?;
+                        let project_name = resolve_project_name(project.clone(), path)?;
                         cli::project::list_app_users(
                             &http_client,
                             &backend_url,
@@ -1135,8 +1139,11 @@ async fn main() -> Result<()> {
                 let toml_config = build::config::load_full_project_config(&args.path)
                     .context("Failed to load rise.toml")?;
 
-                let project_name =
-                    resolve_project_name(args.project.clone(), &args.path, toml_config.as_ref())?;
+                let project_name = resolve_project_name_with_config(
+                    args.project.clone(),
+                    &args.path,
+                    toml_config.as_ref(),
+                )?;
 
                 // Both --image and --from cannot be specified together
                 if args.image.is_some() && args.from.is_some() {
@@ -1313,7 +1320,7 @@ async fn main() -> Result<()> {
                 group,
                 limit,
             } => {
-                let project_name = resolve_project_name(project.clone(), path, None)?;
+                let project_name = resolve_project_name(project.clone(), path)?;
                 deployment::list_deployments(
                     &http_client,
                     &backend_url,
@@ -1331,7 +1338,7 @@ async fn main() -> Result<()> {
                 follow,
                 timeout,
             } => {
-                let project_name = resolve_project_name(project.clone(), path, None)?;
+                let project_name = resolve_project_name(project.clone(), path)?;
                 deployment::show_deployment(
                     &http_client,
                     &backend_url,
@@ -1348,7 +1355,7 @@ async fn main() -> Result<()> {
                 path,
                 group,
             } => {
-                let project_name = resolve_project_name(project.clone(), path, None)?;
+                let project_name = resolve_project_name(project.clone(), path)?;
                 deployment::stop_deployments_by_group(
                     &http_client,
                     &backend_url,
@@ -1367,7 +1374,7 @@ async fn main() -> Result<()> {
                 timestamps,
                 since,
             } => {
-                let project_name = resolve_project_name(project.clone(), path, None)?;
+                let project_name = resolve_project_name(project.clone(), path)?;
                 let token = config.get_token().ok_or_else(|| {
                     anyhow::anyhow!("Not logged in. Please run 'rise login' first.")
                 })?;
@@ -1394,7 +1401,7 @@ async fn main() -> Result<()> {
                 issuer,
                 claims,
             } => {
-                let project_name = resolve_project_name(project.clone(), path, None)?;
+                let project_name = resolve_project_name(project.clone(), path)?;
                 let claims_map: std::collections::HashMap<String, String> =
                     claims.iter().cloned().collect();
 
@@ -1426,7 +1433,7 @@ async fn main() -> Result<()> {
                 .await?;
             }
             ServiceAccountCommands::List { project, path } => {
-                let project_name = resolve_project_name(project.clone(), path, None)?;
+                let project_name = resolve_project_name(project.clone(), path)?;
                 service_account::list_service_accounts(
                     &http_client,
                     &backend_url,
@@ -1436,7 +1443,7 @@ async fn main() -> Result<()> {
                 .await?;
             }
             ServiceAccountCommands::Show { project, path, id } => {
-                let project_name = resolve_project_name(project.clone(), path, None)?;
+                let project_name = resolve_project_name(project.clone(), path)?;
                 service_account::show_service_account(
                     &http_client,
                     &backend_url,
@@ -1447,7 +1454,7 @@ async fn main() -> Result<()> {
                 .await?;
             }
             ServiceAccountCommands::Delete { project, path, id } => {
-                let project_name = resolve_project_name(project.clone(), path, None)?;
+                let project_name = resolve_project_name(project.clone(), path)?;
                 service_account::delete_service_account(
                     &http_client,
                     &backend_url,
@@ -1476,7 +1483,7 @@ async fn main() -> Result<()> {
                     protected,
                     environment,
                 } => {
-                    let project_name = resolve_project_name(project.clone(), path, None)?;
+                    let project_name = resolve_project_name(project.clone(), path)?;
                     // Protected defaults to true for secrets, false for non-secrets
                     // Can be explicitly overridden with --protected flag
                     let is_protected = protected.unwrap_or(*secret);
@@ -1498,7 +1505,7 @@ async fn main() -> Result<()> {
                     path,
                     environment,
                 } => {
-                    let project_name = resolve_project_name(project.clone(), path, None)?;
+                    let project_name = resolve_project_name(project.clone(), path)?;
                     env::list_env(
                         &http_client,
                         &backend_url,
@@ -1514,7 +1521,7 @@ async fn main() -> Result<()> {
                     key,
                     environment,
                 } => {
-                    let project_name = resolve_project_name(project.clone(), path, None)?;
+                    let project_name = resolve_project_name(project.clone(), path)?;
                     env::get_env(
                         &http_client,
                         &backend_url,
@@ -1531,7 +1538,7 @@ async fn main() -> Result<()> {
                     key,
                     environment,
                 } => {
-                    let project_name = resolve_project_name(project.clone(), path, None)?;
+                    let project_name = resolve_project_name(project.clone(), path)?;
                     env::unset_env(
                         &http_client,
                         &backend_url,
@@ -1548,7 +1555,7 @@ async fn main() -> Result<()> {
                     file,
                     environment,
                 } => {
-                    let project_name = resolve_project_name(project.clone(), path, None)?;
+                    let project_name = resolve_project_name(project.clone(), path)?;
                     env::import_env(
                         &http_client,
                         &backend_url,
@@ -1564,7 +1571,7 @@ async fn main() -> Result<()> {
                     path,
                     deployment_id,
                 } => {
-                    let project_name = resolve_project_name(project.clone(), path, None)?;
+                    let project_name = resolve_project_name(project.clone(), path)?;
                     env::list_deployment_env(
                         &http_client,
                         &backend_url,
@@ -1586,12 +1593,12 @@ async fn main() -> Result<()> {
                     path,
                     domain,
                 } => {
-                    let project_name = resolve_project_name(project.clone(), path, None)?;
+                    let project_name = resolve_project_name(project.clone(), path)?;
                     domain::add_domain(&http_client, &backend_url, &token, &project_name, domain)
                         .await?;
                 }
                 DomainCommands::List { project, path } => {
-                    let project_name = resolve_project_name(project.clone(), path, None)?;
+                    let project_name = resolve_project_name(project.clone(), path)?;
                     domain::list_domains(&http_client, &backend_url, &token, &project_name).await?;
                 }
                 DomainCommands::Remove {
@@ -1599,7 +1606,7 @@ async fn main() -> Result<()> {
                     path,
                     domain,
                 } => {
-                    let project_name = resolve_project_name(project.clone(), path, None)?;
+                    let project_name = resolve_project_name(project.clone(), path)?;
                     domain::remove_domain(
                         &http_client,
                         &backend_url,
@@ -1619,7 +1626,7 @@ async fn main() -> Result<()> {
                 r#type,
                 spec,
             } => {
-                let project_name = resolve_project_name(project.clone(), path, None)?;
+                let project_name = resolve_project_name(project.clone(), path)?;
                 let spec: serde_json::Value =
                     serde_json::from_str(spec).context("Failed to parse spec as JSON")?;
                 extension::create_extension(&project_name, extension, r#type, spec).await?;
@@ -1630,7 +1637,7 @@ async fn main() -> Result<()> {
                 extension,
                 spec,
             } => {
-                let project_name = resolve_project_name(project.clone(), path, None)?;
+                let project_name = resolve_project_name(project.clone(), path)?;
                 let spec: serde_json::Value =
                     serde_json::from_str(spec).context("Failed to parse spec as JSON")?;
                 extension::update_extension(&project_name, extension, spec).await?;
@@ -1641,13 +1648,13 @@ async fn main() -> Result<()> {
                 extension,
                 spec,
             } => {
-                let project_name = resolve_project_name(project.clone(), path, None)?;
+                let project_name = resolve_project_name(project.clone(), path)?;
                 let spec: serde_json::Value =
                     serde_json::from_str(spec).context("Failed to parse spec as JSON")?;
                 extension::patch_extension(&project_name, extension, spec).await?;
             }
             ExtensionCommands::List { project, path } => {
-                let project_name = resolve_project_name(project.clone(), path, None)?;
+                let project_name = resolve_project_name(project.clone(), path)?;
                 extension::list_extensions(&project_name).await?;
             }
             ExtensionCommands::Show {
@@ -1655,7 +1662,7 @@ async fn main() -> Result<()> {
                 path,
                 extension,
             } => {
-                let project_name = resolve_project_name(project.clone(), path, None)?;
+                let project_name = resolve_project_name(project.clone(), path)?;
                 extension::show_extension(&project_name, extension).await?;
             }
             ExtensionCommands::Delete {
@@ -1663,7 +1670,7 @@ async fn main() -> Result<()> {
                 path,
                 extension,
             } => {
-                let project_name = resolve_project_name(project.clone(), path, None)?;
+                let project_name = resolve_project_name(project.clone(), path)?;
                 extension::delete_extension(&project_name, extension).await?;
             }
         },

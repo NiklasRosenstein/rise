@@ -56,7 +56,7 @@ pub async fn handle_environment_command(
             production,
             color,
         } => {
-            let project_name = crate::resolve_project_name(project.clone(), path, None)?;
+            let project_name = crate::resolve_project_name(project.clone(), path)?;
             create_environment(
                 http_client,
                 backend_url,
@@ -70,7 +70,7 @@ pub async fn handle_environment_command(
             .await
         }
         crate::EnvironmentCommands::List { project, path } => {
-            let project_name = crate::resolve_project_name(project.clone(), path, None)?;
+            let project_name = crate::resolve_project_name(project.clone(), path)?;
             list_environments(http_client, backend_url, &token, &project_name).await
         }
         crate::EnvironmentCommands::Show {
@@ -78,7 +78,7 @@ pub async fn handle_environment_command(
             project,
             path,
         } => {
-            let project_name = crate::resolve_project_name(project.clone(), path, None)?;
+            let project_name = crate::resolve_project_name(project.clone(), path)?;
             show_environment(http_client, backend_url, &token, &project_name, name).await
         }
         crate::EnvironmentCommands::Update {
@@ -90,7 +90,7 @@ pub async fn handle_environment_command(
             production,
             color,
         } => {
-            let project_name = crate::resolve_project_name(project.clone(), path, None)?;
+            let project_name = crate::resolve_project_name(project.clone(), path)?;
             update_environment(
                 http_client,
                 backend_url,
@@ -109,7 +109,7 @@ pub async fn handle_environment_command(
             project,
             path,
         } => {
-            let project_name = crate::resolve_project_name(project.clone(), path, None)?;
+            let project_name = crate::resolve_project_name(project.clone(), path)?;
             delete_environment(http_client, backend_url, &token, &project_name, name).await
         }
     }
