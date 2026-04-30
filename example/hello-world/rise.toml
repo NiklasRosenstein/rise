@@ -7,7 +7,13 @@ access_class = "private"
 custom_domains = []
 
 [project.env]
+APP_ENV = "production"
 
+[environments.production]
+env = { LOG_LEVEL = "warn" }
+
+[environments.staging]
+env = { LOG_LEVEL = "debug" }
 # Build-time arguments (optional)
 # These are passed to the build process and can configure build behavior
 # Uncomment to use:

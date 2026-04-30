@@ -45,6 +45,7 @@ pub async fn run_locally(
         image_tag.clone(),
         options.path.to_string(),
         options.build_args,
+        None,
     )
     .with_push(false); // Never push local dev images
 

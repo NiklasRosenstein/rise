@@ -248,6 +248,36 @@ async fn insert_rise_env_vars(
     Ok(())
 }
 
+/// Filter env overrides by target environment.
+///
+/// - `for_environment: None` → always included (global override)
+/// - `for_environment: Some(name)` → included only if name matches `resolved_environment`
+///
+/// Logs a warning for each override that was dropped because its `for_environment`
+/// didn't match the resolved environment.
+fn filter_env_overrides_by_environment<'a>(
+    overrides: &'a [models::EnvOverride],
+    resolved_environment: Option<&str>,
+) -> Vec<&'a models::EnvOverride> {
+    let mut result = Vec::new();
+    for o in overrides {
+        match &o.for_environment {
+            None => result.push(o),
+            Some(env_name) => {
+                if resolved_environment == Some(env_name.as_str()) {
+                    result.push(o);
+                } else {
+                    warn!(
+                        "Env override '{}' skipped: for_environment '{}' does not match resolved environment {:?}",
+                        o.key, env_name, resolved_environment
+                    );
+                }
+            }
+        }
+    }
+    result
+}
+
 /// Apply env var overrides from the deployment request.
 ///
 /// Encrypts secret values and upserts each override into the deployment's env vars.
@@ -259,6 +289,7 @@ async fn apply_env_overrides(
     state: &AppState,
     deployment_id: uuid::Uuid,
     overrides: &[models::EnvOverride],
+    resolved_environment: Option<&str>,
 ) -> Result<(), ServerError> {
     use crate::db::models::EnvVarSource;
 
@@ -266,13 +297,21 @@ async fn apply_env_overrides(
         return Ok(());
     }
 
+    let filtered = filter_env_overrides_by_environment(overrides, resolved_environment);
+
+    if filtered.is_empty() {
+        return Ok(());
+    }
+
     info!(
-        "Applying {} env override(s) to deployment {}",
+        "Applying {} env override(s) to deployment {} ({} total, environment: {:?})",
+        filtered.len(),
+        deployment_id,
         overrides.len(),
-        deployment_id
+        resolved_environment,
     );
 
-    for env_override in overrides {
+    for env_override in filtered {
         let is_protected = validate_env_override(env_override)?;
 
         // Validate source: only client-allowed values (toml, cli) are accepted.
@@ -852,7 +891,13 @@ pub async fn create_deployment(
         }
 
         // Apply env overrides from the request
-        apply_env_overrides(&state, new_deployment.id, &payload.env_overrides).await?;
+        apply_env_overrides(
+            &state,
+            new_deployment.id,
+            &payload.env_overrides,
+            resolved_environment.as_ref().map(|e| e.name.as_str()),
+        )
+        .await?;
 
         // Upsert PORT env var with the final http_port value
         crate::db::env_vars::upsert_deployment_env_var(
@@ -962,7 +1007,13 @@ pub async fn create_deployment(
             .internal_err("Failed to copy environment variables")?;
 
             // Apply env overrides from the request
-            apply_env_overrides(&state, deployment.id, &payload.env_overrides).await?;
+            apply_env_overrides(
+                &state,
+                deployment.id,
+                &payload.env_overrides,
+                resolved_environment.as_ref().map(|e| e.name.as_str()),
+            )
+            .await?;
 
             crate::db::env_vars::upsert_deployment_env_var(
                 &state.db_pool,
@@ -1049,7 +1100,13 @@ pub async fn create_deployment(
         .internal_err("Failed to copy environment variables")?;
 
         // Apply env overrides from the request
-        apply_env_overrides(&state, deployment.id, &payload.env_overrides).await?;
+        apply_env_overrides(
+            &state,
+            deployment.id,
+            &payload.env_overrides,
+            resolved_environment.as_ref().map(|e| e.name.as_str()),
+        )
+        .await?;
 
         // Upsert PORT env var with the resolved effective value
         // This overwrites any user-set PORT with the resolved value (which may be the same)
@@ -1138,7 +1195,13 @@ pub async fn create_deployment(
         .internal_err("Failed to copy environment variables")?;
 
         // Apply env overrides from the request
-        apply_env_overrides(&state, deployment.id, &payload.env_overrides).await?;
+        apply_env_overrides(
+            &state,
+            deployment.id,
+            &payload.env_overrides,
+            resolved_environment.as_ref().map(|e| e.name.as_str()),
+        )
+        .await?;
 
         // Upsert PORT env var with the resolved effective value
         // This overwrites any user-set PORT with the resolved value (which may be the same)
@@ -2011,6 +2074,7 @@ mod tests {
             is_secret: false,
             is_protected: Some(false),
             source: None,
+            for_environment: None,
         })
         .unwrap_err();
 
@@ -2029,6 +2093,7 @@ mod tests {
             is_secret: false,
             is_protected: Some(true),
             source: None,
+            for_environment: None,
         })
         .unwrap_err();
 
@@ -2047,6 +2112,7 @@ mod tests {
             is_secret: false,
             is_protected: Some(false),
             source: None,
+            for_environment: None,
         })
         .unwrap_err();
 
@@ -2065,6 +2131,7 @@ mod tests {
             is_secret: true,
             is_protected: None,
             source: None,
+            for_environment: None,
         })
         .unwrap();
 
@@ -2079,9 +2146,78 @@ mod tests {
             is_secret: true,
             is_protected: Some(false),
             source: None,
+            for_environment: None,
         });
 
         assert!(!is_protected);
+    }
+
+    fn make_override(key: &str, for_environment: Option<&str>) -> EnvOverride {
+        EnvOverride {
+            key: key.to_string(),
+            value: "v".to_string(),
+            is_secret: false,
+            is_protected: None,
+            source: None,
+            for_environment: for_environment.map(|s| s.to_string()),
+        }
+    }
+
+    #[test]
+    fn filter_env_overrides_global_always_included() {
+        let overrides = vec![make_override("A", None), make_override("B", None)];
+        let result = super::filter_env_overrides_by_environment(&overrides, Some("production"));
+        assert_eq!(result.len(), 2);
+    }
+
+    #[test]
+    fn filter_env_overrides_scoped_included_when_env_matches() {
+        let overrides = vec![make_override("A", Some("production"))];
+        let result = super::filter_env_overrides_by_environment(&overrides, Some("production"));
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].key, "A");
+    }
+
+    #[test]
+    fn filter_env_overrides_scoped_excluded_when_env_differs() {
+        let overrides = vec![make_override("A", Some("staging"))];
+        let result = super::filter_env_overrides_by_environment(&overrides, Some("production"));
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn filter_env_overrides_mixed_global_and_scoped() {
+        let overrides = vec![
+            make_override("GLOBAL", None),
+            make_override("PROD_ONLY", Some("production")),
+            make_override("STG_ONLY", Some("staging")),
+        ];
+        let result = super::filter_env_overrides_by_environment(&overrides, Some("production"));
+        assert_eq!(result.len(), 2);
+        let keys: Vec<&str> = result.iter().map(|o| o.key.as_str()).collect();
+        assert!(keys.contains(&"GLOBAL"));
+        assert!(keys.contains(&"PROD_ONLY"));
+    }
+
+    #[test]
+    fn filter_env_overrides_all_scoped_none_matching() {
+        let overrides = vec![
+            make_override("A", Some("staging")),
+            make_override("B", Some("dev")),
+        ];
+        let result = super::filter_env_overrides_by_environment(&overrides, Some("production"));
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn filter_env_overrides_no_resolved_env_only_globals_pass() {
+        let overrides = vec![
+            make_override("GLOBAL", None),
+            make_override("SCOPED", Some("production")),
+        ];
+        let result = super::filter_env_overrides_by_environment(&overrides, None);
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].key, "GLOBAL");
     }
 
     #[sqlx::test]

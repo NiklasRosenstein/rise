@@ -560,7 +560,13 @@ export function ServiceAccountsList({ projectName }) {
                                         .join(', ')}
                                 </MonoTd>
                                 <MonoTd className="px-6 py-4 text-sm text-gray-700 dark:text-gray-300">
-                                    {sa.allowed_environments ? sa.allowed_environments.join(', ') : 'All'}
+                                    {sa.allowed_environments ? sa.allowed_environments.map((envName, i) => (
+                                        <span key={envName} className="inline-flex items-center gap-1.5">
+                                            {i > 0 && ', '}
+                                            <EnvironmentColorDot color={environments.find(e => e.name === envName)?.color} />
+                                            {envName}
+                                        </span>
+                                    )) : 'All'}
                                 </MonoTd>
                                 <MonoTd className="px-6 py-4 whitespace-nowrap text-sm text-gray-700 dark:text-gray-300">{formatDate(sa.created_at)}</MonoTd>
                                 <MonoTd className="px-6 py-4 text-sm">
@@ -949,6 +955,30 @@ export function DomainsList({ projectName, defaultUrl = null }) {
     );
 }
 
+const ENV_VAR_SOURCE_COLORS = {
+    system: 'gray',
+    global: 'green',
+    extension: 'purple',
+    toml: 'yellow',
+    cli: 'blue',
+};
+
+function EnvVarSourceTag({ source, environments = [] }) {
+    if (!source) return null;
+    const envPrefix = 'env:';
+    if (source.startsWith(envPrefix)) {
+        const envName = source.slice(envPrefix.length);
+        const envColor = environments.find(e => e.name === envName)?.color;
+        return (
+            <span className="inline-flex items-center gap-1.5">
+                <EnvironmentColorDot color={envColor} />
+                <MonoTag color="blue">{envName}</MonoTag>
+            </span>
+        );
+    }
+    return <MonoTag color={ENV_VAR_SOURCE_COLORS[source] || 'gray'}>{source}</MonoTag>;
+}
+
 // Environment Variables Component
 export function EnvVarsList({ projectName, deploymentId }) {
     const [envVars, setEnvVars] = useState([]);
@@ -977,13 +1007,12 @@ export function EnvVarsList({ projectName, deploymentId }) {
         is_protected: type === 'protected',
     });
 
-    // Load environments for filter dropdown (project-level only)
+    // Load environments for filter dropdown and source color dots
     useEffect(() => {
-        if (deploymentId) return;
         api.getProjectEnvironments(projectName)
             .then(data => setEnvironments(data || []))
             .catch(() => {});
-    }, [projectName, deploymentId]);
+    }, [projectName]);
 
     const loadEnvVars = useCallback(async () => {
         try {
@@ -1109,6 +1138,9 @@ export function EnvVarsList({ projectName, deploymentId }) {
                             <MonoTh className="px-6 py-3 text-left">Key</MonoTh>
                             <MonoTh className="px-6 py-3 text-left">Value</MonoTh>
                             <MonoTh className="px-6 py-3 text-left">Type</MonoTh>
+                            {deploymentId && (
+                                <MonoTh className="px-6 py-3 text-left">Source</MonoTh>
+                            )}
                             {showEnvColumn && (
                                 <MonoTh className="px-6 py-3 text-left">Environment</MonoTh>
                             )}
@@ -1119,7 +1151,7 @@ export function EnvVarsList({ projectName, deploymentId }) {
                     </MonoTableHead>
                     <MonoTableBody>
                         {envVars.length === 0 ? (
-                            <MonoTableEmptyRow colSpan={deploymentId ? 3 : (showEnvColumn ? 5 : 4)}>No environment variables configured.</MonoTableEmptyRow>
+                            <MonoTableEmptyRow colSpan={deploymentId ? 4 : (showEnvColumn ? 5 : 4)}>No environment variables configured.</MonoTableEmptyRow>
                         ) : (
                             envVars.map(env => (
                             <MonoTableRow key={`${env.key}-${env.environment || ''}`} interactive className="transition-colors">
@@ -1176,6 +1208,11 @@ export function EnvVarsList({ projectName, deploymentId }) {
                                         <MonoTag color="gray">plain</MonoTag>
                                     )}
                                 </MonoTd>
+                                {deploymentId && (
+                                    <MonoTd className="px-6 py-4 text-sm">
+                                        <EnvVarSourceTag source={env.source} environments={environments} />
+                                    </MonoTd>
+                                )}
                                 {showEnvColumn && (
                                     <MonoTd className="px-6 py-4 text-sm text-gray-700 dark:text-gray-300">
                                         {env.environment ? (
