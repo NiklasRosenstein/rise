@@ -736,8 +736,15 @@ impl AppState {
         tracing::info!("Initialized encrypt endpoint rate limiter (100 req/hour per user)");
 
         // Initialize OAuth endpoint rate limiter
-        let oauth_rate_limiter = Arc::new(crate::server::rate_limit::OAuthRateLimiter::new());
-        tracing::info!("Initialized OAuth endpoint rate limiter (10 req/5min per IP, 5 req/5min per session, 1000 req/min global)");
+        let rl = &settings.server.oauth_rate_limit;
+        let oauth_rate_limiter = Arc::new(crate::server::rate_limit::OAuthRateLimiter::new(rl));
+        tracing::info!(
+            per_project = %format!("{} req/{}s", rl.per_project_max, rl.per_project_window_secs),
+            per_ip = %format!("{} req/{}s", rl.per_ip_max, rl.per_ip_window_secs),
+            per_session = %format!("{} req/{}s", rl.per_session_max, rl.per_session_window_secs),
+            global = %format!("{} req/{}s", rl.global_max, rl.global_window_secs),
+            "Initialized OAuth endpoint rate limiter",
+        );
 
         // Extract access_classes from deployment controller settings
         // Filter out null values (used to remove inherited access classes)
