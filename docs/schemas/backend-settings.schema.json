@@ -805,32 +805,32 @@
       "type": "object"
     },
     "OAuthRateLimitSettings": {
-      "description": "Rate limiting configuration for OAuth endpoints (authorize, callback, token).\n\nFour independent limits are enforced:\n- **Per-project**: keyed by project name — limits traffic to each project independently\n  so one busy project cannot starve others.\n- **Per-IP**: keyed by client IP — limits traffic from a single source address.\n- **Per-session**: keyed by a hash of the `rise_jwt` cookie — limits per-user traffic.\n- **Global**: shared across all requests — caps total throughput.",
+      "description": "Rate limiting configuration for OAuth endpoints (authorize, callback, token).\n\nFour independent limits are enforced:\n- **Per-project**: keyed by project name — limits traffic to each project independently\n  so one busy project cannot starve others.\n- **Per-IP**: keyed by client IP — limits traffic from a single source address.\n- **Per-session**: keyed by a hash of the `rise_jwt` cookie — limits per-user traffic.\n- **Global**: shared across all requests — caps total throughput.\n\nSetting any `*_max` value to `0` effectively blocks all OAuth traffic for that tier\n(every request will exceed the limit immediately).",
       "properties": {
         "global_max": {
-          "default": 1000,
-          "description": "Maximum total OAuth requests per window across all clients (default: 1000)",
+          "default": 2000,
+          "description": "Maximum total OAuth requests per window across all clients (default: 2000)",
           "format": "uint32",
           "minimum": 0,
           "type": "integer"
         },
         "global_window_secs": {
-          "default": 10,
-          "description": "Window in seconds for the global limit (default: 10)",
+          "default": 60,
+          "description": "Window in seconds for the global limit (default: 60)",
           "format": "uint64",
           "minimum": 0,
           "type": "integer"
         },
         "per_ip_max": {
-          "default": 500,
-          "description": "Maximum requests per client IP per window (default: 500)",
+          "default": 50,
+          "description": "Maximum requests per client IP per window (default: 50)",
           "format": "uint32",
           "minimum": 0,
           "type": "integer"
         },
         "per_ip_window_secs": {
-          "default": 10,
-          "description": "Window in seconds for per-IP limit (default: 10)",
+          "default": 60,
+          "description": "Window in seconds for per-IP limit (default: 60)",
           "format": "uint64",
           "minimum": 0,
           "type": "integer"
@@ -843,22 +843,22 @@
           "type": "integer"
         },
         "per_project_window_secs": {
-          "default": 10,
-          "description": "Window in seconds for per-project limit (default: 10)",
+          "default": 60,
+          "description": "Window in seconds for per-project limit (default: 60)",
           "format": "uint64",
           "minimum": 0,
           "type": "integer"
         },
         "per_session_max": {
-          "default": 30,
-          "description": "Maximum requests per session (rise_jwt cookie) per window (default: 30)",
+          "default": 20,
+          "description": "Maximum requests per session (rise_jwt cookie) per window (default: 20)",
           "format": "uint32",
           "minimum": 0,
           "type": "integer"
         },
         "per_session_window_secs": {
-          "default": 10,
-          "description": "Window in seconds for per-session limit (default: 10)",
+          "default": 60,
+          "description": "Window in seconds for per-session limit (default: 60)",
           "format": "uint64",
           "minimum": 0,
           "type": "integer"

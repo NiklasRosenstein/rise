@@ -92,33 +92,36 @@ pub struct ServerSettings {
 /// - **Per-IP**: keyed by client IP — limits traffic from a single source address.
 /// - **Per-session**: keyed by a hash of the `rise_jwt` cookie — limits per-user traffic.
 /// - **Global**: shared across all requests — caps total throughput.
+///
+/// Setting any `*_max` value to `0` effectively blocks all OAuth traffic for that tier
+/// (every request will exceed the limit immediately).
 #[derive(Debug, Deserialize, Clone, JsonSchema)]
 pub struct OAuthRateLimitSettings {
     /// Maximum requests per project per window (default: 500)
     #[serde(default = "default_oauth_per_project_max")]
     pub per_project_max: u32,
-    /// Window in seconds for per-project limit (default: 10)
+    /// Window in seconds for per-project limit (default: 60)
     #[serde(default = "default_oauth_per_project_window_secs")]
     pub per_project_window_secs: u64,
 
-    /// Maximum requests per client IP per window (default: 500)
+    /// Maximum requests per client IP per window (default: 50)
     #[serde(default = "default_oauth_per_ip_max")]
     pub per_ip_max: u32,
-    /// Window in seconds for per-IP limit (default: 10)
+    /// Window in seconds for per-IP limit (default: 60)
     #[serde(default = "default_oauth_per_ip_window_secs")]
     pub per_ip_window_secs: u64,
 
-    /// Maximum requests per session (rise_jwt cookie) per window (default: 30)
+    /// Maximum requests per session (rise_jwt cookie) per window (default: 20)
     #[serde(default = "default_oauth_per_session_max")]
     pub per_session_max: u32,
-    /// Window in seconds for per-session limit (default: 10)
+    /// Window in seconds for per-session limit (default: 60)
     #[serde(default = "default_oauth_per_session_window_secs")]
     pub per_session_window_secs: u64,
 
-    /// Maximum total OAuth requests per window across all clients (default: 1000)
+    /// Maximum total OAuth requests per window across all clients (default: 2000)
     #[serde(default = "default_oauth_global_max")]
     pub global_max: u32,
-    /// Window in seconds for the global limit (default: 10)
+    /// Window in seconds for the global limit (default: 60)
     #[serde(default = "default_oauth_global_window_secs")]
     pub global_window_secs: u64,
 }
@@ -163,31 +166,31 @@ fn default_oauth_per_project_max() -> u32 {
 }
 
 fn default_oauth_per_project_window_secs() -> u64 {
-    10
+    60
 }
 
 fn default_oauth_per_ip_max() -> u32 {
-    500
+    50
 }
 
 fn default_oauth_per_ip_window_secs() -> u64 {
-    10
+    60
 }
 
 fn default_oauth_per_session_max() -> u32 {
-    30
+    20
 }
 
 fn default_oauth_per_session_window_secs() -> u64 {
-    10
+    60
 }
 
 fn default_oauth_global_max() -> u32 {
-    1000
+    2000
 }
 
 fn default_oauth_global_window_secs() -> u64 {
-    10
+    60
 }
 
 fn default_reconcile_interval() -> u64 {

@@ -353,7 +353,7 @@ pub async fn authorize(
     let session_key = crate::server::rate_limit::extract_session_key(&headers);
     if let Err(retry_after) = state
         .oauth_rate_limiter
-        .increment_and_check(&client_ip, session_key.as_deref(), Some(&project_name))
+        .increment_and_check(&client_ip, session_key.as_deref(), &project_name)
         .await
     {
         tracing::warn!(
@@ -599,7 +599,7 @@ pub async fn callback(
     let session_key = crate::server::rate_limit::extract_session_key(&headers);
     if let Err(retry_after) = state
         .oauth_rate_limiter
-        .increment_and_check(&client_ip, session_key.as_deref(), Some(&project_name))
+        .increment_and_check(&client_ip, session_key.as_deref(), &project_name)
         .await
     {
         tracing::warn!(
@@ -1087,7 +1087,7 @@ pub async fn token_endpoint(
     let session_key = crate::server::rate_limit::extract_session_key(&headers);
     if let Err(retry_after) = state
         .oauth_rate_limiter
-        .increment_and_check(&client_ip, session_key.as_deref(), Some(&project_name))
+        .increment_and_check(&client_ip, session_key.as_deref(), &project_name)
         .await
     {
         tracing::warn!(
