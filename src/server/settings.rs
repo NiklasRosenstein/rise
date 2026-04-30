@@ -93,24 +93,24 @@ pub struct ServerSettings {
 /// - **Global**: shared across all requests — caps total throughput.
 #[derive(Debug, Deserialize, Clone, JsonSchema)]
 pub struct OAuthRateLimitSettings {
-    /// Maximum requests per project+IP per window (default: 100)
+    /// Maximum requests per project+IP per window (default: 500)
     #[serde(default = "default_oauth_per_project_max")]
     pub per_project_max: u32,
-    /// Window in seconds for per-project+IP limit (default: 60)
+    /// Window in seconds for per-project+IP limit (default: 10)
     #[serde(default = "default_oauth_per_project_window_secs")]
     pub per_project_window_secs: u64,
 
     /// Maximum requests per session (rise_jwt cookie) per window (default: 30)
     #[serde(default = "default_oauth_per_session_max")]
     pub per_session_max: u32,
-    /// Window in seconds for per-session limit (default: 60)
+    /// Window in seconds for per-session limit (default: 10)
     #[serde(default = "default_oauth_per_session_window_secs")]
     pub per_session_window_secs: u64,
 
-    /// Maximum total OAuth requests per window across all clients (default: 3000)
+    /// Maximum total OAuth requests per window across all clients (default: 1000)
     #[serde(default = "default_oauth_global_max")]
     pub global_max: u32,
-    /// Window in seconds for the global limit (default: 60)
+    /// Window in seconds for the global limit (default: 10)
     #[serde(default = "default_oauth_global_window_secs")]
     pub global_window_secs: u64,
 }
@@ -149,11 +149,11 @@ fn default_jwt_expiry_seconds() -> u64 {
 }
 
 fn default_oauth_per_project_max() -> u32 {
-    100
+    500
 }
 
 fn default_oauth_per_project_window_secs() -> u64 {
-    60
+    10
 }
 
 fn default_oauth_per_session_max() -> u32 {
@@ -161,15 +161,15 @@ fn default_oauth_per_session_max() -> u32 {
 }
 
 fn default_oauth_per_session_window_secs() -> u64 {
-    60
+    10
 }
 
 fn default_oauth_global_max() -> u32 {
-    3000
+    1000
 }
 
 fn default_oauth_global_window_secs() -> u64 {
-    60
+    10
 }
 
 fn default_reconcile_interval() -> u64 {

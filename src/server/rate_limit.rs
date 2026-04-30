@@ -11,9 +11,9 @@ use std::time::Duration;
 use super::settings::OAuthRateLimitSettings;
 
 /// Rate limiter for OAuth endpoints with three independent limits:
-/// - Per-project: keyed by `{project}:{ip}` (configurable, default 100 req/60s)
-/// - Per-session: keyed by `rise_jwt` cookie hash (configurable, default 30 req/60s)
-/// - Global: shared across all requests (configurable, default 3000 req/60s)
+/// - Per-project: keyed by `{project}:{ip}` (configurable, default 500 req/10s)
+/// - Per-session: keyed by `rise_jwt` cookie hash (configurable, default 30 req/10s)
+/// - Global: shared across all requests (configurable, default 1000 req/10s)
 pub struct OAuthRateLimiter {
     project_limiter: Arc<Cache<String, Arc<AtomicU32>>>,
     session_limiter: Arc<Cache<String, Arc<AtomicU32>>>,

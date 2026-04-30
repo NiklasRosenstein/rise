@@ -808,29 +808,29 @@
       "description": "Rate limiting configuration for OAuth endpoints (authorize, callback, token).\n\nThree independent limits are enforced:\n- **Per-project**: keyed by `{project_name}:{client_ip}` — limits traffic to each\n  project independently so one busy project cannot starve others.\n- **Per-session**: keyed by a hash of the `rise_jwt` cookie — limits per-user traffic.\n- **Global**: shared across all requests — caps total throughput.",
       "properties": {
         "global_max": {
-          "default": 3000,
-          "description": "Maximum total OAuth requests per window across all clients (default: 3000)",
+          "default": 1000,
+          "description": "Maximum total OAuth requests per window across all clients (default: 1000)",
           "format": "uint32",
           "minimum": 0,
           "type": "integer"
         },
         "global_window_secs": {
-          "default": 60,
-          "description": "Window in seconds for the global limit (default: 60)",
+          "default": 10,
+          "description": "Window in seconds for the global limit (default: 10)",
           "format": "uint64",
           "minimum": 0,
           "type": "integer"
         },
         "per_project_max": {
-          "default": 100,
-          "description": "Maximum requests per project+IP per window (default: 100)",
+          "default": 500,
+          "description": "Maximum requests per project+IP per window (default: 500)",
           "format": "uint32",
           "minimum": 0,
           "type": "integer"
         },
         "per_project_window_secs": {
-          "default": 60,
-          "description": "Window in seconds for per-project+IP limit (default: 60)",
+          "default": 10,
+          "description": "Window in seconds for per-project+IP limit (default: 10)",
           "format": "uint64",
           "minimum": 0,
           "type": "integer"
@@ -843,8 +843,8 @@
           "type": "integer"
         },
         "per_session_window_secs": {
-          "default": 60,
-          "description": "Window in seconds for per-session limit (default: 60)",
+          "default": 10,
+          "description": "Window in seconds for per-session limit (default: 10)",
           "format": "uint64",
           "minimum": 0,
           "type": "integer"
