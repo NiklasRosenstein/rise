@@ -10,16 +10,20 @@ use std::time::Duration;
 
 use super::settings::OAuthRateLimitSettings;
 
-/// Rate limiter for OAuth endpoints with three independent limits:
-/// - Per-project: keyed by `{project}:{ip}` (configurable, default 500 req/10s)
+/// Rate limiter for OAuth endpoints with four independent limits:
+/// - Per-project: keyed by project name (configurable, default 500 req/10s)
+/// - Per-IP: keyed by client IP (configurable, default 500 req/10s)
 /// - Per-session: keyed by `rise_jwt` cookie hash (configurable, default 30 req/10s)
 /// - Global: shared across all requests (configurable, default 1000 req/10s)
 pub struct OAuthRateLimiter {
     project_limiter: Arc<Cache<String, Arc<AtomicU32>>>,
+    ip_limiter: Arc<Cache<String, Arc<AtomicU32>>>,
     session_limiter: Arc<Cache<String, Arc<AtomicU32>>>,
     global_limiter: Arc<Cache<String, Arc<AtomicU32>>>,
     per_project_max: u32,
     per_project_window_secs: u64,
+    per_ip_max: u32,
+    per_ip_window_secs: u64,
     per_session_max: u32,
     per_session_window_secs: u64,
     global_max: u32,
@@ -27,7 +31,8 @@ pub struct OAuthRateLimiter {
 }
 
 impl OAuthRateLimiter {
-    const PROJECT_MAX_CAPACITY: u64 = 50_000;
+    const PROJECT_MAX_CAPACITY: u64 = 10_000;
+    const IP_MAX_CAPACITY: u64 = 50_000;
     const SESSION_MAX_CAPACITY: u64 = 10_000;
     const GLOBAL_MAX_CAPACITY: u64 = 1;
 
@@ -36,6 +41,12 @@ impl OAuthRateLimiter {
             Cache::builder()
                 .time_to_live(Duration::from_secs(settings.per_project_window_secs))
                 .max_capacity(Self::PROJECT_MAX_CAPACITY)
+                .build(),
+        );
+        let ip_limiter = Arc::new(
+            Cache::builder()
+                .time_to_live(Duration::from_secs(settings.per_ip_window_secs))
+                .max_capacity(Self::IP_MAX_CAPACITY)
                 .build(),
         );
         let session_limiter = Arc::new(
@@ -52,10 +63,13 @@ impl OAuthRateLimiter {
         );
         Self {
             project_limiter,
+            ip_limiter,
             session_limiter,
             global_limiter,
             per_project_max: settings.per_project_max,
             per_project_window_secs: settings.per_project_window_secs,
+            per_ip_max: settings.per_ip_max,
+            per_ip_window_secs: settings.per_ip_window_secs,
             per_session_max: settings.per_session_max,
             per_session_window_secs: settings.per_session_window_secs,
             global_max: settings.global_max,
@@ -64,9 +78,6 @@ impl OAuthRateLimiter {
     }
 
     /// Atomically increment counters and check limits.
-    ///
-    /// The `project` parameter scopes the per-IP limit so that each project gets its own
-    /// budget (key: `"{project}:{ip}"`). When `project` is `None`, the key is just the IP.
     ///
     /// Returns `Ok(())` if within limits after incrementing, `Err(retry_after_secs)` if exceeded.
     pub async fn increment_and_check(
@@ -87,20 +98,30 @@ impl OAuthRateLimiter {
             return Err(self.global_window_secs);
         }
 
-        // Per-project+IP
-        let project_key = match project {
-            Some(p) => format!("{p}:{ip}"),
-            None => ip.to_string(),
-        };
-        let project_counter = self
-            .project_limiter
-            .entry_by_ref(&project_key)
+        // Per-project
+        if let Some(p) = project {
+            let project_counter = self
+                .project_limiter
+                .entry_by_ref(p)
+                .or_insert_with(std::future::ready(Arc::new(AtomicU32::new(0))))
+                .await
+                .into_value();
+            let project_count = project_counter.fetch_add(1, Ordering::Relaxed) + 1;
+            if project_count > self.per_project_max {
+                return Err(self.per_project_window_secs);
+            }
+        }
+
+        // Per-IP
+        let ip_counter = self
+            .ip_limiter
+            .entry_by_ref(ip)
             .or_insert_with(std::future::ready(Arc::new(AtomicU32::new(0))))
             .await
             .into_value();
-        let project_count = project_counter.fetch_add(1, Ordering::Relaxed) + 1;
-        if project_count > self.per_project_max {
-            return Err(self.per_project_window_secs);
+        let ip_count = ip_counter.fetch_add(1, Ordering::Relaxed) + 1;
+        if ip_count > self.per_ip_max {
+            return Err(self.per_ip_window_secs);
         }
 
         // Per-session
@@ -207,6 +228,8 @@ mod tests {
         OAuthRateLimitSettings {
             per_project_max: 10,
             per_project_window_secs: 300,
+            per_ip_max: 10,
+            per_ip_window_secs: 300,
             per_session_max: 5,
             per_session_window_secs: 300,
             global_max: 1000,
@@ -287,37 +310,58 @@ mod tests {
     async fn test_rate_limiter_blocks_at_project_limit() {
         let settings = test_settings();
         let limiter = OAuthRateLimiter::new(&settings);
-        let ip = "10.0.0.1";
         let project = "my-project";
-        // Exhaust the per-project+IP limit
-        for _ in 0..settings.per_project_max {
-            let _ = limiter.increment_and_check(ip, None, Some(project)).await;
+        // Use different IPs so we only hit the project limit, not the IP limit
+        for i in 0..settings.per_project_max {
+            let ip = format!("10.0.0.{i}");
+            let _ = limiter.increment_and_check(&ip, None, Some(project)).await;
         }
-        // Next request should be blocked
-        let result = limiter.increment_and_check(ip, None, Some(project)).await;
+        // Next request should be blocked by project limit
+        let result = limiter
+            .increment_and_check("10.0.1.0", None, Some(project))
+            .await;
         assert!(result.is_err());
         assert_eq!(result.unwrap_err(), settings.per_project_window_secs);
+    }
+
+    #[tokio::test]
+    async fn test_rate_limiter_blocks_at_ip_limit() {
+        let settings = test_settings();
+        let limiter = OAuthRateLimiter::new(&settings);
+        let ip = "10.0.0.1";
+        // Use different projects so we only hit the IP limit, not the project limit
+        for i in 0..settings.per_ip_max {
+            let project = format!("project-{i}");
+            let _ = limiter.increment_and_check(ip, None, Some(&project)).await;
+        }
+        // Next request should be blocked by IP limit
+        let result = limiter
+            .increment_and_check(ip, None, Some("another-project"))
+            .await;
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err(), settings.per_ip_window_secs);
     }
 
     #[tokio::test]
     async fn test_rate_limiter_different_projects_independent() {
         let settings = test_settings();
         let limiter = OAuthRateLimiter::new(&settings);
-        let ip = "10.0.0.1";
+        // Use different IPs per request so we don't hit the IP limit
         // Exhaust project-a's limit
-        for _ in 0..settings.per_project_max {
+        for i in 0..settings.per_project_max {
+            let ip = format!("10.0.0.{i}");
             let _ = limiter
-                .increment_and_check(ip, None, Some("project-a"))
+                .increment_and_check(&ip, None, Some("project-a"))
                 .await;
         }
         // project-a should be blocked
         assert!(limiter
-            .increment_and_check(ip, None, Some("project-a"))
+            .increment_and_check("10.0.1.0", None, Some("project-a"))
             .await
             .is_err());
         // project-b should still be allowed
         assert!(limiter
-            .increment_and_check(ip, None, Some("project-b"))
+            .increment_and_check("10.0.1.1", None, Some("project-b"))
             .await
             .is_ok());
     }
@@ -326,17 +370,18 @@ mod tests {
     async fn test_rate_limiter_blocks_at_session_limit() {
         let settings = test_settings();
         let limiter = OAuthRateLimiter::new(&settings);
-        let ip = "10.0.0.2";
         let session = "session:abc123";
-        // Exhaust the session limit
-        for _ in 0..settings.per_session_max {
+        // Use different IPs and projects so we only hit the session limit
+        for i in 0..settings.per_session_max {
+            let ip = format!("10.0.0.{i}");
+            let project = format!("proj-{i}");
             let _ = limiter
-                .increment_and_check(ip, Some(session), Some("proj"))
+                .increment_and_check(&ip, Some(session), Some(&project))
                 .await;
         }
-        // Next request should be blocked
+        // Next request should be blocked by session limit
         let result = limiter
-            .increment_and_check(ip, Some(session), Some("proj"))
+            .increment_and_check("10.0.1.0", Some(session), Some("proj-new"))
             .await;
         assert!(result.is_err());
         assert_eq!(result.unwrap_err(), settings.per_session_window_secs);

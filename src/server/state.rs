@@ -740,6 +740,7 @@ impl AppState {
         let oauth_rate_limiter = Arc::new(crate::server::rate_limit::OAuthRateLimiter::new(rl));
         tracing::info!(
             per_project = %format!("{} req/{}s", rl.per_project_max, rl.per_project_window_secs),
+            per_ip = %format!("{} req/{}s", rl.per_ip_max, rl.per_ip_window_secs),
             per_session = %format!("{} req/{}s", rl.per_session_max, rl.per_session_window_secs),
             global = %format!("{} req/{}s", rl.global_max, rl.global_window_secs),
             "Initialized OAuth endpoint rate limiter",
