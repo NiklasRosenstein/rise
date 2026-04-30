@@ -259,6 +259,7 @@ async fn apply_env_overrides(
     state: &AppState,
     deployment_id: uuid::Uuid,
     overrides: &[models::EnvOverride],
+    resolved_environment: Option<&str>,
 ) -> Result<(), ServerError> {
     use crate::db::models::EnvVarSource;
 
@@ -266,13 +267,30 @@ async fn apply_env_overrides(
         return Ok(());
     }
 
+    // Filter overrides by target environment:
+    // - for_environment: None → always included (global override)
+    // - for_environment: Some(name) → included only if name matches resolved environment
+    let filtered: Vec<&models::EnvOverride> = overrides
+        .iter()
+        .filter(|o| match &o.for_environment {
+            None => true,
+            Some(env_name) => resolved_environment == Some(env_name.as_str()),
+        })
+        .collect();
+
+    if filtered.is_empty() {
+        return Ok(());
+    }
+
     info!(
-        "Applying {} env override(s) to deployment {}",
+        "Applying {} env override(s) to deployment {} (filtered from {}, environment: {:?})",
+        filtered.len(),
+        deployment_id,
         overrides.len(),
-        deployment_id
+        resolved_environment,
     );
 
-    for env_override in overrides {
+    for env_override in filtered {
         let is_protected = validate_env_override(env_override)?;
 
         // Validate source: only client-allowed values (toml, cli) are accepted.
@@ -852,7 +870,13 @@ pub async fn create_deployment(
         }
 
         // Apply env overrides from the request
-        apply_env_overrides(&state, new_deployment.id, &payload.env_overrides).await?;
+        apply_env_overrides(
+            &state,
+            new_deployment.id,
+            &payload.env_overrides,
+            resolved_environment.as_ref().map(|e| e.name.as_str()),
+        )
+        .await?;
 
         // Upsert PORT env var with the final http_port value
         crate::db::env_vars::upsert_deployment_env_var(
@@ -962,7 +986,13 @@ pub async fn create_deployment(
             .internal_err("Failed to copy environment variables")?;
 
             // Apply env overrides from the request
-            apply_env_overrides(&state, deployment.id, &payload.env_overrides).await?;
+            apply_env_overrides(
+                &state,
+                deployment.id,
+                &payload.env_overrides,
+                resolved_environment.as_ref().map(|e| e.name.as_str()),
+            )
+            .await?;
 
             crate::db::env_vars::upsert_deployment_env_var(
                 &state.db_pool,
@@ -1049,7 +1079,13 @@ pub async fn create_deployment(
         .internal_err("Failed to copy environment variables")?;
 
         // Apply env overrides from the request
-        apply_env_overrides(&state, deployment.id, &payload.env_overrides).await?;
+        apply_env_overrides(
+            &state,
+            deployment.id,
+            &payload.env_overrides,
+            resolved_environment.as_ref().map(|e| e.name.as_str()),
+        )
+        .await?;
 
         // Upsert PORT env var with the resolved effective value
         // This overwrites any user-set PORT with the resolved value (which may be the same)
@@ -1138,7 +1174,13 @@ pub async fn create_deployment(
         .internal_err("Failed to copy environment variables")?;
 
         // Apply env overrides from the request
-        apply_env_overrides(&state, deployment.id, &payload.env_overrides).await?;
+        apply_env_overrides(
+            &state,
+            deployment.id,
+            &payload.env_overrides,
+            resolved_environment.as_ref().map(|e| e.name.as_str()),
+        )
+        .await?;
 
         // Upsert PORT env var with the resolved effective value
         // This overwrites any user-set PORT with the resolved value (which may be the same)
@@ -2011,6 +2053,7 @@ mod tests {
             is_secret: false,
             is_protected: Some(false),
             source: None,
+            for_environment: None,
         })
         .unwrap_err();
 
@@ -2029,6 +2072,7 @@ mod tests {
             is_secret: false,
             is_protected: Some(true),
             source: None,
+            for_environment: None,
         })
         .unwrap_err();
 
@@ -2047,6 +2091,7 @@ mod tests {
             is_secret: false,
             is_protected: Some(false),
             source: None,
+            for_environment: None,
         })
         .unwrap_err();
 
@@ -2065,6 +2110,7 @@ mod tests {
             is_secret: true,
             is_protected: None,
             source: None,
+            for_environment: None,
         })
         .unwrap();
 
@@ -2079,6 +2125,7 @@ mod tests {
             is_secret: true,
             is_protected: Some(false),
             source: None,
+            for_environment: None,
         });
 
         assert!(!is_protected);

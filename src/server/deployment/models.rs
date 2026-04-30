@@ -194,6 +194,10 @@ pub struct EnvOverride {
     pub is_protected: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub source: Option<String>,
+    /// Target environment name. When set, this override is only applied if the
+    /// resolved deployment environment matches. `None` means the override is global.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub for_environment: Option<String>,
 }
 
 // Request to create a deployment
