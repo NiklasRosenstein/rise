@@ -429,6 +429,9 @@ pub struct EnvOverride {
     pub is_secret: bool,
     pub is_protected: bool,
     pub source: Option<String>,
+    /// Target environment name. When set, the server only applies this override
+    /// if the resolved deployment environment matches. `None` means global.
+    pub for_environment: Option<String>,
 }
 
 /// Options for creating a deployment
@@ -455,6 +458,8 @@ pub struct DeploymentOptions<'a> {
     /// URL to the pull request/merge request associated with this deployment.
     /// If None, auto-detection from CI environment variables is attempted.
     pub pull_request_url: Option<String>,
+    /// Pre-loaded project config from rise.toml to avoid re-loading during build.
+    pub toml_config: Option<build::config::ProjectBuildConfig>,
 }
 
 pub async fn create_deployment(
@@ -680,6 +685,7 @@ pub async fn create_deployment(
             deployment_info.image_tag.clone(),
             deploy_opts.path.to_string(),
             deploy_opts.build_args,
+            deploy_opts.toml_config,
         );
 
         // Step 2: Login to registry if credentials provided
@@ -960,6 +966,9 @@ async fn call_create_deployment_api(
                 });
                 if let Some(ref source) = o.source {
                     v["source"] = serde_json::json!(source);
+                }
+                if let Some(ref env) = o.for_environment {
+                    v["for_environment"] = serde_json::json!(env);
                 }
                 v
             })

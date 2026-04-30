@@ -112,7 +112,7 @@ pub(crate) struct BuildOptions {
 }
 
 impl BuildOptions {
-    /// Create BuildOptions from BuildArgs and Config
+    /// Create BuildOptions from BuildArgs and Config.
     ///
     /// Configuration precedence (highest to lowest):
     /// 1. CLI flags (BuildArgs)
@@ -120,23 +120,31 @@ impl BuildOptions {
     /// 3. Project config file (rise.toml / .rise.toml)
     /// 4. Global config file (via Config getters)
     /// 5. Auto-detection/defaults (via Config getters)
+    ///
+    /// When `preloaded_config` is provided, its `.build` section is used instead
+    /// of loading rise.toml from disk, avoiding duplicate file reads/warnings.
     pub(crate) fn from_build_args(
         config: &Config,
         image_tag: String,
         app_path: String,
         build_args: &BuildArgs,
+        preloaded_config: Option<crate::build::config::ProjectBuildConfig>,
     ) -> Self {
         use tracing::warn;
 
-        // Load project-level build config from app_path with error handling
-        let project_config = match crate::build::config::load_full_project_config(&app_path) {
-            Ok(cfg) => cfg.and_then(|c| c.build),
-            Err(e) => {
-                warn!(
-                    "Failed to load project config: {:#}. Continuing without it.",
-                    e
-                );
-                None
+        // Use preloaded config if available, otherwise load from disk
+        let project_config = if let Some(cfg) = preloaded_config {
+            cfg.build
+        } else {
+            match crate::build::config::load_full_project_config(&app_path) {
+                Ok(cfg) => cfg.and_then(|c| c.build),
+                Err(e) => {
+                    warn!(
+                        "Failed to load project config: {:#}. Continuing without it.",
+                        e
+                    );
+                    None
+                }
             }
         };
 

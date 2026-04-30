@@ -348,12 +348,12 @@ pub async fn authorize(
         project_name, extension_name
     );
 
-    // Rate limiting
+    // Rate limiting (keyed per project+IP so different projects have independent budgets)
     let client_ip = crate::server::rate_limit::extract_client_ip(&headers);
     let session_key = crate::server::rate_limit::extract_session_key(&headers);
     if let Err(retry_after) = state
         .oauth_rate_limiter
-        .increment_and_check(&client_ip, session_key.as_deref())
+        .increment_and_check(&client_ip, session_key.as_deref(), &project_name)
         .await
     {
         tracing::warn!(
@@ -594,12 +594,12 @@ pub async fn callback(
         project_name, extension_name
     );
 
-    // Rate limiting
+    // Rate limiting (keyed per project+IP so different projects have independent budgets)
     let client_ip = crate::server::rate_limit::extract_client_ip(&headers);
     let session_key = crate::server::rate_limit::extract_session_key(&headers);
     if let Err(retry_after) = state
         .oauth_rate_limiter
-        .increment_and_check(&client_ip, session_key.as_deref())
+        .increment_and_check(&client_ip, session_key.as_deref(), &project_name)
         .await
     {
         tracing::warn!(
@@ -1082,11 +1082,12 @@ pub async fn token_endpoint(
         .map(|s| s.to_string());
 
     // Rate limiting: count all attempts (including invalid ones) to thwart brute-force
+    // Keyed per project+IP so different projects have independent budgets.
     let client_ip = crate::server::rate_limit::extract_client_ip(&headers);
     let session_key = crate::server::rate_limit::extract_session_key(&headers);
     if let Err(retry_after) = state
         .oauth_rate_limiter
-        .increment_and_check(&client_ip, session_key.as_deref())
+        .increment_and_check(&client_ip, session_key.as_deref(), &project_name)
         .await
     {
         tracing::warn!(

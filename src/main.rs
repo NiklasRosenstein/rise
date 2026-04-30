@@ -23,14 +23,37 @@ mod server;
 #[cfg(feature = "cli")]
 use cli::*;
 
-/// Resolve project name from explicit argument or rise.toml fallback
+/// Resolve project name from explicit argument or rise.toml fallback.
 #[cfg(feature = "cli")]
 fn resolve_project_name(explicit_project: Option<String>, path: &str) -> Result<String> {
+    resolve_project_name_with_config(explicit_project, path, None)
+}
+
+/// Like [`resolve_project_name`] but accepts a preloaded config to avoid
+/// duplicate disk loads (and duplicate log/warning output) when the caller
+/// has already loaded the config for other purposes.
+#[cfg(feature = "cli")]
+fn resolve_project_name_with_config(
+    explicit_project: Option<String>,
+    path: &str,
+    preloaded_config: Option<&build::config::ProjectBuildConfig>,
+) -> Result<String> {
     if let Some(project) = explicit_project {
-        Ok(project)
-    } else if let Some(config) = build::config::load_full_project_config(path)? {
-        if let Some(project_config) = config.project {
-            Ok(project_config.name)
+        return Ok(project);
+    }
+
+    // Use preloaded config if available, otherwise load from disk
+    let owned_config;
+    let config = if let Some(cfg) = preloaded_config {
+        Some(cfg)
+    } else {
+        owned_config = build::config::load_full_project_config(path)?;
+        owned_config.as_ref()
+    };
+
+    if let Some(cfg) = config {
+        if let Some(ref project_config) = cfg.project {
+            Ok(project_config.name.clone())
         } else {
             anyhow::bail!("No project name specified and rise.toml has no [project] section")
         }
@@ -1111,7 +1134,16 @@ async fn main() -> Result<()> {
         },
         Commands::Deployment(deployment_cmd) => match deployment_cmd {
             DeploymentCommands::Create { args } => {
-                let project_name = resolve_project_name(args.project.clone(), &args.path)?;
+                // Load rise.toml once — reused for project name resolution,
+                // environment resolution, env var collection, and build config.
+                let toml_config = build::config::load_full_project_config(&args.path)
+                    .context("Failed to load rise.toml")?;
+
+                let project_name = resolve_project_name_with_config(
+                    args.project.clone(),
+                    &args.path,
+                    toml_config.as_ref(),
+                )?;
 
                 // Both --image and --from cannot be specified together
                 if args.image.is_some() && args.from.is_some() {
@@ -1143,10 +1175,6 @@ async fn main() -> Result<()> {
                     }
                 }
 
-                // Load rise.toml config for env resolution and env var overrides
-                let toml_config = build::config::load_full_project_config(&args.path)
-                    .context("Failed to load rise.toml")?;
-
                 // Resolve environment: explicit --environment flag takes precedence,
                 // otherwise fall back to the `default = true` environment from rise.toml.
                 let resolved_environment = args.environment.clone().or_else(|| {
@@ -1158,11 +1186,14 @@ async fn main() -> Result<()> {
                     })
                 });
 
-                // Collect runtime env overrides with source tracking
-                // Priority: toml < cli (later overrides earlier for same key)
+                // Collect runtime env overrides with source tracking.
+                // All toml vars are sent tagged with for_environment; the server
+                // filters them after resolving the deployment's target environment.
+                // Priority: toml < cli (later overrides earlier for same key within
+                // the same for_environment scope).
                 let mut env_overrides: Vec<deployment::EnvOverride> = Vec::new();
 
-                // 1. Collect [project.env] vars from rise.toml
+                // 1. Collect [project.env] vars from rise.toml (global, no for_environment)
                 if let Some(ref cfg) = toml_config {
                     if let Some(ref project_config) = cfg.project {
                         for (key, value) in &project_config.env {
@@ -1172,31 +1203,28 @@ async fn main() -> Result<()> {
                                 is_secret: false,
                                 is_protected: false,
                                 source: Some("toml".to_string()),
+                                for_environment: None,
                             });
                         }
                     }
 
-                    // 2. Collect [environments.TARGET.env] vars (override global)
-                    // Apply per-environment toml overrides when the target environment is
-                    // known client-side (explicit --environment or toml default = true).
-                    if let Some(env_name) = resolved_environment.as_ref() {
-                        if let Some(env_config) = cfg.environments.get(env_name) {
-                            for (key, value) in &env_config.env {
-                                // Remove any existing override for this key (from project.env)
-                                env_overrides.retain(|o| o.key != *key);
-                                env_overrides.push(deployment::EnvOverride {
-                                    key: key.clone(),
-                                    value: value.clone(),
-                                    is_secret: false,
-                                    is_protected: false,
-                                    source: Some("toml".to_string()),
-                                });
-                            }
+                    // 2. Collect [environments.*.env] vars from rise.toml, tagged with
+                    //    for_environment so the server can filter after resolution.
+                    for (env_name, env_config) in &cfg.environments {
+                        for (key, value) in &env_config.env {
+                            env_overrides.push(deployment::EnvOverride {
+                                key: key.clone(),
+                                value: value.clone(),
+                                is_secret: false,
+                                is_protected: false,
+                                source: Some("toml".to_string()),
+                                for_environment: Some(env_name.clone()),
+                            });
                         }
                     }
                 }
 
-                // 3. CLI overrides (override toml for same key)
+                // 3. CLI overrides (global, override toml for same key)
 
                 // --env KEY=VALUE → plain text
                 for (key, value) in &args.env {
@@ -1207,6 +1235,7 @@ async fn main() -> Result<()> {
                         is_secret: false,
                         is_protected: false,
                         source: Some("cli".to_string()),
+                        for_environment: None,
                     });
                 }
 
@@ -1219,6 +1248,7 @@ async fn main() -> Result<()> {
                         is_secret: true,
                         is_protected: false,
                         source: Some("cli".to_string()),
+                        for_environment: None,
                     });
                 }
 
@@ -1231,6 +1261,7 @@ async fn main() -> Result<()> {
                         is_secret: true,
                         is_protected: true,
                         source: Some("cli".to_string()),
+                        for_environment: None,
                     });
                 }
 
@@ -1249,6 +1280,7 @@ async fn main() -> Result<()> {
                             is_secret: var.is_secret,
                             is_protected: var.is_secret, // secrets from file are protected by default
                             source: Some("cli".to_string()),
+                            for_environment: None,
                         });
                     }
                 }
@@ -1277,6 +1309,7 @@ async fn main() -> Result<()> {
                         env_overrides,
                         job_url: args.job_url.clone(),
                         pull_request_url: args.pull_request_url.clone(),
+                        toml_config,
                     },
                 )
                 .await?;
@@ -1652,6 +1685,7 @@ async fn main() -> Result<()> {
                 tag.clone(),
                 path.clone(),
                 build_args,
+                None,
             )
             .with_push(*push);
 
