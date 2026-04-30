@@ -78,6 +78,54 @@ pub struct ServerSettings {
     /// SSRF validation configuration.
     #[serde(default)]
     pub ssrf: super::ssrf::SsrfConfig,
+
+    /// OAuth endpoint rate limiting configuration.
+    #[serde(default)]
+    pub oauth_rate_limit: OAuthRateLimitSettings,
+}
+
+/// Rate limiting configuration for OAuth endpoints (authorize, callback, token).
+///
+/// Three independent limits are enforced:
+/// - **Per-project**: keyed by `{project_name}:{client_ip}` — limits traffic to each
+///   project independently so one busy project cannot starve others.
+/// - **Per-session**: keyed by a hash of the `rise_jwt` cookie — limits per-user traffic.
+/// - **Global**: shared across all requests — caps total throughput.
+#[derive(Debug, Deserialize, Clone, JsonSchema)]
+pub struct OAuthRateLimitSettings {
+    /// Maximum requests per project+IP per window (default: 100)
+    #[serde(default = "default_oauth_per_project_max")]
+    pub per_project_max: u32,
+    /// Window in seconds for per-project+IP limit (default: 60)
+    #[serde(default = "default_oauth_per_project_window_secs")]
+    pub per_project_window_secs: u64,
+
+    /// Maximum requests per session (rise_jwt cookie) per window (default: 30)
+    #[serde(default = "default_oauth_per_session_max")]
+    pub per_session_max: u32,
+    /// Window in seconds for per-session limit (default: 60)
+    #[serde(default = "default_oauth_per_session_window_secs")]
+    pub per_session_window_secs: u64,
+
+    /// Maximum total OAuth requests per window across all clients (default: 3000)
+    #[serde(default = "default_oauth_global_max")]
+    pub global_max: u32,
+    /// Window in seconds for the global limit (default: 60)
+    #[serde(default = "default_oauth_global_window_secs")]
+    pub global_window_secs: u64,
+}
+
+impl Default for OAuthRateLimitSettings {
+    fn default() -> Self {
+        Self {
+            per_project_max: default_oauth_per_project_max(),
+            per_project_window_secs: default_oauth_per_project_window_secs(),
+            per_session_max: default_oauth_per_session_max(),
+            per_session_window_secs: default_oauth_per_session_window_secs(),
+            global_max: default_oauth_global_max(),
+            global_window_secs: default_oauth_global_window_secs(),
+        }
+    }
 }
 
 fn default_cookie_secure() -> bool {
@@ -98,6 +146,30 @@ fn default_jwt_claims() -> Vec<String> {
 
 fn default_jwt_expiry_seconds() -> u64 {
     86400 // 24 hours
+}
+
+fn default_oauth_per_project_max() -> u32 {
+    100
+}
+
+fn default_oauth_per_project_window_secs() -> u64 {
+    60
+}
+
+fn default_oauth_per_session_max() -> u32 {
+    30
+}
+
+fn default_oauth_per_session_window_secs() -> u64 {
+    60
+}
+
+fn default_oauth_global_max() -> u32 {
+    3000
+}
+
+fn default_oauth_global_window_secs() -> u64 {
+    60
 }
 
 fn default_reconcile_interval() -> u64 {
