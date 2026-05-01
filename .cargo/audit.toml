@@ -1,0 +1,6 @@
+[advisories]
+# RUSTSEC-2023-0071 affects Marvin-attack timing side channels in RSA decryption.
+# Rise uses RSA for JWT signing/verification and key generation, and the remaining
+# transitive uses are either signature-oriented or build-time only. There is no
+# stable fixed release of the rsa crate yet.
+ignore = ["RUSTSEC-2023-0071"]
