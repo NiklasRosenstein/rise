@@ -74,9 +74,10 @@ pub struct AppState {
     /// Kubernetes client for direct API calls (pod health checks, log streaming)
     #[cfg(feature = "backend")]
     pub kube_client: Option<kube::Client>,
-    /// Shared secret token for authenticating Metacontroller webhook requests
+    /// IP validator for Metacontroller webhook requests (None in dev mode)
     #[cfg(feature = "backend")]
-    pub metacontroller_webhook_token: Option<String>,
+    pub metacontroller_ip_validator:
+        Option<Arc<crate::server::deployment::ip_validator::MetacontrollerIpValidator>>,
     /// Port for the internal metacontroller webhook listener
     #[cfg(feature = "backend")]
     pub metacontroller_webhook_port: Option<u16>,
@@ -452,7 +453,7 @@ impl AppState {
 
         // Initialize ResourceBuilder and kube_client for Metacontroller webhook and deployment backend
         #[cfg(feature = "backend")]
-        let (resource_builder, webhook_kube_client, webhook_token, webhook_port) = {
+        let (resource_builder, webhook_kube_client, ip_validator, webhook_port) = {
             use crate::server::deployment::resource_builder::ResourceBuilder;
             use crate::server::settings::DeploymentControllerSettings;
 
@@ -482,7 +483,8 @@ impl AppState {
                 pod_resources,
                 health_probes,
                 metacontroller_webhook_port,
-                metacontroller_webhook_token,
+                metacontroller_pod_namespace,
+                metacontroller_pod_label_selector,
                 namespace_format,
                 ..
             }) = &settings.deployment_controller
@@ -543,29 +545,36 @@ impl AppState {
                     namespace_format: namespace_format.clone(),
                 };
 
-                // Reject empty/blank tokens and the well-known development token in non-development environments
-                if metacontroller_webhook_token.trim().is_empty() {
-                    anyhow::bail!(
-                        "Refusing to start: metacontroller_webhook_token is empty. \
-                         Generate a secure token with: openssl rand -base64 32"
-                    );
-                }
-                const DEV_WEBHOOK_TOKEN: &str = "dev-webhook-token-not-for-production";
                 let run_mode =
                     std::env::var("RISE_CONFIG_RUN_MODE").unwrap_or_else(|_| "development".into());
-                if metacontroller_webhook_token == DEV_WEBHOOK_TOKEN && run_mode != "development" {
-                    anyhow::bail!(
-                        "Refusing to start: metacontroller_webhook_token is set to the \
-                         well-known development token. Generate a secure token with: \
-                         openssl rand -base64 32"
+                let validator = if metacontroller_pod_namespace.trim().is_empty() {
+                    if run_mode != "development" {
+                        anyhow::bail!(
+                            "Refusing to start: kubernetes.metacontroller_pod_namespace is not \
+                             set. Set it to the namespace where metacontroller pods run \
+                             (e.g. the release namespace)."
+                        );
+                    }
+                    tracing::warn!(
+                        "Metacontroller webhook running without source IP validation — \
+                         acceptable for development only"
                     );
-                }
+                    None
+                } else {
+                    Some(Arc::new(
+                        crate::server::deployment::ip_validator::MetacontrollerIpValidator::new(
+                            kube_client.clone(),
+                            metacontroller_pod_namespace.clone(),
+                            metacontroller_pod_label_selector.clone(),
+                        ),
+                    ))
+                };
 
                 tracing::info!("Initialized ResourceBuilder for Metacontroller webhook");
                 (
                     Some(Arc::new(rb)),
                     Some(kube_client),
-                    Some(metacontroller_webhook_token.clone()),
+                    validator,
                     Some(*metacontroller_webhook_port),
                 )
             } else {
@@ -847,7 +856,7 @@ impl AppState {
             #[cfg(feature = "backend")]
             kube_client: webhook_kube_client,
             #[cfg(feature = "backend")]
-            metacontroller_webhook_token: webhook_token,
+            metacontroller_ip_validator: ip_validator,
             #[cfg(feature = "backend")]
             metacontroller_webhook_port: webhook_port,
         })

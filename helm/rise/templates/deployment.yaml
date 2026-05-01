@@ -55,6 +55,10 @@ spec:
           value: "/etc/rise"
         - name: RISE_CONFIG_RUN_MODE
           value: "production"
+        {{- if .Values.metacontroller.enabled }}
+        - name: RISE_METACONTROLLER_POD_NAMESPACE
+          value: {{ .Values.metacontroller.install | ternary .Release.Namespace (.Values.metacontroller.namespace | default "metacontroller") | quote }}
+        {{- end }}
         {{- if .Values.postgresql.enabled }}
         - name: DATABASE_URL
           value: "postgres://{{ .Values.postgresql.auth.username }}:{{ .Values.postgresql.auth.password }}@{{ include "rise.fullname" . }}-postgresql:5432/{{ .Values.postgresql.auth.database }}"

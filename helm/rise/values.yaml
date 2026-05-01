@@ -100,10 +100,9 @@ metacontroller:
   # webhookBaseUrl: "http://rise-webhook.rise-system.svc:3001"
   # Port for the internal webhook listener (default: 3001)
   # webhookPort: 3001
-  # Shared secret for webhook authentication (required for production).
-  # Generate with: openssl rand -base64 32
-  # Must match deployment_controller.metacontroller_webhook_token in backend config.
-  # webhookToken: ""
+  # Webhook authentication uses Kubernetes pod-IP validation (two layers: NetworkPolicy +
+  # source-IP check). No shared secret is required. When metacontroller.enabled=true,
+  # RISE_METACONTROLLER_POD_NAMESPACE is automatically injected into the Rise config.
   # Namespace where an external metacontroller operator runs (for NetworkPolicy).
   # Only used when install=false. When install=true, the release namespace is used.
   # namespace: "metacontroller"

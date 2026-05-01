@@ -680,10 +680,16 @@ pub enum DeploymentControllerSettings {
         #[serde(default = "default_metacontroller_webhook_port")]
         metacontroller_webhook_port: u16,
 
-        /// Shared secret token for authenticating Metacontroller webhook requests.
-        /// Required when deployment controller is configured.
-        /// Generate with: openssl rand -base64 32
-        metacontroller_webhook_token: String,
+        /// Kubernetes namespace where metacontroller pods run.
+        /// When set, Rise validates that webhook requests originate from a live
+        /// metacontroller pod IP. Absent in development (IP validation disabled).
+        #[serde(default)]
+        metacontroller_pod_namespace: String,
+
+        /// Label selector used to find metacontroller pods.
+        /// Defaults to "app.kubernetes.io/name=metacontroller-operator".
+        #[serde(default)]
+        metacontroller_pod_label_selector: Option<String>,
 
         /// Adopt existing Kubernetes resources during Metacontroller migration.
         /// Patches pre-existing resources with Metacontroller's ownership label
@@ -1172,7 +1178,7 @@ deployment_controller:
   namespace_format: "rise-{project_name}"
   auth_backend_url: "http://localhost:3000"
   auth_signin_url: "http://localhost:3000"
-  metacontroller_webhook_token: "test-token"
+  metacontroller_pod_namespace: "metacontroller"
   network_policy:
     ingress:
       - from:
@@ -1257,7 +1263,7 @@ deployment_controller:
   namespace_format: "rise-{project_name}"
   auth_backend_url: "http://localhost:3000"
   auth_signin_url: "http://localhost:3000"
-  metacontroller_webhook_token: "test-token"
+  metacontroller_pod_namespace: "metacontroller"
   extra_service_token_audiences:
     vault: "https://vault.example.com"
   network_policy:

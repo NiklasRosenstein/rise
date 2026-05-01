@@ -10,7 +10,7 @@
 
 use std::collections::HashMap;
 
-use axum::extract::{Query, State};
+use axum::extract::{ConnectInfo, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use axum::Json;
@@ -19,7 +19,6 @@ use k8s_openapi::api::apps::v1::Deployment as K8sDeployment;
 use k8s_openapi::api::core::v1::Secret;
 use k8s_openapi::apimachinery::pkg::apis::meta::v1::ObjectMeta;
 use serde::{Deserialize, Serialize};
-use subtle::ConstantTimeEq;
 use tracing::{debug, error, info, warn};
 
 use crate::db::models::{Deployment, DeploymentStatus, Project, TerminationReason};
@@ -101,51 +100,24 @@ const SECRET_REFRESH_HOURS: i64 = 6;
 
 // ── Webhook authentication ─────────────────────────────────────────────
 
-#[derive(Debug, Deserialize)]
-pub struct WebhookQuery {
-    token: Option<String>,
-}
-
-/// Validate a webhook token against an expected value.
-///
-/// - If `expected` is `None`, no authentication is required (returns Ok).
-/// - If `expected` is `Some` but `provided` is `None`, returns Forbidden.
-/// - Uses constant-time comparison to prevent timing attacks.
-fn check_webhook_token(
-    expected: Option<&str>,
-    provided: Option<&str>,
-) -> Result<(), (StatusCode, &'static str)> {
-    let Some(expected) = expected else {
-        return Ok(());
-    };
-    let Some(provided) = provided else {
-        return Err((StatusCode::FORBIDDEN, "Missing webhook token"));
-    };
-    if expected.as_bytes().ct_eq(provided.as_bytes()).into() {
-        Ok(())
-    } else {
-        Err((StatusCode::FORBIDDEN, "Invalid webhook token"))
-    }
-}
-
-fn validate_webhook_token(
+async fn validate_source_ip(
     state: &AppState,
-    provided: &Option<String>,
+    addr: std::net::SocketAddr,
 ) -> Result<(), (StatusCode, &'static str)> {
-    check_webhook_token(
-        state.metacontroller_webhook_token.as_deref(),
-        provided.as_deref(),
-    )
+    match &state.metacontroller_ip_validator {
+        Some(validator) => validator.validate(addr).await,
+        None => Ok(()), // dev mode — no validation
+    }
 }
 
 // ── Sync webhook handler ───────────────────────────────────────────────
 
 pub async fn handle_sync(
     State(state): State<AppState>,
-    Query(query): Query<WebhookQuery>,
+    ConnectInfo(addr): ConnectInfo<std::net::SocketAddr>,
     Json(request): Json<SyncRequest>,
 ) -> Response {
-    if let Err((status, msg)) = validate_webhook_token(&state, &query.token) {
+    if let Err((status, msg)) = validate_source_ip(&state, addr).await {
         return (status, msg).into_response();
     }
     let project_name = match request
@@ -1258,10 +1230,10 @@ async fn load_env_vars(
 
 pub async fn handle_finalize(
     State(state): State<AppState>,
-    Query(query): Query<WebhookQuery>,
+    ConnectInfo(addr): ConnectInfo<std::net::SocketAddr>,
     Json(request): Json<FinalizeRequest>,
 ) -> Response {
-    if let Err((status, msg)) = validate_webhook_token(&state, &query.token) {
+    if let Err((status, msg)) = validate_source_ip(&state, addr).await {
         return (status, msg).into_response();
     }
 
@@ -1399,46 +1371,6 @@ mod tests {
                 status
             );
         }
-    }
-
-    // ── check_webhook_token ────────────────────────────────────────────
-
-    #[test]
-    fn test_token_validation_no_expected_token() {
-        // No token configured → always passes
-        assert!(check_webhook_token(None, None).is_ok());
-        assert!(check_webhook_token(None, Some("anything")).is_ok());
-    }
-
-    #[test]
-    fn test_token_validation_missing_provided_token() {
-        let result = check_webhook_token(Some("secret"), None);
-        assert!(result.is_err());
-        let (status, msg) = result.unwrap_err();
-        assert_eq!(status, StatusCode::FORBIDDEN);
-        assert_eq!(msg, "Missing webhook token");
-    }
-
-    #[test]
-    fn test_token_validation_invalid_token() {
-        let result = check_webhook_token(Some("secret"), Some("wrong"));
-        assert!(result.is_err());
-        let (status, msg) = result.unwrap_err();
-        assert_eq!(status, StatusCode::FORBIDDEN);
-        assert_eq!(msg, "Invalid webhook token");
-    }
-
-    #[test]
-    fn test_token_validation_valid_token() {
-        assert!(check_webhook_token(Some("secret"), Some("secret")).is_ok());
-    }
-
-    #[test]
-    fn test_token_validation_empty_strings() {
-        // Empty expected with empty provided should match
-        assert!(check_webhook_token(Some(""), Some("")).is_ok());
-        // Empty expected with non-empty provided should not match
-        assert!(check_webhook_token(Some(""), Some("x")).is_err());
     }
 
     // ── FinalizeResponse serialization ─────────────────────────────────
