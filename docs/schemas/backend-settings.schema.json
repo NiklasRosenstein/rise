@@ -299,6 +299,19 @@
               "description": "Adopt existing Kubernetes resources during Metacontroller migration.\nPatches pre-existing resources with Metacontroller's ownership label\nso they are adopted rather than rejected. No-op once all resources\nare labeled. Defaults to true.",
               "type": "boolean"
             },
+            "metacontroller_pod_label_selector": {
+              "default": null,
+              "description": "Label selector used to find metacontroller pods.\nDefaults to \"app.kubernetes.io/name=metacontroller-operator\".",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "metacontroller_pod_namespace": {
+              "default": "",
+              "description": "Kubernetes namespace where metacontroller pods run.\nWhen set, Rise validates that webhook requests originate from a live\nmetacontroller pod IP. Absent in development (IP validation disabled).",
+              "type": "string"
+            },
             "metacontroller_webhook_port": {
               "default": 3001,
               "description": "Port for the internal metacontroller webhook listener.\nWebhook endpoints are served on this separate port instead of the main HTTP port.\nDefaults to 3001.",
@@ -306,10 +319,6 @@
               "maximum": 65535,
               "minimum": 0,
               "type": "integer"
-            },
-            "metacontroller_webhook_token": {
-              "description": "Shared secret token for authenticating Metacontroller webhook requests.\nRequired when deployment controller is configured.\nGenerate with: openssl rand -base64 32",
-              "type": "string"
             },
             "namespace_annotations": {
               "additionalProperties": {
@@ -390,8 +399,7 @@
             "auth_backend_url",
             "auth_signin_url",
             "access_classes",
-            "network_policy",
-            "metacontroller_webhook_token"
+            "network_policy"
           ],
           "type": "object"
         }

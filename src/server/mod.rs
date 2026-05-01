@@ -239,12 +239,9 @@ pub async fn run_server(settings: settings::Settings) -> Result<()> {
     info!("HTTP server listening on http://{}", addr);
     let listener = tokio::net::TcpListener::bind(&addr).await?;
 
-    // Spawn internal webhook listener for Metacontroller (separate port, token-authenticated)
+    // Spawn internal webhook listener for Metacontroller (separate port, IP-validated)
     #[cfg(feature = "backend")]
-    let webhook_handle = if let (Some(port), Some(_token)) = (
-        state.metacontroller_webhook_port,
-        state.metacontroller_webhook_token.as_ref(),
-    ) {
+    let webhook_handle = if let Some(port) = state.metacontroller_webhook_port {
         let webhook_app = Router::new()
             .nest("/api/v1", deployment::routes::metacontroller_routes())
             .with_state(state.clone())
@@ -258,9 +255,12 @@ pub async fn run_server(settings: settings::Settings) -> Result<()> {
         let webhook_listener = tokio::net::TcpListener::bind(&webhook_addr).await?;
 
         Some(tokio::spawn(async move {
-            axum::serve(webhook_listener, webhook_app)
-                .with_graceful_shutdown(shutdown_signal())
-                .await
+            axum::serve(
+                webhook_listener,
+                webhook_app.into_make_service_with_connect_info::<std::net::SocketAddr>(),
+            )
+            .with_graceful_shutdown(shutdown_signal())
+            .await
         }))
     } else {
         None

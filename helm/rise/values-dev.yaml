@@ -3,7 +3,6 @@ replicaCount: 0
 
 metacontroller:
   webhookBaseUrl: "http://host.minikube.internal:3001"
-  webhookToken: "dev-webhook-token-not-for-production"
 
 postgresql:
   enabled: false

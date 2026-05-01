@@ -49,7 +49,8 @@ deployment_controller:
   type: "kubernetes"
   pod_security_enabled: false
   metacontroller_webhook_port: 3001
-  metacontroller_webhook_token: "dev-webhook-token-not-for-production"
+  # metacontroller_pod_namespace is intentionally absent in development:
+  # Rise runs on the host (outside the cluster), so source-IP validation is skipped.
   production_ingress_url_template: "{project_name}.rise.local"
   staging_ingress_url_template: "{deployment_group}--{project_name}.preview.rise.local"
   environment_ingress_url_template: "{environment}--{project_name}.preview.rise.local"

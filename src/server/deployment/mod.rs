@@ -2,6 +2,8 @@ pub mod controller;
 #[cfg(feature = "backend")]
 pub mod crd;
 pub mod handlers;
+#[cfg(feature = "backend")]
+pub mod ip_validator;
 pub mod models;
 #[cfg(feature = "backend")]
 pub mod resource_builder;

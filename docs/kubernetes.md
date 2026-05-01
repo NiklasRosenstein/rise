@@ -958,43 +958,37 @@ Pod status: ImagePullBackOff
 
 ## Webhook Security
 
-The Metacontroller sync/finalize webhooks are served on a **separate internal port** (default: 3001) and require a **shared secret token** for authentication. This prevents unauthorized access to endpoints that return decrypted secrets and registry credentials.
+The Metacontroller sync/finalize webhooks are served on a **separate internal port** (default: 3001). Authentication uses two independent layers — no shared secret is required.
+
+### Defense-in-depth layers
+
+1. **NetworkPolicy** — restricts ingress on the webhook port to pods labelled `app.kubernetes.io/name=metacontroller-operator`. External callers and wrong-namespace pods are blocked before they reach the Rise process.
+2. **Pod-IP validation** — on every request, Rise checks that the TCP source IP belongs to a live metacontroller pod by querying the Kubernetes API (result cached for 15 seconds). If the Kubernetes API is unreachable, stale cache is used with a warning; if no cache exists yet, the request is rejected with `503`.
+
+Together these layers mean an attacker must both bypass the NetworkPolicy *and* spoof the source IP of a live metacontroller pod — neither is possible without deep cluster compromise.
 
 ### Configuration
+
+When `metacontroller.enabled: true`, the Helm chart automatically injects the metacontroller pod namespace into the Rise config via the `RISE_METACONTROLLER_POD_NAMESPACE` environment variable. No manual configuration is needed.
+
+If you supply the Rise config directly, set:
 
 ```yaml
 deployment_controller:
   type: kubernetes
-  # ... other settings ...
   metacontroller_webhook_port: 3001  # Default
-  metacontroller_webhook_token: "YOUR_SECRET_TOKEN"  # Required
+  metacontroller_pod_namespace: "metacontroller"  # Namespace where metacontroller pods run
+  # Optional — defaults to "app.kubernetes.io/name=metacontroller-operator"
+  # metacontroller_pod_label_selector: "app.kubernetes.io/name=metacontroller-operator"
 ```
 
-Generate a token:
-```bash
-openssl rand -base64 32
-```
+### Development mode
 
-The Helm chart passes the same token to the Metacontroller CompositeController webhook URLs as a `?token=` query parameter. Set `metacontroller.webhookToken` in your Helm values to match `metacontroller_webhook_token` in the backend config.
-
-### Network isolation
-
-The webhook endpoints are protected by three layers of defense in depth:
-
-1. **Port isolation** — webhooks are served on a separate port (default: 3001), not exposed via the main API service or Ingress.
-2. **Token authentication** — every request must include the shared secret as a `?token=` query parameter.
-3. **NetworkPolicy** — a Kubernetes NetworkPolicy restricts ingress on the webhook port to only pods in the Metacontroller operator's namespace.
-
-The Helm chart creates:
-- A dedicated `ClusterIP` Service (`*-webhook`) on the webhook port
-- A `NetworkPolicy` restricting ingress on the webhook port to the namespace specified by `metacontroller.namespace` (default: `"metacontroller"`)
+When `metacontroller_pod_namespace` is absent (or empty), pod-IP validation is skipped. Rise logs a startup warning and allows all webhook requests. This is intended for local development where Rise runs on the host outside the cluster. The server refuses to start without a namespace in any run mode other than `development`.
 
 ### Bring-your-own Metacontroller
 
-When you manage the Metacontroller operator yourself (i.e. `metacontroller.install: false`), you need to align two settings:
-
-- **`metacontroller.namespace`** — set this to the namespace where your Metacontroller operator runs so the NetworkPolicy permits its webhook calls.
-- **`metacontroller.webhookToken`** — must match `metacontroller_webhook_token` in the backend config.
+When you manage the Metacontroller operator yourself (i.e. `metacontroller.install: false`), set `metacontroller.namespace` to the namespace where your operator runs so the NetworkPolicy and pod-IP validation both target the correct pods.
 
 ```yaml
 # Helm values
@@ -1002,5 +996,4 @@ metacontroller:
   enabled: true
   install: false                  # Do not install the operator subchart
   namespace: "my-metacontroller"  # Namespace where your operator runs
-  webhookToken: "YOUR_SECRET_TOKEN"
 ```
