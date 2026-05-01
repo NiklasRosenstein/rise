@@ -447,7 +447,7 @@ impl AppState {
         // Initialize deployment backend
         #[cfg(not(feature = "backend"))]
         compile_error!(
-            "At least one deployment backend must be enabled. Please build with --features k8s"
+            "At least one deployment backend must be enabled. Please build with --features backend"
         );
 
         // Initialize ResourceBuilder and kube_client for Metacontroller webhook and deployment backend
@@ -543,7 +543,13 @@ impl AppState {
                     namespace_format: namespace_format.clone(),
                 };
 
-                // Reject the well-known development token in non-development environments
+                // Reject empty/blank tokens and the well-known development token in non-development environments
+                if metacontroller_webhook_token.trim().is_empty() {
+                    anyhow::bail!(
+                        "Refusing to start: metacontroller_webhook_token is empty. \
+                         Generate a secure token with: openssl rand -base64 32"
+                    );
+                }
                 const DEV_WEBHOOK_TOKEN: &str = "dev-webhook-token-not-for-production";
                 let run_mode =
                     std::env::var("RISE_CONFIG_RUN_MODE").unwrap_or_else(|_| "development".into());

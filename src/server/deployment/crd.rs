@@ -250,7 +250,7 @@ async fn mark_adoption_completed(api: &Api<RiseProject>, project_name: &str) -> 
 /// ownership of child resources.
 const CONTROLLER_UID_LABEL: &str = "controller-uid";
 
-/// Patch a single resource's labels with the `controller-uid` label via strategic merge patch.
+/// Patch a single resource's labels with the `controller-uid` label via JSON merge patch.
 async fn patch_resource_label<T>(
     api: &Api<T>,
     name: &str,

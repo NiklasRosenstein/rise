@@ -410,8 +410,22 @@ async fn complete_termination(
         Some(TerminationReason::Expired) => {
             db_deployments::mark_expired(&state.db_pool, deployment.id).await?;
         }
-        Some(TerminationReason::Failed) | Some(TerminationReason::Cancelled) | None => {
-            // Failed/Cancelled termination reasons and missing reasons all resolve to Stopped
+        Some(TerminationReason::Failed) => {
+            db_deployments::mark_failed(
+                &state.db_pool,
+                deployment.id,
+                deployment
+                    .error_message
+                    .as_deref()
+                    .unwrap_or("Deployment failed"),
+            )
+            .await?;
+        }
+        Some(TerminationReason::Cancelled) => {
+            db_deployments::mark_cancelled(&state.db_pool, deployment.id).await?;
+        }
+        None => {
+            // Missing termination reason resolves to Stopped
             db_deployments::mark_stopped(&state.db_pool, deployment.id).await?;
         }
     }
