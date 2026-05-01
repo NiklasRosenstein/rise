@@ -84,7 +84,7 @@ Inside `DeploymentControllerSettings::Kubernetes`:
 | Change | Detail |
 |---|---|
 | Remove | `metacontroller_webhook_token: String` |
-| Add | `metacontroller_pod_namespace: Option<String>` |
+| Add | `metacontroller_pod_namespace: String` (`#[serde(default)]`; empty string = validation disabled) |
 | Add | `metacontroller_pod_label_selector: Option<String>` (default: `"app.kubernetes.io/name=metacontroller-operator"`) |
 
 ### `AppState` changes (`src/server/state.rs`)
@@ -146,12 +146,15 @@ Remove the `$tokenParam` block entirely. Webhook URLs become:
 - Remove `webhookToken`
 - No `metacontroller_pod_namespace` (its absence disables IP validation in dev)
 
-### `configmap.yaml`
+### `deployment.yaml`
 
-When `metacontroller.enabled`, inject into the `kubernetes` config block:
+When `metacontroller.enabled`, inject `RISE_METACONTROLLER_POD_NAMESPACE` as an environment variable into the Rise server container. `config/production.yaml` reads it via `${RISE_METACONTROLLER_POD_NAMESPACE}`:
 
 ```yaml
-metacontroller_pod_namespace: {{ .Values.metacontroller.install | ternary .Release.Namespace (.Values.metacontroller.namespace | default "metacontroller") | quote }}
+{{- if .Values.metacontroller.enabled }}
+- name: RISE_METACONTROLLER_POD_NAMESPACE
+  value: {{ .Values.metacontroller.install | ternary .Release.Namespace (.Values.metacontroller.namespace | default "metacontroller") | quote }}
+{{- end }}
 ```
 
 ### `clusterrole.yaml`

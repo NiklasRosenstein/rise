@@ -23,6 +23,8 @@ pub struct MetacontrollerIpValidator {
 struct IpCache {
     ips: HashSet<IpAddr>,
     fetched_at: Option<Instant>,
+    /// Set on every refresh attempt (success or failure) to rate-limit retries.
+    last_attempted_at: Option<Instant>,
 }
 
 impl MetacontrollerIpValidator {
@@ -39,6 +41,7 @@ impl MetacontrollerIpValidator {
             cache: Mutex::new(IpCache {
                 ips: HashSet::new(),
                 fetched_at: None,
+                last_attempted_at: None,
             }),
         }
     }
@@ -50,8 +53,15 @@ impl MetacontrollerIpValidator {
             .fetched_at
             .map(|t| t.elapsed() < self.ttl)
             .unwrap_or(false);
+        // Rate-limit: don't retry within TTL of the last attempt (success or failure).
+        // Without this, every request would hammer the K8s API during an outage.
+        let recently_attempted = cache
+            .last_attempted_at
+            .map(|t| t.elapsed() < self.ttl)
+            .unwrap_or(false);
 
-        if !is_fresh {
+        if !is_fresh && !recently_attempted {
+            cache.last_attempted_at = Some(Instant::now());
             match self.fetch_pod_ips().await {
                 Ok(ips) => {
                     cache.ips = ips;
@@ -59,15 +69,16 @@ impl MetacontrollerIpValidator {
                 }
                 Err(e) => {
                     warn!("Failed to refresh metacontroller pod IPs: {:?}", e);
-                    if cache.fetched_at.is_none() {
-                        return Err((
-                            StatusCode::SERVICE_UNAVAILABLE,
-                            "Cannot validate source IP: Kubernetes API unavailable",
-                        ));
-                    }
-                    // Use stale cache
                 }
             }
+        }
+
+        // No successful fetch yet → fail closed (covers both fresh failure and rate-limited cold start)
+        if cache.fetched_at.is_none() {
+            return Err((
+                StatusCode::SERVICE_UNAVAILABLE,
+                "Cannot validate source IP: Kubernetes API unavailable",
+            ));
         }
 
         check_ip(&cache.ips, addr)
