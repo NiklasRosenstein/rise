@@ -25,14 +25,13 @@ use std::sync::Arc;
 use std::time::Duration;
 
 #[cfg(feature = "backend")]
-use crate::server::deployment::controller::{
-    DeploymentBackend, KubernetesController, KubernetesControllerConfig,
-};
+use crate::server::deployment::controller::DeploymentBackend;
 
 /// Minimal state for controllers - database access and encryption
 #[derive(Clone)]
 pub struct ControllerState {
     pub db_pool: PgPool,
+    #[allow(dead_code)]
     pub encryption_provider: Option<Arc<dyn EncryptionProvider>>,
 }
 
@@ -69,6 +68,18 @@ pub struct AppState {
     pub production_ingress_url_template: Option<String>,
     /// Staging ingress URL template (for custom domain validation)
     pub staging_ingress_url_template: Option<String>,
+    /// ResourceBuilder for Metacontroller webhook (builds K8s resource specs)
+    #[cfg(feature = "backend")]
+    pub resource_builder: Option<Arc<crate::server::deployment::resource_builder::ResourceBuilder>>,
+    /// Kubernetes client for direct API calls (pod health checks, log streaming)
+    #[cfg(feature = "backend")]
+    pub kube_client: Option<kube::Client>,
+    /// Shared secret token for authenticating Metacontroller webhook requests
+    #[cfg(feature = "backend")]
+    pub metacontroller_webhook_token: Option<String>,
+    /// Port for the internal metacontroller webhook listener
+    #[cfg(feature = "backend")]
+    pub metacontroller_webhook_port: Option<u16>,
 }
 
 /// Initialize encryption provider from settings
@@ -159,112 +170,25 @@ async fn test_encryption_provider(provider: &dyn EncryptionProvider) -> Result<(
 }
 
 /// Initialize Kubernetes deployment backend from settings
+///
+/// Creates a slim `KubernetesBackend` that wraps `ResourceBuilder` and a kube client.
+/// Provides URL computation, log streaming, and environment cleanup.
+/// All reconciliation is handled by the Metacontroller sync webhook.
 #[cfg(feature = "backend")]
 async fn init_kubernetes_backend(
-    settings: &Settings,
-    controller_state: Arc<ControllerState>,
-    registry_provider: Arc<dyn RegistryProvider>,
+    resource_builder: Arc<crate::server::deployment::resource_builder::ResourceBuilder>,
+    kube_client: kube::Client,
+    db_pool: PgPool,
 ) -> Result<Arc<dyn DeploymentBackend>> {
-    use crate::server::settings::DeploymentControllerSettings;
+    use crate::server::deployment::controller::KubernetesBackend;
 
-    if let Some(DeploymentControllerSettings::Kubernetes {
-        kubeconfig,
-        production_ingress_url_template,
-        staging_ingress_url_template,
-        environment_ingress_url_template,
-        ingress_port,
-        ingress_schema,
-        auth_backend_url,
-        auth_signin_url,
-        namespace_labels,
-        namespace_annotations,
-        ingress_annotations,
-        ingress_tls_secret_name,
-        custom_domain_tls_mode,
-        custom_domain_ingress_annotations,
-        node_selector,
-        image_pull_secret_name,
-        access_classes,
-        host_aliases,
-        extra_service_token_audiences,
-        use_default_service_account_for_production,
-        network_policy,
-        pod_security_enabled,
-        pod_resources,
-        health_probes,
-        ..
-    }) = &settings.deployment_controller
-    {
-        // Install default CryptoProvider for rustls (required for kube-rs HTTPS connections)
-        rustls::crypto::ring::default_provider()
-            .install_default()
-            .ok();
+    let backend = KubernetesBackend::new(kube_client, resource_builder, db_pool);
 
-        // Create kube client
-        let kube_config = if kubeconfig.is_some() {
-            // Use explicit kubeconfig if provided
-            kube::Config::from_kubeconfig(&kube::config::KubeConfigOptions {
-                context: None,
-                cluster: None,
-                user: None,
-            })
-            .await?
-        } else {
-            kube::Config::infer().await? // In-cluster or ~/.kube/config
-        };
-        let kube_client = kube::Client::try_from(kube_config)?;
+    // Test Kubernetes API connection
+    backend.test_connection().await?;
+    tracing::info!("Kubernetes deployment backend initialized and connection tested");
 
-        // Extract backend_address from auth_backend_url
-        let parsed_backend_address =
-            crate::server::settings::BackendAddress::from_url(auth_backend_url)?;
-
-        // Filter out null access classes (used to remove inherited entries)
-        let filtered_access_classes: std::collections::HashMap<_, _> = access_classes
-            .iter()
-            .filter_map(|(k, v)| v.as_ref().map(|ac| (k.clone(), ac.clone())))
-            .collect();
-
-        let k8s_backend = KubernetesController::new(
-            (*controller_state).clone(),
-            kube_client,
-            KubernetesControllerConfig {
-                production_ingress_url_template: production_ingress_url_template.clone(),
-                staging_ingress_url_template: staging_ingress_url_template.clone(),
-                environment_ingress_url_template: environment_ingress_url_template.clone(),
-                ingress_port: *ingress_port,
-                ingress_schema: ingress_schema.clone(),
-                registry_provider,
-                auth_backend_url: auth_backend_url.clone(),
-                auth_signin_url: auth_signin_url.clone(),
-                backend_address: Some(parsed_backend_address),
-                namespace_labels: namespace_labels.clone(),
-                namespace_annotations: namespace_annotations.clone(),
-                ingress_annotations: ingress_annotations.clone(),
-                ingress_tls_secret_name: ingress_tls_secret_name.clone(),
-                custom_domain_tls_mode: custom_domain_tls_mode.clone(),
-                custom_domain_ingress_annotations: custom_domain_ingress_annotations.clone(),
-                node_selector: node_selector.clone(),
-                image_pull_secret_name: image_pull_secret_name.clone(),
-                access_classes: filtered_access_classes,
-                host_aliases: host_aliases.clone(),
-                extra_service_token_audiences: extra_service_token_audiences.clone(),
-                use_default_service_account_for_production:
-                    *use_default_service_account_for_production,
-                network_policy: network_policy.clone(),
-                pod_security_enabled: *pod_security_enabled,
-                pod_resources: pod_resources.clone(),
-                health_probes: health_probes.clone(),
-            },
-        )?;
-
-        // Test Kubernetes API connection
-        k8s_backend.test_connection().await?;
-        tracing::info!("✓ Kubernetes deployment backend initialized and connection tested");
-
-        Ok(Arc::new(k8s_backend) as Arc<dyn DeploymentBackend>)
-    } else {
-        anyhow::bail!("Deployment controller not configured. Please add deployment_controller configuration with type: kubernetes")
-    }
+    Ok(Arc::new(backend) as Arc<dyn DeploymentBackend>)
 }
 
 impl AppState {
@@ -523,16 +447,142 @@ impl AppState {
         // Initialize deployment backend
         #[cfg(not(feature = "backend"))]
         compile_error!(
-            "At least one deployment backend must be enabled. Please build with --features k8s"
+            "At least one deployment backend must be enabled. Please build with --features backend"
         );
 
+        // Initialize ResourceBuilder and kube_client for Metacontroller webhook and deployment backend
+        #[cfg(feature = "backend")]
+        let (resource_builder, webhook_kube_client, webhook_token, webhook_port) = {
+            use crate::server::deployment::resource_builder::ResourceBuilder;
+            use crate::server::settings::DeploymentControllerSettings;
+
+            if let Some(DeploymentControllerSettings::Kubernetes {
+                kubeconfig,
+                production_ingress_url_template,
+                staging_ingress_url_template,
+                environment_ingress_url_template,
+                ingress_port,
+                ingress_schema,
+                auth_backend_url,
+                auth_signin_url,
+                namespace_labels,
+                namespace_annotations,
+                ingress_annotations,
+                ingress_tls_secret_name,
+                custom_domain_tls_mode,
+                custom_domain_ingress_annotations,
+                node_selector,
+                image_pull_secret_name,
+                access_classes,
+                host_aliases,
+                extra_service_token_audiences,
+                use_default_service_account_for_production,
+                network_policy,
+                pod_security_enabled,
+                pod_resources,
+                health_probes,
+                metacontroller_webhook_port,
+                metacontroller_webhook_token,
+                namespace_format,
+                ..
+            }) = &settings.deployment_controller
+            {
+                // Install default CryptoProvider for rustls (required for kube-rs HTTPS connections)
+                rustls::crypto::ring::default_provider()
+                    .install_default()
+                    .ok();
+
+                // Create kube client for webhook and deployment backend
+                let kube_config = if let Some(path) = kubeconfig {
+                    let kubeconfig_data = kube::config::Kubeconfig::read_from(path)?;
+                    kube::Config::from_custom_kubeconfig(
+                        kubeconfig_data,
+                        &kube::config::KubeConfigOptions::default(),
+                    )
+                    .await?
+                } else {
+                    kube::Config::infer().await?
+                };
+                let kube_client = kube::Client::try_from(kube_config)?;
+
+                let parsed_backend_address =
+                    crate::server::settings::BackendAddress::from_url(auth_backend_url)?;
+
+                let filtered_access_classes: std::collections::HashMap<_, _> = access_classes
+                    .iter()
+                    .filter_map(|(k, v)| v.as_ref().map(|ac| (k.clone(), ac.clone())))
+                    .collect();
+
+                let rb = ResourceBuilder {
+                    production_ingress_url_template: production_ingress_url_template.clone(),
+                    staging_ingress_url_template: staging_ingress_url_template.clone(),
+                    environment_ingress_url_template: environment_ingress_url_template.clone(),
+                    ingress_port: *ingress_port,
+                    ingress_schema: ingress_schema.clone(),
+                    registry_provider: registry_provider.clone(),
+                    auth_backend_url: auth_backend_url.clone(),
+                    auth_signin_url: auth_signin_url.clone(),
+                    backend_address: Some(parsed_backend_address),
+                    namespace_labels: namespace_labels.clone(),
+                    namespace_annotations: namespace_annotations.clone(),
+                    ingress_annotations: ingress_annotations.clone(),
+                    ingress_tls_secret_name: ingress_tls_secret_name.clone(),
+                    custom_domain_tls_mode: custom_domain_tls_mode.clone(),
+                    custom_domain_ingress_annotations: custom_domain_ingress_annotations.clone(),
+                    node_selector: node_selector.clone(),
+                    image_pull_secret_name: image_pull_secret_name.clone(),
+                    access_classes: filtered_access_classes,
+                    host_aliases: host_aliases.clone(),
+                    extra_service_token_audiences: extra_service_token_audiences.clone(),
+                    use_default_service_account_for_production:
+                        *use_default_service_account_for_production,
+                    network_policy: network_policy.clone(),
+                    pod_security_enabled: *pod_security_enabled,
+                    pod_resources: pod_resources.clone(),
+                    health_probes: health_probes.clone(),
+                    namespace_format: namespace_format.clone(),
+                };
+
+                // Reject empty/blank tokens and the well-known development token in non-development environments
+                if metacontroller_webhook_token.trim().is_empty() {
+                    anyhow::bail!(
+                        "Refusing to start: metacontroller_webhook_token is empty. \
+                         Generate a secure token with: openssl rand -base64 32"
+                    );
+                }
+                const DEV_WEBHOOK_TOKEN: &str = "dev-webhook-token-not-for-production";
+                let run_mode =
+                    std::env::var("RISE_CONFIG_RUN_MODE").unwrap_or_else(|_| "development".into());
+                if metacontroller_webhook_token == DEV_WEBHOOK_TOKEN && run_mode != "development" {
+                    anyhow::bail!(
+                        "Refusing to start: metacontroller_webhook_token is set to the \
+                         well-known development token. Generate a secure token with: \
+                         openssl rand -base64 32"
+                    );
+                }
+
+                tracing::info!("Initialized ResourceBuilder for Metacontroller webhook");
+                (
+                    Some(Arc::new(rb)),
+                    Some(kube_client),
+                    Some(metacontroller_webhook_token.clone()),
+                    Some(*metacontroller_webhook_port),
+                )
+            } else {
+                (None, None, None, None)
+            }
+        };
+
+        // Initialize deployment backend (slim wrapper around ResourceBuilder + kube client)
         #[cfg(feature = "backend")]
         let deployment_backend = {
-            let controller_state = Arc::new(ControllerState {
-                db_pool: db_pool.clone(),
-                encryption_provider: encryption_provider.clone(),
-            });
-            init_kubernetes_backend(settings, controller_state, registry_provider.clone()).await?
+            let rb = resource_builder.clone().ok_or_else(|| {
+                anyhow::anyhow!("Deployment controller not configured. Please add deployment_controller configuration with type: kubernetes")
+            })?;
+            let kc = webhook_kube_client
+                .clone()
+                .ok_or_else(|| anyhow::anyhow!("Kubernetes client not initialized"))?;
+            init_kubernetes_backend(rb, kc, db_pool.clone()).await?
         };
 
         // Initialize extension registry
@@ -792,6 +842,14 @@ impl AppState {
             access_classes,
             production_ingress_url_template,
             staging_ingress_url_template,
+            #[cfg(feature = "backend")]
+            resource_builder,
+            #[cfg(feature = "backend")]
+            kube_client: webhook_kube_client,
+            #[cfg(feature = "backend")]
+            metacontroller_webhook_token: webhook_token,
+            #[cfg(feature = "backend")]
+            metacontroller_webhook_port: webhook_port,
         })
     }
 }

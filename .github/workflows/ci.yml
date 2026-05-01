@@ -114,6 +114,9 @@ jobs:
       - name: Verify backend config schema is up to date
         run: mise config:schema:check
 
+      - name: Verify CRDs are up to date
+        run: mise crd:check
+
       - name: Check formatting
         run: cargo fmt --all -- --check
 
@@ -194,6 +197,9 @@ jobs:
       - name: Install mise tools
         run: mise use -g helm
 
+      - name: Build chart dependencies
+        run: helm dependency build helm/rise
+
       - name: Set up chart-testing
         uses: helm/chart-testing-action@v2.8.0
 
@@ -209,8 +215,8 @@ jobs:
 
       - name: Validate Helm templates with kubeconform
         run: |
-          helm template rise helm/rise | kubeconform -strict -summary
-          helm template rise helm/rise -f helm/rise/values-ci.yaml | kubeconform -strict -summary
+          helm template rise helm/rise | kubeconform -strict -summary -skip CompositeController
+          helm template rise helm/rise -f helm/rise/values-ci.yaml | kubeconform -strict -summary -skip CompositeController
 
   package-image:
     name: Build and publish image
@@ -299,6 +305,9 @@ jobs:
           sed -i "s/^version: .*/version: ${ci_version}/" helm/rise/Chart.yaml
           sed -i "s/^appVersion: .*/appVersion: \"${image_tag}\"/" helm/rise/Chart.yaml
           cat helm/rise/Chart.yaml
+
+      - name: Build chart dependencies
+        run: helm dependency build helm/rise
 
       - name: Package chart
         run: |

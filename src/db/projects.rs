@@ -135,6 +135,7 @@ pub async fn find_by_id(pool: &PgPool, id: Uuid) -> Result<Option<Project>> {
 }
 
 /// Find multiple projects by their IDs in a single query
+#[allow(dead_code)]
 pub async fn find_by_ids(pool: &PgPool, ids: &[Uuid]) -> Result<Vec<Project>> {
     let projects = sqlx::query_as!(
         Project,

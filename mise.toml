@@ -44,6 +44,16 @@ description = "Verify the committed backend settings JSON schema is up to date."
 run = "mise config:schema:generate && git --no-pager diff --exit-code -- docs/schemas/backend-settings.schema.json"
 env.SQLX_OFFLINE = true
 
+[tasks."crd:generate"]
+description = "Generate the RiseProject CRD YAML for the Helm chart."
+run = "cargo run --features cli,backend -- backend crd-schema > helm/rise/crds/riseproject-crd.yaml"
+env.SQLX_OFFLINE = true
+
+[tasks."crd:check"]
+description = "Verify the committed CRD YAML is up to date with the Rust definition."
+run = "mise crd:generate && git --no-pager diff --exit-code -- helm/rise/crds/riseproject-crd.yaml"
+env.SQLX_OFFLINE = true
+
 [tasks."docs:serve"]
 description = "Serve documentation with live reload in port 3001."
 run = "mdbook serve -p 3001 --open"
@@ -164,6 +174,14 @@ echo
 
 kubectl port-forward --namespace ingress-nginx svc/ingress-nginx-controller 8080:80 8443:443 &
 echo "Port-forward running in background (PID: $!)"
+
+# Install Metacontroller + Rise CRDs for development
+helm dependency build helm/rise
+kubectl apply --server-side --force-conflicts -f helm/rise/crds/
+helm upgrade --install rise-dev ./helm/rise \
+  -f helm/rise/values-dev.yaml \
+  --namespace rise \
+  --create-namespace
 """
 
 [tasks."minikube:down"]
@@ -202,6 +220,16 @@ helm upgrade --install ingress-nginx ingress-nginx \
   --set controller.hostPort.ports.http=8080 \
   --set controller.hostPort.ports.https=8443 \
   --set controller.service.type=ClusterIP
+
+# Install Metacontroller + Rise CRDs for development
+HOST_IP=$(kubectl get node $(hostname) -o jsonpath='{.metadata.annotations.k3s\\.io/internal-ip}')
+helm dependency build helm/rise
+kubectl apply --server-side --force-conflicts -f helm/rise/crds/
+helm upgrade --install rise-dev ./helm/rise \
+  -f helm/rise/values-dev.yaml \
+  --set "metacontroller.webhookBaseUrl=http://${HOST_IP}:3001" \
+  --namespace rise \
+  --create-namespace
 
 set +x
 echo

@@ -9,8 +9,6 @@ pub struct Settings {
     pub auth: AuthSettings,
     pub database: DatabaseSettings,
     #[serde(default)]
-    pub controller: ControllerSettings,
-    #[serde(default)]
     pub registry: Option<RegistrySettings>,
     #[serde(default)]
     pub deployment_controller: Option<DeploymentControllerSettings>,
@@ -193,30 +191,6 @@ fn default_oauth_global_window_secs() -> u64 {
     60
 }
 
-fn default_reconcile_interval() -> u64 {
-    5
-}
-
-fn default_health_check_interval() -> u64 {
-    5
-}
-
-fn default_termination_interval() -> u64 {
-    5
-}
-
-fn default_cancellation_interval() -> u64 {
-    5
-}
-
-fn default_expiration_interval() -> u64 {
-    60
-}
-
-fn default_secret_refresh_interval() -> u64 {
-    3600
-}
-
 fn default_idp_group_sync_enabled() -> bool {
     true
 }
@@ -239,47 +213,6 @@ fn default_allow_team_creation() -> bool {
 
 fn default_allow_list_all_teams() -> bool {
     false // Backward compatible - non-admins only see their own teams by default
-}
-
-#[derive(Debug, Deserialize, Clone, JsonSchema)]
-pub struct ControllerSettings {
-    /// Interval in seconds for checking deployments to reconcile (default: 5)
-    #[serde(default = "default_reconcile_interval")]
-    pub reconcile_interval_secs: u64,
-
-    /// Interval in seconds for health checks on active deployments (default: 5)
-    #[serde(default = "default_health_check_interval")]
-    pub health_check_interval_secs: u64,
-
-    /// Interval in seconds for processing terminating deployments (default: 5)
-    #[serde(default = "default_termination_interval")]
-    pub termination_interval_secs: u64,
-
-    /// Interval in seconds for processing cancelling deployments (default: 5)
-    #[serde(default = "default_cancellation_interval")]
-    pub cancellation_interval_secs: u64,
-
-    /// Interval in seconds for checking expired deployments (default: 60)
-    #[serde(default = "default_expiration_interval")]
-    pub expiration_interval_secs: u64,
-
-    /// Interval in seconds for refreshing Kubernetes image pull secrets (default: 3600)
-    #[serde(default = "default_secret_refresh_interval")]
-    #[allow(dead_code)]
-    pub secret_refresh_interval_secs: u64,
-}
-
-impl Default for ControllerSettings {
-    fn default() -> Self {
-        Self {
-            reconcile_interval_secs: default_reconcile_interval(),
-            health_check_interval_secs: default_health_check_interval(),
-            termination_interval_secs: default_termination_interval(),
-            cancellation_interval_secs: default_cancellation_interval(),
-            expiration_interval_secs: default_expiration_interval(),
-            secret_refresh_interval_secs: default_secret_refresh_interval(),
-        }
-    }
 }
 
 #[derive(Debug, Deserialize, Clone, JsonSchema)]
@@ -397,6 +330,10 @@ pub enum CustomDomainTlsMode {
     Shared,
     /// Each custom domain gets its own tls-{domain} secret (cert-manager integration)
     PerDomain,
+}
+
+fn default_metacontroller_webhook_port() -> u16 {
+    3001
 }
 
 fn default_custom_domain_tls_mode() -> CustomDomainTlsMode {
@@ -736,6 +673,24 @@ pub enum DeploymentControllerSettings {
         /// If not set, uses defaults (HTTP probes on app port at "/" path)
         #[serde(default)]
         health_probes: Option<HealthProbeConfig>,
+
+        /// Port for the internal metacontroller webhook listener.
+        /// Webhook endpoints are served on this separate port instead of the main HTTP port.
+        /// Defaults to 3001.
+        #[serde(default = "default_metacontroller_webhook_port")]
+        metacontroller_webhook_port: u16,
+
+        /// Shared secret token for authenticating Metacontroller webhook requests.
+        /// Required when deployment controller is configured.
+        /// Generate with: openssl rand -base64 32
+        metacontroller_webhook_token: String,
+
+        /// Adopt existing Kubernetes resources during Metacontroller migration.
+        /// Patches pre-existing resources with Metacontroller's ownership label
+        /// so they are adopted rather than rejected. No-op once all resources
+        /// are labeled. Defaults to true.
+        #[serde(default = "default_true")]
+        legacy_adopt_existing_resources_to_metacontroller: bool,
     },
 }
 
@@ -1217,6 +1172,7 @@ deployment_controller:
   namespace_format: "rise-{project_name}"
   auth_backend_url: "http://localhost:3000"
   auth_signin_url: "http://localhost:3000"
+  metacontroller_webhook_token: "test-token"
   network_policy:
     ingress:
       - from:
@@ -1301,6 +1257,7 @@ deployment_controller:
   namespace_format: "rise-{project_name}"
   auth_backend_url: "http://localhost:3000"
   auth_signin_url: "http://localhost:3000"
+  metacontroller_webhook_token: "test-token"
   extra_service_token_audiences:
     vault: "https://vault.example.com"
   network_policy:

@@ -146,53 +146,6 @@
       ],
       "type": "object"
     },
-    "ControllerSettings": {
-      "properties": {
-        "cancellation_interval_secs": {
-          "default": 5,
-          "description": "Interval in seconds for processing cancelling deployments (default: 5)",
-          "format": "uint64",
-          "minimum": 0,
-          "type": "integer"
-        },
-        "expiration_interval_secs": {
-          "default": 60,
-          "description": "Interval in seconds for checking expired deployments (default: 60)",
-          "format": "uint64",
-          "minimum": 0,
-          "type": "integer"
-        },
-        "health_check_interval_secs": {
-          "default": 5,
-          "description": "Interval in seconds for health checks on active deployments (default: 5)",
-          "format": "uint64",
-          "minimum": 0,
-          "type": "integer"
-        },
-        "reconcile_interval_secs": {
-          "default": 5,
-          "description": "Interval in seconds for checking deployments to reconcile (default: 5)",
-          "format": "uint64",
-          "minimum": 0,
-          "type": "integer"
-        },
-        "secret_refresh_interval_secs": {
-          "default": 3600,
-          "description": "Interval in seconds for refreshing Kubernetes image pull secrets (default: 3600)",
-          "format": "uint64",
-          "minimum": 0,
-          "type": "integer"
-        },
-        "termination_interval_secs": {
-          "default": 5,
-          "description": "Interval in seconds for processing terminating deployments (default: 5)",
-          "format": "uint64",
-          "minimum": 0,
-          "type": "integer"
-        }
-      },
-      "type": "object"
-    },
     "CustomDomainTlsMode": {
       "description": "TLS mode for custom domains",
       "oneOf": [
@@ -341,6 +294,23 @@
                 "null"
               ]
             },
+            "legacy_adopt_existing_resources_to_metacontroller": {
+              "default": true,
+              "description": "Adopt existing Kubernetes resources during Metacontroller migration.\nPatches pre-existing resources with Metacontroller's ownership label\nso they are adopted rather than rejected. No-op once all resources\nare labeled. Defaults to true.",
+              "type": "boolean"
+            },
+            "metacontroller_webhook_port": {
+              "default": 3001,
+              "description": "Port for the internal metacontroller webhook listener.\nWebhook endpoints are served on this separate port instead of the main HTTP port.\nDefaults to 3001.",
+              "format": "uint16",
+              "maximum": 65535,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "metacontroller_webhook_token": {
+              "description": "Shared secret token for authenticating Metacontroller webhook requests.\nRequired when deployment controller is configured.\nGenerate with: openssl rand -base64 32",
+              "type": "string"
+            },
             "namespace_annotations": {
               "additionalProperties": {
                 "type": "string"
@@ -420,7 +390,8 @@
             "auth_backend_url",
             "auth_signin_url",
             "access_classes",
-            "network_policy"
+            "network_policy",
+            "metacontroller_webhook_token"
           ],
           "type": "object"
         }
@@ -1338,9 +1309,6 @@
   "properties": {
     "auth": {
       "$ref": "#/$defs/AuthSettings"
-    },
-    "controller": {
-      "$ref": "#/$defs/ControllerSettings"
     },
     "database": {
       "$ref": "#/$defs/DatabaseSettings"

@@ -11,6 +11,9 @@ pub enum BackendCommands {
     /// Print backend settings JSON schema
     #[cfg(feature = "backend")]
     ConfigSchema,
+    /// Print the RiseProject CRD as YAML
+    #[cfg(feature = "backend")]
+    CrdSchema,
 }
 
 #[cfg(feature = "backend")]
@@ -39,6 +42,13 @@ pub async fn handle_backend_command(cmd: BackendCommands) -> Result<()> {
         BackendCommands::ConfigSchema => {
             let schema = crate::server::settings::Settings::json_schema_value();
             println!("{}", serde_json::to_string_pretty(&schema)?);
+            Ok(())
+        }
+        #[cfg(feature = "backend")]
+        BackendCommands::CrdSchema => {
+            use kube::CustomResourceExt;
+            let crd = crate::server::deployment::crd::RiseProject::crd();
+            print!("{}", serde_yaml::to_string(&crd)?);
             Ok(())
         }
     }

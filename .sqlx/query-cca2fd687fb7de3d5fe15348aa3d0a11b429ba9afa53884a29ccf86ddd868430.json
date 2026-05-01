@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        SELECT\n            id, deployment_id, project_id, created_by_id,\n            status as \"status: DeploymentStatus\",\n            deployment_group, environment_id, expires_at,\n            completed_at, error_message, build_logs,\n            controller_metadata as \"controller_metadata: serde_json::Value\",\n            image, image_digest, rolled_back_from_deployment_id,\n            http_port, needs_reconcile, is_active,\n            deploying_started_at,\n            first_healthy_at, job_url, pull_request_url,\n            termination_reason as \"termination_reason: _\",\n            created_at, updated_at\n        FROM deployments\n        WHERE NOT is_terminal(status)\n        ORDER BY updated_at ASC\n        LIMIT $1\n        ",
+  "query": "\n        SELECT\n            id, deployment_id, project_id, created_by_id,\n            status as \"status: DeploymentStatus\",\n            deployment_group, environment_id, expires_at,\n            completed_at, error_message, build_logs,\n            controller_metadata as \"controller_metadata: serde_json::Value\",\n            image, image_digest, rolled_back_from_deployment_id,\n            http_port, needs_reconcile, is_active,\n            deploying_started_at,\n            first_healthy_at, job_url, pull_request_url,\n            termination_reason as \"termination_reason: _\",\n            created_at, updated_at\n        FROM deployments\n        WHERE project_id = $1\n          AND NOT is_terminal(status)\n        ORDER BY created_at DESC\n        ",
   "describe": {
     "columns": [
       {
@@ -144,7 +144,7 @@
     ],
     "parameters": {
       "Left": [
-        "Int8"
+        "Uuid"
       ]
     },
     "nullable": [
@@ -175,5 +175,5 @@
       false
     ]
   },
-  "hash": "1a2fddeddca1a2d84941309f0d188b031e9c6036a656bd84a14a6236f98fe58f"
+  "hash": "cca2fd687fb7de3d5fe15348aa3d0a11b429ba9afa53884a29ccf86ddd868430"
 }

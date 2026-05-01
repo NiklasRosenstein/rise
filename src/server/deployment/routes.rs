@@ -40,3 +40,16 @@ pub fn deployment_routes() -> Router<AppState> {
             get(super::handlers::stream_deployment_logs),
         )
 }
+
+/// Metacontroller webhook routes (token-authenticated on an internal listener).
+/// These are called by Metacontroller within the cluster and require a shared-secret
+/// token passed as a `?token=` query parameter.
+#[cfg(feature = "backend")]
+pub fn metacontroller_routes() -> Router<AppState> {
+    Router::new()
+        .route("/metacontroller/sync", post(super::webhook::handle_sync))
+        .route(
+            "/metacontroller/finalize",
+            post(super::webhook::handle_finalize),
+        )
+}

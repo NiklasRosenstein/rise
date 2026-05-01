@@ -4000,6 +4000,7 @@ dependencies = [
  "serde_ignored",
  "serde_json",
  "serde_urlencoded",
+ "serde_yaml",
  "sha2 0.11.0",
  "snowflake-connector-rs",
  "sqlx",

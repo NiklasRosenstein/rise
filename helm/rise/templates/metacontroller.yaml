@@ -1,0 +1,57 @@
+{{- if .Values.metacontroller.enabled }}
+{{- $webhookPort := .Values.metacontroller.webhookPort | default 3001 }}
+{{- $baseUrl := .Values.metacontroller.webhookBaseUrl | default (printf "http://%s-webhook.%s.svc:%s" (include "rise.fullname" .) .Release.Namespace (toString $webhookPort)) }}
+{{- $tokenParam := "" }}
+{{- if .Values.metacontroller.webhookToken }}
+{{- $tokenParam = printf "?token=%s" (.Values.metacontroller.webhookToken | urlquery) }}
+{{- end }}
+apiVersion: metacontroller.k8s.io/v1alpha1
+kind: CompositeController
+metadata:
+  name: rise-project-controller
+  labels:
+    {{- include "rise.labels" . | nindent 4 }}
+spec:
+  generateSelector: true
+  resyncPeriodSeconds: {{ .Values.metacontroller.resyncPeriodSeconds }}
+  parentResource:
+    apiVersion: rise.dev/v1alpha1
+    resource: riseprojects
+    ignoreStatusChanges: true
+  childResources:
+    - apiVersion: v1
+      resource: namespaces
+      updateStrategy:
+        method: InPlace
+    - apiVersion: v1
+      resource: secrets
+      updateStrategy:
+        method: InPlace
+    - apiVersion: v1
+      resource: serviceaccounts
+      updateStrategy:
+        method: InPlace
+    - apiVersion: apps/v1
+      resource: deployments
+      updateStrategy:
+        method: InPlace
+    - apiVersion: v1
+      resource: services
+      updateStrategy:
+        method: InPlace
+    - apiVersion: networking.k8s.io/v1
+      resource: ingresses
+      updateStrategy:
+        method: InPlace
+    - apiVersion: networking.k8s.io/v1
+      resource: networkpolicies
+      updateStrategy:
+        method: InPlace
+  hooks:
+    sync:
+      webhook:
+        url: {{ $baseUrl }}/api/v1/metacontroller/sync{{ $tokenParam }}
+    finalize:
+      webhook:
+        url: {{ $baseUrl }}/api/v1/metacontroller/finalize{{ $tokenParam }}
+{{- end }}

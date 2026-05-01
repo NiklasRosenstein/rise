@@ -24,11 +24,75 @@ use anyhow::Result;
 use axum::{extract::Request, middleware as axum_middleware, response::Response, Router};
 use state::{AppState, ControllerState};
 use std::sync::Arc;
-#[cfg(feature = "backend")]
-use std::time::Duration;
 use tower::ServiceBuilder;
 use tower_http::{classify::ServerErrorsFailureClass, trace::TraceLayer};
 use tracing::{info, Span};
+
+/// Build the standard trace layer used for request logging on both the main
+/// server and the internal webhook listener.
+macro_rules! trace_layer {
+    () => {
+        TraceLayer::new_for_http()
+            .on_request(|request: &Request, _span: &Span| {
+                let request_id = request
+                    .extensions()
+                    .get::<self::middleware::RequestId>()
+                    .map(|rid| rid.0);
+                let path = request.uri().path();
+                tracing::info!(
+                    method = %request.method(),
+                    path = %path,
+                    request_id = ?request_id,
+                    "request started"
+                );
+            })
+            .on_response(
+                |response: &Response, latency: std::time::Duration, _span: &Span| {
+                    let status = response.status();
+                    let latency_ms = latency.as_millis();
+                    let request_id = response
+                        .headers()
+                        .get("x-request-id")
+                        .and_then(|h| h.to_str().ok());
+
+                    if status.is_server_error() {
+                        tracing::error!(
+                            status = %status,
+                            latency_ms = %latency_ms,
+                            request_id = ?request_id,
+                            "request completed with server error"
+                        );
+                    } else if status.is_client_error() {
+                        tracing::warn!(
+                            status = %status,
+                            latency_ms = %latency_ms,
+                            request_id = ?request_id,
+                            "request completed with client error"
+                        );
+                    } else {
+                        tracing::info!(
+                            status = %status,
+                            latency_ms = %latency_ms,
+                            request_id = ?request_id,
+                            "request completed successfully"
+                        );
+                    }
+                },
+            )
+            .on_failure(
+                |failure: ServerErrorsFailureClass,
+                 latency: std::time::Duration,
+                 _span: &Span| {
+                    let latency_ms = latency.as_millis();
+                    tracing::error!(
+                        classification = ?failure,
+                        latency_ms = %latency_ms,
+                        "request failed unexpectedly"
+                    );
+                },
+            )
+    };
+}
 
 /// Run the HTTP server process with all enabled controllers
 pub async fn run_server(settings: settings::Settings) -> Result<()> {
@@ -40,37 +104,34 @@ pub async fn run_server(settings: settings::Settings) -> Result<()> {
         encryption_provider: state.encryption_provider.clone(),
     };
 
+    // Backfill missing RiseProject CRDs (upgrade migration + recovery)
+    #[cfg(feature = "backend")]
+    if let Some(ref kube_client) = state.kube_client {
+        let (adopt, namespace_format) = match &settings.deployment_controller {
+            Some(settings::DeploymentControllerSettings::Kubernetes {
+                legacy_adopt_existing_resources_to_metacontroller,
+                namespace_format,
+                ..
+            }) => (
+                *legacy_adopt_existing_resources_to_metacontroller,
+                namespace_format.as_str(),
+            ),
+            _ => (false, "rise-{project_name}"),
+        };
+        if let Err(e) = deployment::crd::backfill_rise_projects(
+            kube_client,
+            &state.db_pool,
+            adopt,
+            namespace_format,
+        )
+        .await
+        {
+            tracing::warn!("Failed to backfill RiseProject CRDs: {:?}", e);
+        }
+    }
+
     // Spawn enabled controllers as background tasks
     let mut controller_handles = vec![];
-
-    // Start Kubernetes deployment controller
-    info!("Starting Kubernetes deployment controller");
-
-    let settings_clone = settings.clone();
-    let controller_state_clone = controller_state.clone();
-    let registry_provider = state.registry_provider.clone();
-    let handle = tokio::spawn(async move {
-        #[cfg(feature = "backend")]
-        {
-            if let Err(e) = run_kubernetes_controller_loop(
-                controller_state_clone,
-                registry_provider,
-                settings_clone,
-            )
-            .await
-            {
-                tracing::error!("Deployment controller error: {:#}", e);
-            }
-        }
-        #[cfg(not(feature = "backend"))]
-        {
-            tracing::error!(
-                "Kubernetes deployment controller is required but the 'backend' feature is not enabled. \
-                 Please rebuild with --features backend"
-            );
-        }
-    });
-    controller_handles.push(handle);
 
     // Start project controller (always enabled)
     info!("Starting project controller");
@@ -166,88 +227,54 @@ pub async fn run_server(settings: settings::Settings) -> Result<()> {
         .with_state(state.clone())
         .layer(
             ServiceBuilder::new()
-                // Add request ID middleware first (before TraceLayer so it's available in logs)
+                // TraceLayer is added first so it wraps inner; request_id_middleware
+                // is added last so it runs outermost (inserts RequestId before TraceLayer reads it)
+                .layer(trace_layer!())
                 .layer(axum_middleware::from_fn(
                     self::middleware::request_id_middleware,
-                ))
-                // Enhanced trace layer with custom logging
-                .layer(
-                    TraceLayer::new_for_http()
-                        .on_request(|request: &Request, _span: &Span| {
-                            // Extract request ID if available
-                            let request_id = request
-                                .extensions()
-                                .get::<self::middleware::RequestId>()
-                                .map(|rid| rid.0);
-
-                            let path = request.uri().path();
-
-                            tracing::info!(
-                                method = %request.method(),
-                                path = %path,
-                                request_id = ?request_id,
-                                "request started"
-                            );
-                        })
-                        .on_response(
-                            |response: &Response, latency: std::time::Duration, _span: &Span| {
-                                let status = response.status();
-                                let latency_ms = latency.as_millis();
-
-                                // Extract request ID from response headers
-                                let request_id = response
-                                    .headers()
-                                    .get("x-request-id")
-                                    .and_then(|h| h.to_str().ok());
-
-                                // Log with appropriate severity based on status
-                                if status.is_server_error() {
-                                    tracing::error!(
-                                        status = %status,
-                                        latency_ms = %latency_ms,
-                                        request_id = ?request_id,
-                                        "request completed with server error"
-                                    );
-                                } else if status.is_client_error() {
-                                    tracing::warn!(
-                                        status = %status,
-                                        latency_ms = %latency_ms,
-                                        request_id = ?request_id,
-                                        "request completed with client error"
-                                    );
-                                } else {
-                                    tracing::info!(
-                                        status = %status,
-                                        latency_ms = %latency_ms,
-                                        request_id = ?request_id,
-                                        "request completed successfully"
-                                    );
-                                }
-                            },
-                        )
-                        .on_failure(
-                            |failure: ServerErrorsFailureClass,
-                             latency: std::time::Duration,
-                             _span: &Span| {
-                                let latency_ms = latency.as_millis();
-                                tracing::error!(
-                                    classification = ?failure,
-                                    latency_ms = %latency_ms,
-                                    "request failed unexpectedly"
-                                );
-                            },
-                        ),
-                ),
+                )),
         );
 
     let addr = format!("{}:{}", settings.server.host, settings.server.port);
     info!("HTTP server listening on http://{}", addr);
     let listener = tokio::net::TcpListener::bind(&addr).await?;
 
+    // Spawn internal webhook listener for Metacontroller (separate port, token-authenticated)
+    #[cfg(feature = "backend")]
+    let webhook_handle = if let (Some(port), Some(_token)) = (
+        state.metacontroller_webhook_port,
+        state.metacontroller_webhook_token.as_ref(),
+    ) {
+        let webhook_app = Router::new()
+            .nest("/api/v1", deployment::routes::metacontroller_routes())
+            .with_state(state.clone())
+            .layer(trace_layer!())
+            .layer(axum_middleware::from_fn(
+                self::middleware::request_id_middleware,
+            )); // request_id_middleware outermost → inserts ID before TraceLayer reads it
+
+        let webhook_addr = format!("{}:{}", settings.server.host, port);
+        info!("Metacontroller webhook listener on http://{}", webhook_addr);
+        let webhook_listener = tokio::net::TcpListener::bind(&webhook_addr).await?;
+
+        Some(tokio::spawn(async move {
+            axum::serve(webhook_listener, webhook_app)
+                .with_graceful_shutdown(shutdown_signal())
+                .await
+        }))
+    } else {
+        None
+    };
+
     // Graceful shutdown support
     axum::serve(listener, app)
         .with_graceful_shutdown(shutdown_signal())
         .await?;
+
+    #[cfg(feature = "backend")]
+    if let Some(handle) = webhook_handle {
+        let _ = handle.await;
+    }
 
     info!("HTTP server shutdown complete");
 
@@ -319,191 +346,6 @@ async fn run_ecr_controller_loop(
     // Wait for shutdown signal
     shutdown_signal().await;
     info!("ECR controller shutdown complete");
-    Ok(())
-}
-
-/// Run the Kubernetes deployment controller loop (for embedding in server process)
-#[cfg(feature = "backend")]
-async fn run_kubernetes_controller_loop(
-    controller_state: ControllerState,
-    registry_provider: Arc<dyn crate::server::registry::RegistryProvider>,
-    settings: settings::Settings,
-) -> Result<()> {
-    // Install default CryptoProvider for rustls (required for kube-rs HTTPS connections)
-    rustls::crypto::ring::default_provider()
-        .install_default()
-        .ok();
-
-    // Extract Kubernetes controller settings
-    let (
-        kubeconfig,
-        production_ingress_url_template,
-        staging_ingress_url_template,
-        environment_ingress_url_template,
-        ingress_port,
-        ingress_schema,
-        auth_backend_url,
-        auth_signin_url,
-        _namespace_format,
-        namespace_labels,
-        namespace_annotations,
-        ingress_annotations,
-        ingress_tls_secret_name,
-        custom_domain_tls_mode,
-        custom_domain_ingress_annotations,
-        node_selector,
-        image_pull_secret_name,
-        access_classes,
-        host_aliases,
-        extra_service_token_audiences,
-        use_default_service_account_for_production,
-        network_policy,
-        pod_security_enabled,
-        pod_resources,
-        health_probes,
-    ) = match settings.deployment_controller.clone() {
-        Some(settings::DeploymentControllerSettings::Kubernetes {
-            kubeconfig,
-            production_ingress_url_template,
-            staging_ingress_url_template,
-            environment_ingress_url_template,
-            ingress_port,
-            ingress_schema,
-            auth_backend_url,
-            auth_signin_url,
-            namespace_format,
-            namespace_labels,
-            namespace_annotations,
-            ingress_annotations,
-            ingress_tls_secret_name,
-            custom_domain_tls_mode,
-            custom_domain_ingress_annotations,
-            node_selector,
-            image_pull_secret_name,
-            access_classes,
-            host_aliases,
-            extra_service_token_audiences,
-            use_default_service_account_for_production,
-            network_policy,
-            pod_security_enabled,
-            pod_resources,
-            health_probes,
-        }) => (
-            kubeconfig,
-            production_ingress_url_template,
-            staging_ingress_url_template,
-            environment_ingress_url_template,
-            ingress_port,
-            ingress_schema,
-            auth_backend_url,
-            auth_signin_url,
-            namespace_format,
-            namespace_labels,
-            namespace_annotations,
-            ingress_annotations,
-            ingress_tls_secret_name,
-            custom_domain_tls_mode,
-            custom_domain_ingress_annotations,
-            node_selector,
-            image_pull_secret_name,
-            access_classes,
-            host_aliases,
-            extra_service_token_audiences,
-            use_default_service_account_for_production,
-            network_policy,
-            pod_security_enabled,
-            pod_resources,
-            health_probes,
-        ),
-        None => {
-            anyhow::bail!("Deployment controller not configured. Please add deployment_controller configuration with type: kubernetes")
-        }
-    };
-
-    // Use components passed from main server (no initialization needed)
-
-    // Create kube client
-    let kube_config = if kubeconfig.is_some() {
-        // Use explicit kubeconfig if provided
-        kube::Config::from_kubeconfig(&kube::config::KubeConfigOptions {
-            context: None,
-            cluster: None,
-            user: None,
-        })
-        .await?
-    } else {
-        kube::Config::infer().await? // In-cluster or ~/.kube/config
-    };
-    let kube_client = kube::Client::try_from(kube_config)?;
-
-    // Extract backend_address from auth_backend_url
-    let parsed_backend_address = settings::BackendAddress::from_url(&auth_backend_url)?;
-
-    // Filter out null access classes (used to remove inherited entries)
-    let access_classes: std::collections::HashMap<_, _> = access_classes
-        .into_iter()
-        .filter_map(|(k, v)| v.map(|ac| (k, ac)))
-        .collect();
-
-    let backend = Arc::new(deployment::controller::KubernetesController::new(
-        controller_state.clone(),
-        kube_client,
-        deployment::controller::KubernetesControllerConfig {
-            production_ingress_url_template,
-            staging_ingress_url_template,
-            environment_ingress_url_template,
-            ingress_port,
-            ingress_schema,
-            registry_provider,
-            auth_backend_url,
-            auth_signin_url,
-            backend_address: Some(parsed_backend_address),
-            namespace_labels,
-            namespace_annotations,
-            ingress_annotations,
-            ingress_tls_secret_name,
-            custom_domain_tls_mode,
-            custom_domain_ingress_annotations,
-            node_selector,
-            image_pull_secret_name,
-            access_classes,
-            host_aliases,
-            extra_service_token_audiences,
-            use_default_service_account_for_production,
-            network_policy,
-            pod_security_enabled,
-            pod_resources,
-            health_probes,
-        },
-    )?);
-
-    // Test Kubernetes API connection before proceeding
-    backend.test_connection().await?;
-
-    let controller = Arc::new(deployment::controller::DeploymentController::new(
-        Arc::new(controller_state),
-        backend.clone(),
-        Duration::from_secs(settings.controller.reconcile_interval_secs),
-        Duration::from_secs(settings.controller.health_check_interval_secs),
-        Duration::from_secs(settings.controller.termination_interval_secs),
-        Duration::from_secs(settings.controller.cancellation_interval_secs),
-        Duration::from_secs(settings.controller.expiration_interval_secs),
-    )?);
-    controller.start();
-    info!("Kubernetes deployment controller started");
-
-    // Start Kubernetes-specific background loops
-    Arc::clone(&backend).start(); // Namespace cleanup loop
-    info!("Kubernetes namespace cleanup loop started");
-
-    backend.start_secret_refresh_loop(Duration::from_secs(
-        settings.controller.secret_refresh_interval_secs,
-    ));
-    info!("Kubernetes secret refresh loop started");
-
-    // Wait for shutdown signal
-    shutdown_signal().await;
-    info!("Kubernetes deployment controller shutdown complete");
     Ok(())
 }
 

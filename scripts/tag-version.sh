@@ -66,6 +66,7 @@ if [ -z "$VERSION" ]; then
     echo ""
     echo "Examples:"
     echo "  $0 0.1.4                    # Create release for version 0.1.4"
+    echo "  $0 0.21.0-rc1               # Create prerelease for version 0.21.0-rc1"
     echo "  $0 --dry-run 0.1.4          # Preview release notes for next version"
     echo "  $0 --skip-ai-release-notes 0.1.4  # Tag without Claude-generated notes"
     echo "  $0 --dry-run 0.1.4 v0.13.0..HEAD  # Preview notes for specific range"
@@ -77,9 +78,9 @@ check_prerequisites
 
 TAG="v${VERSION}"
 
-# Validate version format (basic check for X.Y.Z)
-if ! [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-    echo "Error: Version must be in format X.Y.Z (e.g., 0.1.4)"
+# Validate version format (X.Y.Z with optional prerelease suffix)
+if ! [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9.]+)?$ ]]; then
+    echo "Error: Version must be in format X.Y.Z or X.Y.Z-prerelease (e.g., 0.1.4, 0.21.0-rc1)"
     exit 1
 fi
 
@@ -233,7 +234,7 @@ git commit -m "chore: bump version to ${VERSION}"
 
 # Step 4: Create the tag with AI-generated notes in the annotation
 echo "[4/5] Creating tag ${TAG}..."
-git tag -a "${TAG}" -m "${RELEASE_SUMMARY}"
+git tag -a "${TAG}" --cleanup=verbatim -m "${RELEASE_SUMMARY}"
 
 # Step 5: Push commit and tag
 echo "[5/5] Pushing to remote..."

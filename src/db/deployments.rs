@@ -56,6 +56,45 @@ pub async fn list_for_project(pool: &PgPool, project_id: Uuid) -> Result<Vec<Dep
     Ok(deployments)
 }
 
+/// List non-terminal deployments for a project.
+///
+/// Returns only deployments that are not in a terminal state (Cancelled, Stopped,
+/// Superseded, Failed, Expired). Used by the sync webhook to avoid loading the
+/// full deployment history on every sync cycle.
+#[cfg(feature = "backend")]
+pub async fn list_non_terminal_for_project(
+    pool: &PgPool,
+    project_id: Uuid,
+) -> Result<Vec<Deployment>> {
+    let deployments = sqlx::query_as!(
+        Deployment,
+        r#"
+        SELECT
+            id, deployment_id, project_id, created_by_id,
+            status as "status: DeploymentStatus",
+            deployment_group, environment_id, expires_at,
+            completed_at, error_message, build_logs,
+            controller_metadata as "controller_metadata: serde_json::Value",
+            image, image_digest, rolled_back_from_deployment_id,
+            http_port, needs_reconcile, is_active,
+            deploying_started_at,
+            first_healthy_at, job_url, pull_request_url,
+            termination_reason as "termination_reason: _",
+            created_at, updated_at
+        FROM deployments
+        WHERE project_id = $1
+          AND NOT is_terminal(status)
+        ORDER BY created_at DESC
+        "#,
+        project_id
+    )
+    .fetch_all(pool)
+    .await
+    .context("Failed to list non-terminal deployments for project")?;
+
+    Ok(deployments)
+}
+
 /// Batch fetch deployments by their UUIDs
 /// Returns a HashMap mapping deployment ID to Deployment
 pub async fn get_deployments_batch(
@@ -361,71 +400,6 @@ pub async fn mark_failed(pool: &PgPool, id: Uuid, error_message: &str) -> Result
 }
 
 /// Find deployments in non-terminal states for reconciliation
-/// Excludes terminal states using is_terminal() PostgreSQL function
-#[cfg(feature = "backend")]
-pub async fn find_non_terminal(pool: &PgPool, limit: i64) -> Result<Vec<Deployment>> {
-    let deployments = sqlx::query_as!(
-        Deployment,
-        r#"
-        SELECT
-            id, deployment_id, project_id, created_by_id,
-            status as "status: DeploymentStatus",
-            deployment_group, environment_id, expires_at,
-            completed_at, error_message, build_logs,
-            controller_metadata as "controller_metadata: serde_json::Value",
-            image, image_digest, rolled_back_from_deployment_id,
-            http_port, needs_reconcile, is_active,
-            deploying_started_at,
-            first_healthy_at, job_url, pull_request_url,
-            termination_reason as "termination_reason: _",
-            created_at, updated_at
-        FROM deployments
-        WHERE NOT is_terminal(status)
-        ORDER BY updated_at ASC
-        LIMIT $1
-        "#,
-        limit
-    )
-    .fetch_all(pool)
-    .await
-    .context("Failed to find non-terminal deployments")?;
-
-    Ok(deployments)
-}
-
-/// Find all deployments with a specific status
-#[cfg(feature = "backend")]
-pub async fn find_by_status(pool: &PgPool, status: DeploymentStatus) -> Result<Vec<Deployment>> {
-    let status_str = status.to_string();
-
-    let deployments = sqlx::query_as!(
-        Deployment,
-        r#"
-        SELECT
-            id, deployment_id, project_id, created_by_id,
-            status as "status: DeploymentStatus",
-            deployment_group, environment_id, expires_at,
-            completed_at, error_message, build_logs,
-            controller_metadata as "controller_metadata: serde_json::Value",
-            image, image_digest, rolled_back_from_deployment_id,
-            http_port, needs_reconcile, is_active,
-            deploying_started_at,
-            first_healthy_at, job_url, pull_request_url,
-            termination_reason as "termination_reason: _",
-            created_at, updated_at
-        FROM deployments
-        WHERE status = $1
-        ORDER BY created_at DESC
-        "#,
-        status_str
-    )
-    .fetch_all(pool)
-    .await
-    .context("Failed to find deployments by status")?;
-
-    Ok(deployments)
-}
-
 /// Update controller metadata
 #[cfg(feature = "backend")]
 pub async fn update_controller_metadata(
@@ -784,40 +758,6 @@ pub async fn clear_needs_reconcile(pool: &PgPool, id: Uuid) -> Result<()> {
     Ok(())
 }
 
-/// Find deployments that need reconciliation
-///
-/// Returns deployments in Healthy or Unhealthy states that have needs_reconcile=TRUE
-pub async fn find_needing_reconcile(pool: &PgPool, limit: i64) -> Result<Vec<Deployment>> {
-    let deployments = sqlx::query_as!(
-        Deployment,
-        r#"
-        SELECT
-            id, deployment_id, project_id, created_by_id,
-            status as "status: DeploymentStatus",
-            deployment_group, environment_id, expires_at,
-            termination_reason as "termination_reason: _",
-            completed_at, error_message, build_logs,
-            controller_metadata as "controller_metadata: serde_json::Value",
-            image, image_digest, rolled_back_from_deployment_id,
-            http_port, needs_reconcile, is_active,
-            deploying_started_at,
-            first_healthy_at, job_url, pull_request_url,
-            created_at, updated_at
-        FROM deployments
-        WHERE needs_reconcile = TRUE
-          AND status IN ('Healthy', 'Unhealthy')
-        ORDER BY updated_at ASC
-        LIMIT $1
-        "#,
-        limit
-    )
-    .fetch_all(pool)
-    .await
-    .context("Failed to find deployments needing reconciliation")?;
-
-    Ok(deployments)
-}
-
 /// Find active deployment for a project in a specific group
 /// Active = most recent Healthy deployment in the group
 #[cfg(feature = "backend")]
@@ -969,40 +909,6 @@ pub async fn find_last_for_project_and_group(
     .context("Failed to find last deployment for project and group")?;
 
     Ok(deployment)
-}
-
-/// Find expired deployments that need cleanup
-#[cfg(feature = "backend")]
-pub async fn find_expired(pool: &PgPool, limit: i64) -> Result<Vec<Deployment>> {
-    let deployments = sqlx::query_as!(
-        Deployment,
-        r#"
-        SELECT
-            id, deployment_id, project_id, created_by_id,
-            status as "status: DeploymentStatus",
-                        deployment_group, environment_id, expires_at,
-            termination_reason as "termination_reason: _",
-            completed_at, error_message, build_logs,
-            controller_metadata as "controller_metadata: serde_json::Value",
-            image, image_digest, rolled_back_from_deployment_id,
-            http_port, needs_reconcile, is_active,
-            deploying_started_at,
-            first_healthy_at, job_url, pull_request_url,
-            created_at, updated_at
-        FROM deployments
-        WHERE expires_at IS NOT NULL
-          AND expires_at <= NOW()
-          AND NOT is_terminal(status)
-        ORDER BY expires_at ASC
-        LIMIT $1
-        "#,
-        limit
-    )
-    .fetch_all(pool)
-    .await
-    .context("Failed to find expired deployments")?;
-
-    Ok(deployments)
 }
 
 /// List deployments for a project with optional group filter
@@ -1181,21 +1087,6 @@ pub async fn mark_as_active(
     Ok(())
 }
 
-/// Unmark a deployment as active
-#[allow(dead_code)]
-pub async fn mark_as_inactive(pool: &PgPool, deployment_id: Uuid) -> Result<()> {
-    sqlx::query!(
-        "UPDATE deployments
-         SET is_active = FALSE, updated_at = NOW()
-         WHERE id = $1",
-        deployment_id
-    )
-    .execute(pool)
-    .await?;
-
-    Ok(())
-}
-
 /// Get all active deployments for a project across all deployment groups
 pub async fn get_active_deployments_for_project(
     pool: &PgPool,
@@ -1224,45 +1115,6 @@ pub async fn get_active_deployments_for_project(
     )
     .fetch_all(pool)
     .await?;
-
-    Ok(deployments)
-}
-
-/// Find deployments stuck in pre-Pushed states (Pending, Building, Pushing)
-/// that were created before the given threshold timestamp
-#[cfg(feature = "backend")]
-pub async fn find_stuck_pre_pushed_before(
-    pool: &PgPool,
-    threshold: DateTime<Utc>,
-    limit: i64,
-) -> Result<Vec<Deployment>> {
-    let deployments = sqlx::query_as!(
-        Deployment,
-        r#"
-        SELECT
-            id, deployment_id, project_id, created_by_id,
-            status as "status: DeploymentStatus",
-            deployment_group, environment_id, expires_at,
-            error_message, completed_at, build_logs,
-            controller_metadata as "controller_metadata: serde_json::Value",
-            image, image_digest, rolled_back_from_deployment_id,
-            http_port, needs_reconcile, is_active,
-            deploying_started_at,
-            first_healthy_at, job_url, pull_request_url,
-            termination_reason as "termination_reason: _",
-            created_at, updated_at
-        FROM deployments
-        WHERE status IN ('Pending', 'Building', 'Pushing')
-          AND created_at < $1
-          AND NOT is_protected(status)
-        LIMIT $2
-        "#,
-        threshold,
-        limit
-    )
-    .fetch_all(pool)
-    .await
-    .context("Failed to find stuck pre-pushed deployments")?;
 
     Ok(deployments)
 }

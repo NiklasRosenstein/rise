@@ -66,7 +66,7 @@ The controller supports two authentication modes:
 
 ### Resources Managed
 
-The Kubernetes controller creates and manages the following resources per project:
+Rise creates a `RiseProject` custom resource per project. Metacontroller watches these CRs and manages the following child resources based on the desired state returned by Rise's sync webhook:
 
 | Resource | Scope | Purpose |
 |----------|-------|---------|
@@ -74,6 +74,8 @@ The Kubernetes controller creates and manages the following resources per projec
 | Deployment | One per deployment | Runs application pods |
 | Service | One per deployment group | Routes traffic to active deployment |
 | Ingress | One per deployment group | Exposes HTTP/HTTPS endpoints |
+| Endpoints | One per project (if backend configured) | Backend endpoints for the `rise-backend` Service (applied directly, not via Metacontroller) |
+| NetworkPolicy | One per active deployment group | Restricts network access per deployment group |
 | ServiceAccount | One per environment | Per-environment workload identity |
 | Secret | One per project | Stores image pull credentials |
 
@@ -376,7 +378,7 @@ All resources are labeled for management and selection:
 
 ```yaml
 labels:
-  rise.dev/managed-by: "rise"
+  app.kubernetes.io/managed-by: "rise"
   rise.dev/project: "my-app"
   rise.dev/environment: "production"        # present when deployment has an environment
   rise.dev/deployment-group: "default"
@@ -590,7 +592,7 @@ kind: Namespace
 metadata:
   name: rise-my-app
   labels:
-    rise.dev/managed-by: "rise"
+    app.kubernetes.io/managed-by: "rise"
     rise.dev/project: "my-app"
 ```
 
@@ -696,7 +698,7 @@ metadata:
   name: my-app-20251207-143022
   namespace: rise-my-app
   labels:
-    rise.dev/managed-by: "rise"
+    app.kubernetes.io/managed-by: "rise"
     rise.dev/project: "my-app"
     rise.dev/environment: "production"
     rise.dev/deployment-group: "default"
@@ -741,7 +743,7 @@ metadata:
   name: default
   namespace: rise-my-app
   labels:
-    rise.dev/managed-by: "rise"
+    app.kubernetes.io/managed-by: "rise"
     rise.dev/project: "my-app"
     rise.dev/environment: "production"
 spec:
@@ -769,7 +771,7 @@ metadata:
   name: default
   namespace: rise-my-app
   labels:
-    rise.dev/managed-by: "rise"
+    app.kubernetes.io/managed-by: "rise"
     rise.dev/project: "my-app"
     rise.dev/environment: "production"
   annotations:
@@ -882,13 +884,14 @@ rise backend controller deployment-kubernetes
 
 The controller will:
 1. Connect to Kubernetes using configured kubeconfig or in-cluster credentials
-2. Start reconciliation loop for deployments in `Pushed`, `Deploying`, `Healthy`, or `Unhealthy` status
-3. Start image pull secret refresh loop (runs hourly)
-4. Process deployments continuously until stopped
+2. Start the webhook server (sync and finalize endpoints) on a separate internal port
+3. Metacontroller periodically calls these webhooks to reconcile each `RiseProject` resource, creating/updating child resources (namespaces, deployments, services, etc.) based on the desired state returned by the sync webhook
 
 ### Required RBAC Permissions
 
-The controller requires the following Kubernetes permissions:
+With Metacontroller, Rise itself only needs minimal permissions. Metacontroller handles the broad resource management (namespaces, deployments, services, secrets, ingresses, etc.) through its own RBAC.
+
+Rise's ClusterRole:
 
 ```yaml
 apiVersion: rbac.authorization.k8s.io/v1
@@ -896,34 +899,39 @@ kind: ClusterRole
 metadata:
   name: rise-controller
 rules:
-  - apiGroups: [""]
-    resources: ["namespaces"]
-    verbs: ["get", "list", "create", "update", "patch"]
-  - apiGroups: [""]
-    resources: ["secrets", "services"]
-    verbs: ["get", "list", "create", "update", "patch", "delete"]
-  - apiGroups: [""]
-    resources: ["serviceaccounts"]
-    verbs: ["get", "list", "create", "update", "patch"]
-  - apiGroups: ["apps"]
-    resources: ["deployments", "replicasets"]
-    verbs: ["get", "list", "create", "update", "patch", "delete"]
+  # RiseProject CRD lifecycle management
+  - apiGroups: ["rise.dev"]
+    resources: ["riseprojects"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  # Pod read access for health checks in sync webhook and log streaming
   - apiGroups: [""]
     resources: ["pods"]
-    verbs: ["get", "list"]
-  - apiGroups: ["networking.k8s.io"]
-    resources: ["ingresses"]
-    verbs: ["get", "list", "create", "update", "patch", "delete"]
+    verbs: ["get", "list", "watch"]
+  # Pod logs for the log streaming endpoint
+  - apiGroups: [""]
+    resources: ["pods/log"]
+    verbs: ["get"]
+  # Events for monitoring pod errors in sync webhook
+  - apiGroups: [""]
+    resources: ["events"]
+    verbs: ["get", "list", "watch"]
+  # Endpoints for backend service routing (applied directly via kube-rs)
+  - apiGroups: [""]
+    resources: ["endpoints"]
+    verbs: ["get", "patch"]
 ```
+
+**Note:** Metacontroller itself needs broad permissions to manage child resources (namespaces, deployments, services, secrets, ingresses, etc.). Those are configured in the Metacontroller operator's own RBAC, not in Rise's ClusterRole.
 
 ### Basic Troubleshooting
 
 **Permission errors**:
 ```
-Error: Forbidden (403): namespaces is forbidden
+Error: Forbidden (403): riseprojects.rise.dev is forbidden
 ```
-- Verify service account has required RBAC permissions
+- Verify Rise's service account has the required RBAC permissions (RiseProject CRD, pods, pod logs, events)
 - Check `kubectl auth can-i` for each required verb/resource
+- If child resources (deployments, services, etc.) fail to be created, check Metacontroller's RBAC permissions instead
 
 **Connection errors**:
 ```
@@ -947,3 +955,52 @@ Pod status: ImagePullBackOff
 - Check pod events: `kubectl describe pod -n rise-{project} {pod-name}`
 - Verify application listens on configured HTTP port
 - Check resource limits and node capacity
+
+## Webhook Security
+
+The Metacontroller sync/finalize webhooks are served on a **separate internal port** (default: 3001) and require a **shared secret token** for authentication. This prevents unauthorized access to endpoints that return decrypted secrets and registry credentials.
+
+### Configuration
+
+```yaml
+deployment_controller:
+  type: kubernetes
+  # ... other settings ...
+  metacontroller_webhook_port: 3001  # Default
+  metacontroller_webhook_token: "YOUR_SECRET_TOKEN"  # Required
+```
+
+Generate a token:
+```bash
+openssl rand -base64 32
+```
+
+The Helm chart passes the same token to the Metacontroller CompositeController webhook URLs as a `?token=` query parameter. Set `metacontroller.webhookToken` in your Helm values to match `metacontroller_webhook_token` in the backend config.
+
+### Network isolation
+
+The webhook endpoints are protected by three layers of defense in depth:
+
+1. **Port isolation** — webhooks are served on a separate port (default: 3001), not exposed via the main API service or Ingress.
+2. **Token authentication** — every request must include the shared secret as a `?token=` query parameter.
+3. **NetworkPolicy** — a Kubernetes NetworkPolicy restricts ingress on the webhook port to only pods in the Metacontroller operator's namespace.
+
+The Helm chart creates:
+- A dedicated `ClusterIP` Service (`*-webhook`) on the webhook port
+- A `NetworkPolicy` restricting ingress on the webhook port to the namespace specified by `metacontroller.namespace` (default: `"metacontroller"`)
+
+### Bring-your-own Metacontroller
+
+When you manage the Metacontroller operator yourself (i.e. `metacontroller.install: false`), you need to align two settings:
+
+- **`metacontroller.namespace`** — set this to the namespace where your Metacontroller operator runs so the NetworkPolicy permits its webhook calls.
+- **`metacontroller.webhookToken`** — must match `metacontroller_webhook_token` in the backend config.
+
+```yaml
+# Helm values
+metacontroller:
+  enabled: true
+  install: false                  # Do not install the operator subchart
+  namespace: "my-metacontroller"  # Namespace where your operator runs
+  webhookToken: "YOUR_SECRET_TOKEN"
+```

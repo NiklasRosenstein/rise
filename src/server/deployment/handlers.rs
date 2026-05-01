@@ -935,6 +935,18 @@ pub async fn create_deployment(
             }
         );
 
+        // Trigger Metacontroller resync so the webhook picks up the new Pushed deployment
+        if let Some(ref kube_client) = state.kube_client {
+            if let Err(e) =
+                crate::server::deployment::crd::trigger_resync(kube_client, &project.name).await
+            {
+                tracing::warn!(
+                    project = %project.name,
+                    "Failed to trigger CRD resync after rollback deployment: {:?}", e
+                );
+            }
+        }
+
         // Return response with image tag and empty credentials (no push needed)
         return Ok(Json(CreateDeploymentResponse {
             deployment_id,
@@ -1125,6 +1137,18 @@ pub async fn create_deployment(
         // Insert Rise-provided environment variables
         insert_rise_env_vars(&state, &deployment, &project).await?;
 
+        // Trigger Metacontroller resync so the webhook picks up the new Pushed deployment
+        if let Some(ref kube_client) = state.kube_client {
+            if let Err(e) =
+                crate::server::deployment::crd::trigger_resync(kube_client, &project.name).await
+            {
+                tracing::warn!(
+                    project = %project.name,
+                    "Failed to trigger CRD resync after pre-built image deployment: {:?}", e
+                );
+            }
+        }
+
         // Return response with digest as image_tag and empty credentials
         Ok(Json(CreateDeploymentResponse {
             deployment_id,
@@ -1298,6 +1322,18 @@ async fn perform_status_update(
         "Updated deployment {} to status {:?}",
         deployment_id, status_copy
     );
+
+    // Trigger Metacontroller resync so the webhook picks up the status change
+    if let Some(ref kube_client) = state.kube_client {
+        if let Err(e) =
+            crate::server::deployment::crd::trigger_resync(kube_client, &project.name).await
+        {
+            tracing::warn!(
+                project = %project.name,
+                "Failed to trigger CRD resync: {:?}", e
+            );
+        }
+    }
 
     // Only calculate URLs for non-terminal deployments that could receive traffic
     let (primary_url, custom_domain_urls) =
@@ -1640,25 +1676,32 @@ pub async fn stop_deployments_by_group(
 
     let mut stopped_ids = Vec::new();
 
-    // Mark each deployment as Terminating with UserStopped reason
+    // Mark each deployment using appropriate state transition
     for deployment in deployments {
-        match db_deployments::mark_terminating(
-            &state.db_pool,
-            deployment.id,
-            crate::db::models::TerminationReason::UserStopped,
-        )
-        .await
-        {
-            Ok(_) => {
+        let result = if state_machine::is_cancellable(&deployment.status) {
+            db_deployments::mark_cancelling(&state.db_pool, deployment.id)
+                .await
+                .map(|_| "Cancelling")
+        } else {
+            db_deployments::mark_terminating(
+                &state.db_pool,
+                deployment.id,
+                crate::db::models::TerminationReason::UserStopped,
+            )
+            .await
+            .map(|_| "Terminating")
+        };
+        match result {
+            Ok(new_status) => {
                 info!(
-                    "Marked deployment {} as Terminating",
-                    deployment.deployment_id
+                    "Marked deployment {} as {}",
+                    deployment.deployment_id, new_status
                 );
                 stopped_ids.push(deployment.deployment_id);
             }
             Err(e) => {
                 error!(
-                    "Failed to mark deployment {} as Terminating: {}",
+                    "Failed to stop deployment {}: {}",
                     deployment.deployment_id, e
                 );
             }
@@ -1669,6 +1712,20 @@ pub async fn stop_deployments_by_group(
     projects::update_calculated_status(&state.db_pool, project.id)
         .await
         .internal_err("Failed to update project status")?;
+
+    // Trigger Metacontroller resync
+    if !stopped_ids.is_empty() {
+        if let Some(ref kube_client) = state.kube_client {
+            if let Err(e) =
+                crate::server::deployment::crd::trigger_resync(kube_client, &project.name).await
+            {
+                tracing::warn!(
+                    project = %project.name,
+                    "Failed to trigger CRD resync: {:?}", e
+                );
+            }
+        }
+    }
 
     info!(
         "Stopped {} deployments in group '{}' for project '{}'",
@@ -1736,21 +1793,43 @@ pub async fn stop_deployment(
         )));
     }
 
-    // Mark deployment as Terminating with UserStopped reason
-    let updated_deployment = db_deployments::mark_terminating(
-        &state.db_pool,
-        deployment.id,
-        crate::db::models::TerminationReason::UserStopped,
-    )
-    .await
-    .internal_err("Failed to stop deployment")?;
-
-    info!("Marked deployment {} as Terminating", deployment_id);
+    // Use the appropriate state transition based on current status:
+    // Pre-infrastructure states (Pending, Building, Pushing, Pushed, Deploying) → Cancelling
+    // Infrastructure states (Healthy, Unhealthy) → Terminating
+    let updated_deployment = if state_machine::is_cancellable(&deployment.status) {
+        let d = db_deployments::mark_cancelling(&state.db_pool, deployment.id)
+            .await
+            .internal_err("Failed to cancel deployment")?;
+        info!("Marked deployment {} as Cancelling", deployment_id);
+        d
+    } else {
+        let d = db_deployments::mark_terminating(
+            &state.db_pool,
+            deployment.id,
+            crate::db::models::TerminationReason::UserStopped,
+        )
+        .await
+        .internal_err("Failed to stop deployment")?;
+        info!("Marked deployment {} as Terminating", deployment_id);
+        d
+    };
 
     // Update project status
     projects::update_calculated_status(&state.db_pool, project.id)
         .await
         .internal_err("Failed to update project status")?;
+
+    // Trigger Metacontroller resync
+    if let Some(ref kube_client) = state.kube_client {
+        if let Err(e) =
+            crate::server::deployment::crd::trigger_resync(kube_client, &project.name).await
+        {
+            tracing::warn!(
+                project = %project.name,
+                "Failed to trigger CRD resync: {:?}", e
+            );
+        }
+    }
 
     // Calculate deployment URLs dynamically
     let (primary_url, custom_domain_urls) = match state
@@ -2004,6 +2083,7 @@ pub async fn stream_deployment_logs(
         .deployment_backend
         .stream_logs(
             &deployment,
+            &project,
             params.follow,
             tail,
             params.timestamps,

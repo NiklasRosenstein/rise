@@ -1,0 +1,19 @@
+{{- if .Values.metacontroller.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "rise.fullname" . }}-webhook
+  labels:
+    {{- include "rise.labels" . | nindent 4 }}
+    app.kubernetes.io/component: webhook
+spec:
+  type: ClusterIP
+  ports:
+  - port: {{ .Values.metacontroller.webhookPort | default 3001 }}
+    targetPort: webhook
+    protocol: TCP
+    name: webhook
+  selector:
+    {{- include "rise.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: server
+{{- end }}

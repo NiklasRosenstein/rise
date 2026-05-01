@@ -221,6 +221,19 @@ pub async fn create_project(
         .await
         .internal_err("Failed to commit transaction")?;
 
+    // Create RiseProject CRD for Metacontroller (best-effort)
+    #[cfg(feature = "backend")]
+    if let Some(ref kube_client) = state.kube_client {
+        if let Err(e) =
+            crate::server::deployment::crd::ensure_rise_project(kube_client, &project.name).await
+        {
+            tracing::warn!(
+                project = %project.name,
+                "Failed to create RiseProject CRD: {:?}", e
+            );
+        }
+    }
+
     let owner_info = resolve_owner_info(&state, &project)
         .await
         .map_err(|e| ServerError::internal(format!("Failed to resolve owner info: {}", e)))?;
@@ -717,6 +730,19 @@ pub async fn delete_project(
     projects::mark_deleting(&state.db_pool, project.id)
         .await
         .internal_err("Failed to mark project for deletion")?;
+
+    // Delete RiseProject CRD — Metacontroller will call the finalize webhook
+    #[cfg(feature = "backend")]
+    if let Some(ref kube_client) = state.kube_client {
+        if let Err(e) =
+            crate::server::deployment::crd::delete_rise_project(kube_client, &project.name).await
+        {
+            tracing::warn!(
+                project = %project.name,
+                "Failed to delete RiseProject CRD: {:?}", e
+            );
+        }
+    }
 
     tracing::info!("Project {} marked for deletion", project.name);
 

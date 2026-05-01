@@ -45,6 +45,11 @@ spec:
         - name: http
           containerPort: {{ .Values.service.targetPort }}
           protocol: TCP
+        {{- if .Values.metacontroller.enabled }}
+        - name: webhook
+          containerPort: {{ .Values.metacontroller.webhookPort | default 3001 }}
+          protocol: TCP
+        {{- end }}
         env:
         - name: RISE_CONFIG_DIR
           value: "/etc/rise"

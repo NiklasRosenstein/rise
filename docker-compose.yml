@@ -1,3 +1,6 @@
+# Fixed name so the network is always "rise_default", even when run from a git worktree.
+# The managed BuildKit daemon connects to this network via RISE_MANAGED_BUILDKIT_NETWORK_NAME
+# (set in .envrc) to reach rise-registry.
 name: rise
 
 volumes:

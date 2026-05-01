@@ -1,0 +1,47 @@
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: riseprojects.rise.dev
+spec:
+  group: rise.dev
+  names:
+    categories: []
+    kind: RiseProject
+    plural: riseprojects
+    shortNames:
+    - rp
+    singular: riseproject
+  scope: Cluster
+  versions:
+  - additionalPrinterColumns: []
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: Auto-generated derived type for RiseProjectSpec via `CustomResource`
+        properties:
+          spec:
+            description: |-
+              CRD spec for RiseProject — intentionally empty.
+              The database remains the source of truth; the CRD is a marker that tells
+              Metacontroller "this project exists, manage its resources."
+            type: object
+          status:
+            nullable: true
+            properties:
+              lastSyncTime:
+                nullable: true
+                type: string
+              observedGeneration:
+                description: Set by Metacontroller to track which generation of the spec has been observed.
+                format: int64
+                nullable: true
+                type: integer
+            type: object
+        required:
+        - spec
+        title: RiseProject
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}
