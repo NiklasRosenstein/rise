@@ -109,7 +109,7 @@ jobs:
           experimental: true
 
       - name: Install mise tools
-        run: mise use -g cargo:sqlx-cli cargo:cargo-all-features
+        run: mise use -g cargo:sqlx-cli cargo:cargo-all-features cargo:cargo-audit
 
       - name: Verify backend config schema is up to date
         run: mise config:schema:check
@@ -124,6 +124,9 @@ jobs:
         run: cargo all-features clippy --all-targets -- -D warnings
         env:
           SQLX_OFFLINE: true
+
+      - name: Run cargo audit
+        run: cargo audit
 
       - name: Verify SQLX offline query data
         run: mise run sqlx:check
