@@ -28,6 +28,72 @@ use tower::ServiceBuilder;
 use tower_http::{classify::ServerErrorsFailureClass, trace::TraceLayer};
 use tracing::{info, Span};
 
+/// Build the standard trace layer used for request logging on both the main
+/// server and the internal webhook listener.
+macro_rules! trace_layer {
+    () => {
+        TraceLayer::new_for_http()
+            .on_request(|request: &Request, _span: &Span| {
+                let request_id = request
+                    .extensions()
+                    .get::<self::middleware::RequestId>()
+                    .map(|rid| rid.0);
+                let path = request.uri().path();
+                tracing::info!(
+                    method = %request.method(),
+                    path = %path,
+                    request_id = ?request_id,
+                    "request started"
+                );
+            })
+            .on_response(
+                |response: &Response, latency: std::time::Duration, _span: &Span| {
+                    let status = response.status();
+                    let latency_ms = latency.as_millis();
+                    let request_id = response
+                        .headers()
+                        .get("x-request-id")
+                        .and_then(|h| h.to_str().ok());
+
+                    if status.is_server_error() {
+                        tracing::error!(
+                            status = %status,
+                            latency_ms = %latency_ms,
+                            request_id = ?request_id,
+                            "request completed with server error"
+                        );
+                    } else if status.is_client_error() {
+                        tracing::warn!(
+                            status = %status,
+                            latency_ms = %latency_ms,
+                            request_id = ?request_id,
+                            "request completed with client error"
+                        );
+                    } else {
+                        tracing::info!(
+                            status = %status,
+                            latency_ms = %latency_ms,
+                            request_id = ?request_id,
+                            "request completed successfully"
+                        );
+                    }
+                },
+            )
+            .on_failure(
+                |failure: ServerErrorsFailureClass,
+                 latency: std::time::Duration,
+                 _span: &Span| {
+                    let latency_ms = latency.as_millis();
+                    tracing::error!(
+                        classification = ?failure,
+                        latency_ms = %latency_ms,
+                        "request failed unexpectedly"
+                    );
+                },
+            )
+    };
+}
+
 /// Run the HTTP server process with all enabled controllers
 pub async fn run_server(settings: settings::Settings) -> Result<()> {
     let state = AppState::new(&settings).await?;
@@ -165,74 +231,7 @@ pub async fn run_server(settings: settings::Settings) -> Result<()> {
                 .layer(axum_middleware::from_fn(
                     self::middleware::request_id_middleware,
                 ))
-                // Enhanced trace layer with custom logging
-                .layer(
-                    TraceLayer::new_for_http()
-                        .on_request(|request: &Request, _span: &Span| {
-                            // Extract request ID if available
-                            let request_id = request
-                                .extensions()
-                                .get::<self::middleware::RequestId>()
-                                .map(|rid| rid.0);
-
-                            let path = request.uri().path();
-
-                            tracing::info!(
-                                method = %request.method(),
-                                path = %path,
-                                request_id = ?request_id,
-                                "request started"
-                            );
-                        })
-                        .on_response(
-                            |response: &Response, latency: std::time::Duration, _span: &Span| {
-                                let status = response.status();
-                                let latency_ms = latency.as_millis();
-
-                                // Extract request ID from response headers
-                                let request_id = response
-                                    .headers()
-                                    .get("x-request-id")
-                                    .and_then(|h| h.to_str().ok());
-
-                                // Log with appropriate severity based on status
-                                if status.is_server_error() {
-                                    tracing::error!(
-                                        status = %status,
-                                        latency_ms = %latency_ms,
-                                        request_id = ?request_id,
-                                        "request completed with server error"
-                                    );
-                                } else if status.is_client_error() {
-                                    tracing::warn!(
-                                        status = %status,
-                                        latency_ms = %latency_ms,
-                                        request_id = ?request_id,
-                                        "request completed with client error"
-                                    );
-                                } else {
-                                    tracing::info!(
-                                        status = %status,
-                                        latency_ms = %latency_ms,
-                                        request_id = ?request_id,
-                                        "request completed successfully"
-                                    );
-                                }
-                            },
-                        )
-                        .on_failure(
-                            |failure: ServerErrorsFailureClass,
-                             latency: std::time::Duration,
-                             _span: &Span| {
-                                let latency_ms = latency.as_millis();
-                                tracing::error!(
-                                    classification = ?failure,
-                                    latency_ms = %latency_ms,
-                                    "request failed unexpectedly"
-                                );
-                            },
-                        ),
-                ),
+                .layer(trace_layer!()),
         );
 
     let addr = format!("{}:{}", settings.server.host, settings.server.port);
@@ -247,7 +246,11 @@ pub async fn run_server(settings: settings::Settings) -> Result<()> {
     ) {
         let webhook_app = Router::new()
             .nest("/api/v1", deployment::routes::metacontroller_routes())
-            .with_state(state.clone());
+            .with_state(state.clone())
+            .layer(trace_layer!())
+            .layer(axum_middleware::from_fn(
+                self::middleware::request_id_middleware,
+            ));
 
         let webhook_addr = format!("{}:{}", settings.server.host, port);
         info!("Metacontroller webhook listener on http://{}", webhook_addr);
