@@ -91,8 +91,21 @@ impl MetacontrollerIpValidator {
     }
 }
 
+/// Normalise an IP to IPv4 when it is an IPv4-mapped IPv6 address (::ffff:x.x.x.x).
+/// Kubernetes pod IPs are always stored as plain IPv4 strings, but a dual-stack or
+/// IPv6-only listener may present the source address in mapped form.
+fn canonical_ip(ip: IpAddr) -> IpAddr {
+    match ip {
+        IpAddr::V6(v6) => v6
+            .to_ipv4_mapped()
+            .map(IpAddr::V4)
+            .unwrap_or(IpAddr::V6(v6)),
+        v4 => v4,
+    }
+}
+
 fn check_ip(ips: &HashSet<IpAddr>, addr: SocketAddr) -> Result<(), (StatusCode, &'static str)> {
-    if ips.contains(&addr.ip()) {
+    if ips.contains(&canonical_ip(addr.ip())) {
         Ok(())
     } else {
         Err((StatusCode::FORBIDDEN, "Webhook source IP not authorized"))
@@ -102,7 +115,7 @@ fn check_ip(ips: &HashSet<IpAddr>, addr: SocketAddr) -> Result<(), (StatusCode, 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::net::{Ipv4Addr, SocketAddrV4};
+    use std::net::{Ipv4Addr, Ipv6Addr, SocketAddrV4, SocketAddrV6};
 
     fn addr(a: u8, b: u8, c: u8, d: u8) -> SocketAddr {
         SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::new(a, b, c, d), 12345))
@@ -140,5 +153,15 @@ mod tests {
         assert!(check_ip(&ips, addr(10, 0, 0, 2)).is_ok());
         let (status, _) = check_ip(&ips, addr(10, 0, 0, 4)).unwrap_err();
         assert_eq!(status, StatusCode::FORBIDDEN);
+    }
+
+    #[test]
+    fn test_check_ip_ipv4_mapped_ipv6_accepted() {
+        // Dual-stack / IPv6 listeners present IPv4 source addresses as ::ffff:x.x.x.x.
+        // Pod IPs from the Kubernetes API are plain IPv4 — the two representations must match.
+        let ips = ip_set(&[(10, 0, 0, 1)]);
+        let mapped = Ipv6Addr::new(0, 0, 0, 0, 0, 0xffff, 0x0a00, 0x0001); // ::ffff:10.0.0.1
+        let mapped_addr = SocketAddr::V6(SocketAddrV6::new(mapped, 12345, 0, 0));
+        assert!(check_ip(&ips, mapped_addr).is_ok());
     }
 }
