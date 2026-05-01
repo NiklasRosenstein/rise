@@ -17,7 +17,12 @@ spec:
     - port: {{ .Values.metacontroller.webhookPort | default 3001 }}
       protocol: TCP
     from:
-    - namespaceSelector:
+    - podSelector:
+        matchLabels:
+          app.kubernetes.io/name: metacontroller-operator
+      {{- if not .Values.metacontroller.install }}
+      namespaceSelector:
         matchLabels:
           kubernetes.io/metadata.name: {{ .Values.metacontroller.namespace | default "metacontroller" }}
+      {{- end }}
 {{- end }}

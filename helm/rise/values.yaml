@@ -104,7 +104,8 @@ metacontroller:
   # Generate with: openssl rand -base64 32
   # Must match deployment_controller.metacontroller_webhook_token in backend config.
   # webhookToken: ""
-  # Namespace where metacontroller operator runs (for NetworkPolicy)
+  # Namespace where an external metacontroller operator runs (for NetworkPolicy).
+  # Only used when install=false. When install=true, the release namespace is used.
   # namespace: "metacontroller"
   # Patch existing resources with Metacontroller ownership labels during
   # migration from the old controller. Adds RBAC permissions for get/list/patch
