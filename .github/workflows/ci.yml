@@ -109,7 +109,12 @@ jobs:
           experimental: true
 
       - name: Install mise tools
-        run: mise use -g cargo:sqlx-cli cargo:cargo-all-features cargo:cargo-audit
+        run: mise use -g cargo:sqlx-cli cargo:cargo-all-features
+
+      - name: Install cargo-audit
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-audit
 
       - name: Verify backend config schema is up to date
         run: mise config:schema:check
