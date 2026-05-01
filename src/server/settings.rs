@@ -191,30 +191,6 @@ fn default_oauth_global_window_secs() -> u64 {
     60
 }
 
-fn default_reconcile_interval() -> u64 {
-    5
-}
-
-fn default_health_check_interval() -> u64 {
-    5
-}
-
-fn default_termination_interval() -> u64 {
-    5
-}
-
-fn default_cancellation_interval() -> u64 {
-    5
-}
-
-fn default_expiration_interval() -> u64 {
-    60
-}
-
-fn default_secret_refresh_interval() -> u64 {
-    3600
-}
-
 fn default_idp_group_sync_enabled() -> bool {
     true
 }
