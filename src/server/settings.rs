@@ -317,7 +317,6 @@ impl BackendAddress {
     }
 
     /// Check if the host is an IP address (vs a DNS name)
-    #[allow(dead_code)]
     pub fn is_ip_address(&self) -> bool {
         self.host.parse::<std::net::IpAddr>().is_ok()
     }

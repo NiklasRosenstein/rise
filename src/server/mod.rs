@@ -227,11 +227,12 @@ pub async fn run_server(settings: settings::Settings) -> Result<()> {
         .with_state(state.clone())
         .layer(
             ServiceBuilder::new()
-                // Add request ID middleware first (before TraceLayer so it's available in logs)
+                // TraceLayer is added first so it wraps inner; request_id_middleware
+                // is added last so it runs outermost (inserts RequestId before TraceLayer reads it)
+                .layer(trace_layer!())
                 .layer(axum_middleware::from_fn(
                     self::middleware::request_id_middleware,
-                ))
-                .layer(trace_layer!()),
+                )),
         );
 
     let addr = format!("{}:{}", settings.server.host, settings.server.port);
@@ -250,7 +251,7 @@ pub async fn run_server(settings: settings::Settings) -> Result<()> {
             .layer(trace_layer!())
             .layer(axum_middleware::from_fn(
                 self::middleware::request_id_middleware,
-            ));
+            )); // request_id_middleware outermost → inserts ID before TraceLayer reads it
 
         let webhook_addr = format!("{}:{}", settings.server.host, port);
         info!("Metacontroller webhook listener on http://{}", webhook_addr);

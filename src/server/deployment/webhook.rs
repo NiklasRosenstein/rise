@@ -1178,9 +1178,7 @@ async fn add_backend_resources(
     namespace: &str,
     backend_address: &crate::server::settings::BackendAddress,
 ) -> anyhow::Result<()> {
-    let is_ip = backend_address.host.parse::<std::net::IpAddr>().is_ok();
-
-    if is_ip {
+    if backend_address.is_ip_address() {
         // IP address → ClusterIP Service (as child) + Endpoints (applied directly)
         let svc = resource_builder.create_backend_service_clusterip(
             project,
