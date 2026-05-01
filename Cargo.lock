@@ -3868,7 +3868,7 @@ dependencies = [
 
 [[package]]
 name = "rise-deploy"
-version = "0.21.0-rc1"
+version = "0.21.0-rc2"
 dependencies = [
  "aes-gcm",
  "anyhow",
