@@ -1363,6 +1363,7 @@ mod tests {
     use crate::server::registry::{ImageTagType, RegistryProvider};
     use anyhow::Result;
     use async_trait::async_trait;
+    use std::sync::Arc;
 
     struct TestRegistryProvider;
 

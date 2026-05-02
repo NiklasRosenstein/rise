@@ -971,20 +971,33 @@ async fn compute_desired_children(
             children.push(serde_json::to_value(&secret_env.secret)?);
 
             if !is_ready {
+                let k8s_deploy_name = ResourceBuilder::deployment_name(project, deployment);
+                let deploy_already_observed = observed.deployments.contains_key(&k8s_deploy_name);
+
+                // Defer Deployment creation until the Secret is observed, preventing
+                // pods from starting with a missing env secret. However, if a
+                // Deployment already exists (e.g. the secret was rotated or
+                // transiently removed), keep returning it so Metacontroller does
+                // not garbage-collect it while the new secret is being created.
+                if !deploy_already_observed {
+                    debug!(
+                        deployment_id = %deployment.deployment_id,
+                        secret_name,
+                        "Waiting for deployment env secret before returning Deployment"
+                    );
+                    continue;
+                }
+
                 debug!(
                     deployment_id = %deployment.deployment_id,
                     secret_name,
-                    "Waiting for deployment env secret before returning Deployment"
+                    "Deployment env secret not ready but Deployment already exists; returning Deployment to prevent GC"
                 );
-                continue;
             }
         }
 
         let (secret_env_name, secret_env_hash) = match secret_env {
-            Some(secret_env) => (
-                Some(secret_env.secret_name),
-                Some(secret_env.secret_hash),
-            ),
+            Some(secret_env) => (Some(secret_env.secret_name), Some(secret_env.secret_hash)),
             None => (None, None),
         };
 
@@ -1484,9 +1497,9 @@ async fn process_finalize(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::server::encryption::EncryptionProvider;
     use crate::db::models::{DeploymentStatus, Project, ProjectStatus};
     use crate::server::deployment::resource_builder::ResourceBuilder;
+    use crate::server::encryption::EncryptionProvider;
     use crate::server::registry::models::RegistryCredentials;
     use crate::server::registry::{ImageTagType, RegistryProvider};
     use anyhow::Result;
@@ -1652,10 +1665,16 @@ mod tests {
     fn deployment_env_secret_hash_is_stable_for_identical_data() {
         let mut data_a = BTreeMap::new();
         data_a.insert("API_KEY".to_string(), ByteString(b"secret-a".to_vec()));
-        data_a.insert("SESSION_SECRET".to_string(), ByteString(b"secret-b".to_vec()));
+        data_a.insert(
+            "SESSION_SECRET".to_string(),
+            ByteString(b"secret-b".to_vec()),
+        );
 
         let mut data_b = BTreeMap::new();
-        data_b.insert("SESSION_SECRET".to_string(), ByteString(b"secret-b".to_vec()));
+        data_b.insert(
+            "SESSION_SECRET".to_string(),
+            ByteString(b"secret-b".to_vec()),
+        );
         data_b.insert("API_KEY".to_string(), ByteString(b"secret-a".to_vec()));
 
         assert_eq!(
