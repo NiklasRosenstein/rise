@@ -26,7 +26,7 @@ use std::collections::HashSet;
 use std::time::Duration;
 use uuid::Uuid;
 
-use crate::db::leader_leases::LeaderLeaseGuard;
+use crate::db::leader_leases::LeaderElection;
 use crate::db::{models::TeamRole, teams, users};
 
 // ============================================================================
@@ -314,7 +314,7 @@ pub fn sanitize_team_name(display_name: &str) -> String {
 async fn sync_once(
     pool: &PgPool,
     client: &mut GraphClient,
-    lease_guard: &LeaderLeaseGuard,
+    election: &LeaderElection,
 ) -> Result<()> {
     // Step 1: Get a fresh token
     client.ensure_token().await?;
@@ -408,7 +408,7 @@ async fn sync_once(
         .context("Failed to begin transaction for Entra sync")?;
 
     for group in &groups_to_sync {
-        lease_guard.ensure_held().await?;
+        election.assert_leader().await?;
         if let Err(e) = sync_group(&mut tx, group).await {
             tracing::error!(
                 "Failed to sync group '{}' (team '{}'): {:?}",
@@ -428,7 +428,7 @@ async fn sync_once(
 
     for team in all_idp_teams {
         if !synced_team_names.contains(&team.name) {
-            lease_guard.ensure_held().await?;
+            election.assert_leader().await?;
             // This IdP-managed team is no longer assigned in Entra — remove all members
             let removed = teams::remove_all_team_members(&mut *tx, team.id)
                 .await
@@ -588,7 +588,12 @@ pub async fn run_entra_sync_loop(
         }
     });
 
-    let holder_id = uuid::Uuid::new_v4();
+    let election = LeaderElection::spawn(
+        pool.clone(),
+        "rise-entra-sync",
+        Uuid::new_v4(),
+        Duration::from_secs(interval_secs + 30),
+    );
 
     loop {
         tokio::select! {
@@ -599,27 +604,13 @@ pub async fn run_entra_sync_loop(
             }
         }
 
-        let lease_guard = match crate::db::leader_leases::acquire(
-            &pool,
-            "rise-entra-sync",
-            holder_id,
-            Duration::from_secs(interval_secs + 30),
-        )
-        .await
-        {
-            Ok(Some(guard)) => guard,
-            Ok(None) => {
-                tracing::debug!("Skipping Entra sync cycle — another replica is the leader");
-                continue;
-            }
-            Err(e) => {
-                tracing::warn!("Leader election error in Entra sync: {:?}", e);
-                continue;
-            }
-        };
+        if !election.is_leader() {
+            tracing::debug!("Skipping Entra sync cycle — another replica is the leader");
+            continue;
+        }
 
         tracing::debug!("Running Entra active sync cycle");
-        if let Err(e) = sync_once(&pool, &mut client, &lease_guard).await {
+        if let Err(e) = sync_once(&pool, &mut client, &election).await {
             tracing::error!("Entra active sync failed: {:?}", e);
         }
         tracing::info!("Next Entra active sync in {}s", interval_secs);

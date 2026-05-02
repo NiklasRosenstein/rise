@@ -1,4 +1,4 @@
-use crate::db::env_vars as db_env_vars;
+use crate::db::{env_vars as db_env_vars, leader_leases::LeaderElection};
 use crate::server::encryption::EncryptionProvider;
 use crate::server::extensions::providers::oauth::models::{
     OAuthExtensionSpec, OAuthExtensionStatus, TokenResponse,
@@ -523,31 +523,22 @@ impl Extension for OAuthProvider {
 
     fn start(&self) {
         let provider = self.clone();
-        let holder_id = uuid::Uuid::new_v4();
 
         tokio::spawn(async move {
             info!("Starting OAuth provider reconciliation loop");
 
+            let election = LeaderElection::spawn(
+                provider.db_pool.clone(),
+                "rise-ext-oauth",
+                Uuid::new_v4(),
+                std::time::Duration::from_secs(60),
+            );
+
             loop {
-                let guard = match crate::db::leader_leases::acquire(
-                    &provider.db_pool,
-                    "rise-ext-oauth",
-                    holder_id,
-                    std::time::Duration::from_secs(60),
-                )
-                .await
-                {
-                    Ok(Some(guard)) => guard,
-                    Ok(None) => {
-                        tokio::time::sleep(std::time::Duration::from_secs(30)).await;
-                        continue;
-                    }
-                    Err(e) => {
-                        tracing::error!("Leader election error in OAuth extension: {:?}", e);
-                        tokio::time::sleep(std::time::Duration::from_secs(5)).await;
-                        continue;
-                    }
-                };
+                if !election.is_leader() {
+                    tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+                    continue;
+                }
 
                 match crate::db::extensions::list_by_extension_type(&provider.db_pool, "oauth")
                     .await
@@ -556,11 +547,8 @@ impl Extension for OAuthProvider {
                         for ext in extensions {
                             // Handle deleted extensions
                             if ext.deleted_at.is_some() {
-                                if let Err(e) = guard.ensure_held().await {
-                                    warn!(
-                                        "Lost leadership before OAuth deletion reconcile: {:?}",
-                                        e
-                                    );
+                                if !election.is_leader() {
+                                    warn!("Lost leadership before OAuth deletion reconcile");
                                     break;
                                 }
                                 if let Err(e) = provider.reconcile_deletion(ext).await {
@@ -570,8 +558,8 @@ impl Extension for OAuthProvider {
                             }
 
                             // Migrate client_secret_ref → client_secret_encrypted
-                            if let Err(e) = guard.ensure_held().await {
-                                warn!("Lost leadership before OAuth migration reconcile: {:?}", e);
+                            if !election.is_leader() {
+                                warn!("Lost leadership before OAuth migration reconcile");
                                 break;
                             }
                             if let Err(e) = provider.migrate_client_secret_ref(&ext).await {

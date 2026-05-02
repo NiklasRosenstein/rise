@@ -1,5 +1,5 @@
 use crate::db::{
-    extensions as db_extensions, leader_leases::LeaderLeaseGuard, projects as db_projects,
+    extensions as db_extensions, leader_leases::LeaderElection, projects as db_projects,
 };
 use crate::server::encryption::EncryptionProvider;
 use crate::server::extensions::{Extension, InjectedEnvVar};
@@ -1099,7 +1099,7 @@ impl SnowflakeOAuthProvisioner {
     async fn reconcile_single(
         &self,
         project_extension: crate::db::models::ProjectExtension,
-        lease_guard: &LeaderLeaseGuard,
+        election: &LeaderElection,
     ) -> Result<bool> {
         debug!(
             "Reconciling Snowflake OAuth extension: {:?}",
@@ -1134,7 +1134,7 @@ impl SnowflakeOAuthProvisioner {
                 .await?;
 
                 // Update status
-                lease_guard.ensure_held().await?;
+                election.assert_leader().await?;
                 db_extensions::update_status(
                     &self.db_pool,
                     project_extension.project_id,
@@ -1145,7 +1145,7 @@ impl SnowflakeOAuthProvisioner {
 
                 // Hard delete if deletion is complete
                 if status.state == SnowflakeOAuthState::Deleted {
-                    lease_guard.ensure_held().await?;
+                    election.assert_leader().await?;
                     db_extensions::delete_permanently(
                         &self.db_pool,
                         project_extension.project_id,
@@ -1218,7 +1218,7 @@ impl SnowflakeOAuthProvisioner {
         }
 
         // Update status in database
-        lease_guard.ensure_held().await?;
+        election.assert_leader().await?;
         db_extensions::update_status(
             &self.db_pool,
             project_extension.project_id,
@@ -1357,33 +1357,24 @@ Deletion removes all resources: Snowflake integration and OAuth extension.
 
     fn start(&self) {
         let provisioner = self.clone();
-        let holder_id = uuid::Uuid::new_v4();
 
         tokio::spawn(async move {
             info!("Starting Snowflake OAuth provisioner reconciliation loop");
 
+            let election = LeaderElection::spawn(
+                provisioner.db_pool.clone(),
+                "rise-ext-snowflake",
+                Uuid::new_v4(),
+                std::time::Duration::from_secs(60),
+            );
+
             let mut error_state: HashMap<Uuid, (usize, DateTime<Utc>)> = HashMap::new();
 
             loop {
-                let lease_guard = match crate::db::leader_leases::acquire(
-                    &provisioner.db_pool,
-                    "rise-ext-snowflake",
-                    holder_id,
-                    std::time::Duration::from_secs(60),
-                )
-                .await
-                {
-                    Ok(Some(guard)) => guard,
-                    Ok(None) => {
-                        sleep(std::time::Duration::from_secs(30)).await;
-                        continue;
-                    }
-                    Err(e) => {
-                        error!("Leader election error in Snowflake extension: {:?}", e);
-                        sleep(std::time::Duration::from_secs(5)).await;
-                        continue;
-                    }
-                };
+                if !election.is_leader() {
+                    sleep(std::time::Duration::from_secs(5)).await;
+                    continue;
+                }
 
                 match db_extensions::list_by_extension_type(
                     &provisioner.db_pool,
@@ -1406,15 +1397,12 @@ Deletion removes all resources: Snowflake integration and OAuth extension.
                                 }
                             }
 
-                            if let Err(e) = lease_guard.ensure_held().await {
-                                warn!("Lost leadership before Snowflake reconcile: {:?}", e);
+                            if !election.is_leader() {
+                                warn!("Lost leadership before Snowflake reconcile");
                                 break;
                             }
 
-                            match provisioner
-                                .reconcile_single(ext.clone(), &lease_guard)
-                                .await
-                            {
+                            match provisioner.reconcile_single(ext.clone(), &election).await {
                                 Ok(_) => {
                                     error_state.remove(&ext.project_id);
                                 }

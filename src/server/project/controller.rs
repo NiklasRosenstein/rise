@@ -7,7 +7,7 @@ use uuid::Uuid;
 
 use crate::db::models::DeploymentStatus;
 use crate::db::{
-    deployments as db_deployments, extensions as db_extensions, leader_leases::LeaderLeaseGuard,
+    deployments as db_deployments, extensions as db_extensions, leader_leases::LeaderElection,
     projects as db_projects,
 };
 use crate::server::deployment::state_machine;
@@ -21,23 +21,30 @@ pub struct ProjectController {
     state: Arc<ControllerState>,
     deletion_interval: Duration,
     cleanup_tick: AtomicU64,
+    election: LeaderElection,
 }
 
 impl ProjectController {
     /// Create a new project controller
     pub fn new(state: Arc<ControllerState>) -> Self {
+        let election = LeaderElection::spawn(
+            state.db_pool.clone(),
+            "rise-project-controller",
+            Uuid::new_v4(),
+            Duration::from_secs(60),
+        );
         Self {
             state,
             deletion_interval: Duration::from_secs(5),
             cleanup_tick: AtomicU64::new(1),
+            election,
         }
     }
 
     /// Start deletion loop
     pub fn start(self: Arc<Self>) {
-        let holder_id = Uuid::new_v4();
         tokio::spawn(async move {
-            self.deletion_loop(holder_id).await;
+            self.deletion_loop().await;
         });
     }
 
@@ -49,33 +56,18 @@ impl ProjectController {
     /// 3. Cancels pre-infrastructure deployments (Pending/Building/Pushing)
     /// 4. Terminates post-infrastructure deployments (Deploying/Healthy/Unhealthy)
     /// 5. Once all deployments are terminal, deletes the project
-    async fn deletion_loop(&self, holder_id: Uuid) {
+    async fn deletion_loop(&self) {
         info!("Project deletion loop started");
         let mut ticker = interval(self.deletion_interval);
 
         loop {
             ticker.tick().await;
 
-            let lease_guard = match crate::db::leader_leases::acquire(
-                &self.state.db_pool,
-                "rise-project-controller",
-                holder_id,
-                Duration::from_secs(60),
-            )
-            .await
-            {
-                Ok(Some(guard)) => guard,
-                Ok(None) => {
-                    tokio::time::sleep(std::time::Duration::from_secs(30)).await;
-                    continue;
-                }
-                Err(e) => {
-                    warn!("Leader election error in project controller: {:?}", e);
-                    continue;
-                }
-            };
+            if !self.election.is_leader() {
+                continue;
+            }
 
-            if let Err(e) = self.process_deleting_projects(&lease_guard).await {
+            if let Err(e) = self.process_deleting_projects().await {
                 error!("Error in deletion loop: {}", e);
             }
 
@@ -99,10 +91,7 @@ impl ProjectController {
     }
 
     /// Process all projects in Deleting status
-    async fn process_deleting_projects(
-        &self,
-        lease_guard: &LeaderLeaseGuard,
-    ) -> anyhow::Result<()> {
+    async fn process_deleting_projects(&self) -> anyhow::Result<()> {
         let deleting = db_projects::find_deleting(&self.state.db_pool, 10).await?;
 
         for project in deleting {
@@ -134,7 +123,7 @@ impl ProjectController {
                     // Cancel pre-infrastructure deployments
                     // These haven't provisioned resources yet
                     if deployment.status != DeploymentStatus::Cancelling {
-                        lease_guard.ensure_held().await?;
+                        self.election.assert_leader().await?;
                         info!(
                             "Cancelling pre-infrastructure deployment {} (status={:?})",
                             deployment.deployment_id, deployment.status
@@ -145,7 +134,7 @@ impl ProjectController {
                     // Terminate post-infrastructure deployments
                     // These have containers/resources that need cleanup
                     if deployment.status != DeploymentStatus::Terminating {
-                        lease_guard.ensure_held().await?;
+                        self.election.assert_leader().await?;
                         info!(
                             "Terminating post-infrastructure deployment {} (status={:?})",
                             deployment.deployment_id, deployment.status
@@ -190,7 +179,7 @@ impl ProjectController {
                 );
 
                 // Transition to Terminated status before removal
-                lease_guard.ensure_held().await?;
+                self.election.assert_leader().await?;
                 db_projects::update_status(
                     &self.state.db_pool,
                     project.id,
@@ -203,7 +192,7 @@ impl ProjectController {
                     project.name
                 );
 
-                lease_guard.ensure_held().await?;
+                self.election.assert_leader().await?;
                 db_projects::delete(&self.state.db_pool, project.id).await?;
             } else {
                 debug!(
