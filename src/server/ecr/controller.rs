@@ -4,6 +4,7 @@ use tokio::time::interval;
 use tracing::{debug, error, info, warn};
 use uuid::Uuid;
 
+use crate::db::leader_leases::LeaderLeaseGuard;
 use crate::db::projects as db_projects;
 use crate::server::ecr::{EcrRepoManager, ECR_FINALIZER};
 use crate::server::state::ControllerState;
@@ -72,7 +73,7 @@ impl EcrController {
 
         loop {
             ticker.tick().await;
-            match crate::db::leader_leases::try_acquire(
+            let lease_guard = match crate::db::leader_leases::acquire(
                 &self.state.db_pool,
                 "rise-ecr-controller",
                 holder_id,
@@ -80,8 +81,8 @@ impl EcrController {
             )
             .await
             {
-                Ok(true) => {}
-                Ok(false) => {
+                Ok(Some(guard)) => guard,
+                Ok(None) => {
                     tokio::time::sleep(std::time::Duration::from_secs(30)).await;
                     continue;
                 }
@@ -89,15 +90,15 @@ impl EcrController {
                     warn!("Leader election error in ECR provision loop: {:?}", e);
                     continue;
                 }
-            }
-            if let Err(e) = self.provision_repositories().await {
+            };
+            if let Err(e) = self.provision_repositories(&lease_guard).await {
                 error!("Error in ECR provision loop: {}", e);
             }
         }
     }
 
     /// Process provisioning for all active projects
-    async fn provision_repositories(&self) -> anyhow::Result<()> {
+    async fn provision_repositories(&self, lease_guard: &LeaderLeaseGuard) -> anyhow::Result<()> {
         // Get all active projects
         let projects = db_projects::list_active(&self.state.db_pool).await?;
 
@@ -122,6 +123,7 @@ impl EcrController {
                     }
 
                     // Add finalizer to indicate ECR cleanup is needed on deletion
+                    lease_guard.ensure_held().await?;
                     db_projects::add_finalizer(&self.state.db_pool, project.id, ECR_FINALIZER)
                         .await?;
                     debug!("Added ECR finalizer to project: {}", project.name);
@@ -151,7 +153,7 @@ impl EcrController {
 
         loop {
             ticker.tick().await;
-            match crate::db::leader_leases::try_acquire(
+            let lease_guard = match crate::db::leader_leases::acquire(
                 &self.state.db_pool,
                 "rise-ecr-controller",
                 holder_id,
@@ -159,8 +161,8 @@ impl EcrController {
             )
             .await
             {
-                Ok(true) => {}
-                Ok(false) => {
+                Ok(Some(guard)) => guard,
+                Ok(None) => {
                     tokio::time::sleep(std::time::Duration::from_secs(30)).await;
                     continue;
                 }
@@ -168,15 +170,15 @@ impl EcrController {
                     warn!("Leader election error in ECR cleanup loop: {:?}", e);
                     continue;
                 }
-            }
-            if let Err(e) = self.cleanup_repositories().await {
+            };
+            if let Err(e) = self.cleanup_repositories(&lease_guard).await {
                 error!("Error in ECR cleanup loop: {}", e);
             }
         }
     }
 
     /// Process cleanup for all deleting projects with ECR finalizer
-    async fn cleanup_repositories(&self) -> anyhow::Result<()> {
+    async fn cleanup_repositories(&self, lease_guard: &LeaderLeaseGuard) -> anyhow::Result<()> {
         // Find projects marked for deletion that still have ECR finalizer
         let projects =
             db_projects::find_deleting_with_finalizer(&self.state.db_pool, ECR_FINALIZER, 10)
@@ -226,6 +228,7 @@ impl EcrController {
             match cleanup_result {
                 Ok(()) => {
                     // Remove finalizer so project can be deleted
+                    lease_guard.ensure_held().await?;
                     db_projects::remove_finalizer(&self.state.db_pool, project.id, ECR_FINALIZER)
                         .await?;
                     info!(
@@ -258,7 +261,7 @@ impl EcrController {
 
         loop {
             ticker.tick().await;
-            match crate::db::leader_leases::try_acquire(
+            let lease_guard = match crate::db::leader_leases::acquire(
                 &self.state.db_pool,
                 "rise-ecr-controller",
                 holder_id,
@@ -266,8 +269,8 @@ impl EcrController {
             )
             .await
             {
-                Ok(true) => {}
-                Ok(false) => {
+                Ok(Some(guard)) => guard,
+                Ok(None) => {
                     tokio::time::sleep(std::time::Duration::from_secs(30)).await;
                     continue;
                 }
@@ -275,15 +278,15 @@ impl EcrController {
                     warn!("Leader election error in ECR drift detection loop: {:?}", e);
                     continue;
                 }
-            }
-            if let Err(e) = self.detect_repository_drift().await {
+            };
+            if let Err(e) = self.detect_repository_drift(&lease_guard).await {
                 error!("Error in ECR drift detection loop: {}", e);
             }
         }
     }
 
     /// Detect and fix ECR repository drift
-    async fn detect_repository_drift(&self) -> anyhow::Result<()> {
+    async fn detect_repository_drift(&self, lease_guard: &LeaderLeaseGuard) -> anyhow::Result<()> {
         // Get all active projects
         let projects = db_projects::list_active(&self.state.db_pool).await?;
 
@@ -303,6 +306,7 @@ impl EcrController {
                         );
 
                         // Remove finalizer so provision loop will recreate the repository
+                        lease_guard.ensure_held().await?;
                         db_projects::remove_finalizer(
                             &self.state.db_pool,
                             project.id,

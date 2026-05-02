@@ -3,7 +3,7 @@ use crate::server::auth::{
     cookie_helpers::{self, CookieSettings},
     token_storage::{
         generate_code_challenge, generate_code_verifier, generate_state_token,
-        CompletedAuthSession, OAuth2State,
+        CompletedAuthSession, OAuth2State, TokenStore,
     },
 };
 use crate::server::frontend::load_static_file;
@@ -17,6 +17,7 @@ use axum::{
 use base64::Engine;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::sync::Arc;
 use tera::Tera;
 use tracing::instrument;
 
@@ -1197,13 +1198,12 @@ pub async fn oauth_callback(
 ) -> Result<Response, (StatusCode, String)> {
     tracing::info!("OAuth callback received");
 
-    // Retrieve PKCE state from token store
-    let oauth_state = state
+    let claimed_state = state
         .token_store
-        .get(&params.state)
+        .claim(&params.state)
         .await
         .map_err(|e| {
-            tracing::error!("Failed to retrieve PKCE state: {:?}", e);
+            tracing::error!("Failed to claim PKCE state: {:?}", e);
             (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "Login failed".to_string(),
@@ -1216,6 +1216,8 @@ pub async fn oauth_callback(
                 "Invalid or expired state token".to_string(),
             )
         })?;
+    let claimant_id = claimed_state.claimant_id;
+    let oauth_state = claimed_state.data;
 
     // Build callback URL (must match the one used in signin)
     // IdP callback always uses the main Rise domain (pre-registered with IdP)
@@ -1231,6 +1233,13 @@ pub async fn oauth_callback(
         .await
         .map_err(|e| {
             tracing::error!("Failed to exchange code: {:#}", e);
+            let should_release = is_retryable_callback_error(&e);
+            tokio::spawn(finalize_or_release_browser_claim(
+                state.token_store.clone(),
+                params.state.clone(),
+                claimant_id,
+                should_release,
+            ));
             (
                 StatusCode::UNAUTHORIZED,
                 format!("Code exchange failed: {}", e),
@@ -1259,6 +1268,12 @@ pub async fn oauth_callback(
         .await
         .map_err(|e| {
             tracing::error!("Failed to validate JWT: {:#}", e);
+            tokio::spawn(finalize_or_release_browser_claim(
+                state.token_store.clone(),
+                params.state.clone(),
+                claimant_id,
+                false,
+            ));
             (StatusCode::UNAUTHORIZED, "Invalid token".to_string())
         })?;
 
@@ -1305,6 +1320,12 @@ pub async fn oauth_callback(
         // Get user email from claims
         let user_email = claims["email"].as_str().ok_or_else(|| {
             tracing::error!("No email in JWT claims");
+            tokio::spawn(finalize_or_release_browser_claim(
+                state.token_store.clone(),
+                params.state.clone(),
+                claimant_id,
+                false,
+            ));
             (StatusCode::UNAUTHORIZED, "Invalid token claims".to_string())
         })?;
 
@@ -1313,6 +1334,12 @@ pub async fn oauth_callback(
             .await
             .map_err(|e| {
                 tracing::error!("Failed to find/create user: {:#}", e);
+                tokio::spawn(finalize_or_release_browser_claim(
+                    state.token_store.clone(),
+                    params.state.clone(),
+                    claimant_id,
+                    true,
+                ));
                 (
                     StatusCode::INTERNAL_SERVER_ERROR,
                     "Database error".to_string(),
@@ -1329,6 +1356,12 @@ pub async fn oauth_callback(
             .await
             .map_err(|e| {
                 tracing::error!("Failed to sign Rise JWT: {:#}", e);
+                tokio::spawn(finalize_or_release_browser_claim(
+                    state.token_store.clone(),
+                    params.state.clone(),
+                    claimant_id,
+                    true,
+                ));
                 (
                     StatusCode::INTERNAL_SERVER_ERROR,
                     "Failed to create authentication token".to_string(),
@@ -1353,6 +1386,12 @@ pub async fn oauth_callback(
                 .await
                 .map_err(|e| {
                     tracing::error!("Failed to store completed session: {:?}", e);
+                    tokio::spawn(finalize_or_release_browser_claim(
+                        state.token_store.clone(),
+                        params.state.clone(),
+                        claimant_id,
+                        true,
+                    ));
                     (
                         StatusCode::INTERNAL_SERVER_ERROR,
                         "Failed to complete authentication".to_string(),
@@ -1371,6 +1410,17 @@ pub async fn oauth_callback(
                 complete_url
             );
 
+            state
+                .token_store
+                .finalize(&params.state, claimant_id)
+                .await
+                .map_err(|e| {
+                    tracing::error!("Failed to finalize PKCE state: {:?}", e);
+                    (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        "Failed to complete authentication".to_string(),
+                    )
+                })?;
             return Ok(Redirect::to(&complete_url).into_response());
         }
 
@@ -1381,7 +1431,28 @@ pub async fn oauth_callback(
             max_age,
         );
 
-        return render_success_page(&state, project, &redirect_url, &cookie).await;
+        let response = render_success_page(&state, project, &redirect_url, &cookie)
+            .await
+            .inspect_err(|_| {
+                tokio::spawn(finalize_or_release_browser_claim(
+                    state.token_store.clone(),
+                    params.state.clone(),
+                    claimant_id,
+                    true,
+                ));
+            })?;
+        state
+            .token_store
+            .finalize(&params.state, claimant_id)
+            .await
+            .map_err(|e| {
+                tracing::error!("Failed to finalize PKCE state: {:?}", e);
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Failed to complete authentication".to_string(),
+                )
+            })?;
+        return Ok(response);
     }
 
     // Regular OAuth flow (not ingress auth) - UI login
@@ -1401,6 +1472,12 @@ pub async fn oauth_callback(
         .await
         .map_err(|e| {
             tracing::error!("Failed to validate ID token: {:#}", e);
+            tokio::spawn(finalize_or_release_browser_claim(
+                state.token_store.clone(),
+                params.state.clone(),
+                claimant_id,
+                false,
+            ));
             (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "Failed to validate token".to_string(),
@@ -1412,6 +1489,12 @@ pub async fn oauth_callback(
         .and_then(|v| v.as_str())
         .ok_or_else(|| {
             tracing::error!("Email claim missing from ID token");
+            tokio::spawn(finalize_or_release_browser_claim(
+                state.token_store.clone(),
+                params.state.clone(),
+                claimant_id,
+                false,
+            ));
             (
                 StatusCode::BAD_REQUEST,
                 "Email claim missing from token".to_string(),
@@ -1423,6 +1506,12 @@ pub async fn oauth_callback(
         .await
         .map_err(|e| {
             tracing::error!("Failed to find or create user: {:#}", e);
+            tokio::spawn(finalize_or_release_browser_claim(
+                state.token_store.clone(),
+                params.state.clone(),
+                claimant_id,
+                true,
+            ));
             (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "Failed to process user".to_string(),
@@ -1430,7 +1519,15 @@ pub async fn oauth_callback(
         })?;
 
     // Sync groups after login
-    sync_groups_after_login(&state, &token_info.id_token).await?;
+    if let Err(error) = sync_groups_after_login(&state, &token_info.id_token).await {
+        tokio::spawn(finalize_or_release_browser_claim(
+            state.token_store.clone(),
+            params.state.clone(),
+            claimant_id,
+            true,
+        ));
+        return Err(error);
+    }
 
     // Issue Rise HS256 JWT for user authentication (consumed by the UI)
     let rise_jwt = state
@@ -1439,6 +1536,12 @@ pub async fn oauth_callback(
         .await
         .map_err(|e| {
             tracing::error!("Failed to sign user JWT: {:#}", e);
+            tokio::spawn(finalize_or_release_browser_claim(
+                state.token_store.clone(),
+                params.state.clone(),
+                claimant_id,
+                true,
+            ));
             (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "Failed to create authentication token".to_string(),
@@ -1454,7 +1557,28 @@ pub async fn oauth_callback(
     );
 
     // Use success page with delayed redirect to ensure cookie is properly persisted
-    render_ui_login_success_page(&state, &redirect_url, &cookie).await
+    let response = render_ui_login_success_page(&state, &redirect_url, &cookie)
+        .await
+        .inspect_err(|_| {
+            tokio::spawn(finalize_or_release_browser_claim(
+                state.token_store.clone(),
+                params.state.clone(),
+                claimant_id,
+                true,
+            ));
+        })?;
+    state
+        .token_store
+        .finalize(&params.state, claimant_id)
+        .await
+        .map_err(|e| {
+            tracing::error!("Failed to finalize PKCE state: {:?}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to complete authentication".to_string(),
+            )
+        })?;
+    Ok(response)
 }
 
 /// Helper function to render the success page with cookie
@@ -1598,6 +1722,62 @@ async fn render_ui_login_success_page(
     Ok(response)
 }
 
+fn is_retryable_callback_error(error: &anyhow::Error) -> bool {
+    let message = error.to_string().to_ascii_lowercase();
+    !(message.contains("status 400")
+        || message.contains("status 401")
+        || message.contains("status 403")
+        || message.contains("invalid_grant")
+        || message.contains("invalid_request")
+        || message.contains("access_denied"))
+}
+
+async fn finalize_or_release_browser_claim(
+    token_store: Arc<dyn TokenStore>,
+    state_token: String,
+    claimant_id: uuid::Uuid,
+    should_release: bool,
+) {
+    let result = if should_release {
+        token_store.release(&state_token, claimant_id).await
+    } else {
+        token_store.finalize(&state_token, claimant_id).await
+    };
+
+    if let Err(error) = result {
+        tracing::warn!(
+            ?error,
+            should_release,
+            "failed to settle claimed PKCE state"
+        );
+    }
+}
+
+async fn finalize_or_release_completed_claim(
+    token_store: Arc<dyn TokenStore>,
+    token: String,
+    claimant_id: uuid::Uuid,
+    should_release: bool,
+) {
+    let result = if should_release {
+        token_store
+            .release_completed_session(&token, claimant_id)
+            .await
+    } else {
+        token_store
+            .finalize_completed_session(&token, claimant_id)
+            .await
+    };
+
+    if let Err(error) = result {
+        tracing::warn!(
+            ?error,
+            should_release,
+            "failed to settle claimed completion token"
+        );
+    }
+}
+
 #[derive(Debug, Deserialize)]
 pub struct CompleteQuery {
     pub token: String,
@@ -1615,13 +1795,12 @@ pub async fn oauth_complete(
 ) -> Result<Response, (StatusCode, String)> {
     tracing::info!("Custom domain auth complete received");
 
-    // Retrieve and consume the completed session
-    let session = state
+    let claimed_session = state
         .token_store
-        .get_completed_session(&params.token)
+        .claim_completed_session(&params.token)
         .await
         .map_err(|e| {
-            tracing::error!("Failed to retrieve completed session: {:?}", e);
+            tracing::error!("Failed to claim completed session: {:?}", e);
             (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "Login failed".to_string(),
@@ -1634,6 +1813,8 @@ pub async fn oauth_complete(
                 "Invalid or expired completion token. Please try logging in again.".to_string(),
             )
         })?;
+    let claimant_id = claimed_session.claimant_id;
+    let session = claimed_session.data;
 
     // Create cookie for the custom domain (empty domain = current host only)
     let cookie_settings = CookieSettings {
@@ -1647,13 +1828,33 @@ pub async fn oauth_complete(
         session.max_age,
     );
 
-    render_success_page(
+    let response = render_success_page(
         &state,
         &session.project_name,
         &session.redirect_url,
         &cookie,
     )
     .await
+    .inspect_err(|_| {
+        tokio::spawn(finalize_or_release_completed_claim(
+            state.token_store.clone(),
+            params.token.clone(),
+            claimant_id,
+            true,
+        ));
+    })?;
+    state
+        .token_store
+        .finalize_completed_session(&params.token, claimant_id)
+        .await
+        .map_err(|e| {
+            tracing::error!("Failed to finalize completed session: {:?}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to complete authentication".to_string(),
+            )
+        })?;
+    Ok(response)
 }
 
 #[derive(Debug, Deserialize)]

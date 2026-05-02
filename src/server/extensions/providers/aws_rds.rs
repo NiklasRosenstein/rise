@@ -1,6 +1,6 @@
 use crate::db::{
-    self, deployments as db_deployments, extensions as db_extensions, postgres_admin,
-    projects as db_projects,
+    self, deployments as db_deployments, extensions as db_extensions,
+    leader_leases::LeaderLeaseGuard, postgres_admin, projects as db_projects,
 };
 use crate::server::encryption::EncryptionProvider;
 use crate::server::extensions::{Extension, InjectedEnvVar, InjectedEnvVarValue};
@@ -216,6 +216,7 @@ impl AwsRdsProvisioner {
     async fn reconcile_single(
         &self,
         project_extension: db::models::ProjectExtension,
+        lease_guard: &LeaderLeaseGuard,
     ) -> Result<bool> {
         debug!("Reconciling AWS RDS extension: {:?}", project_extension);
         let project = db_projects::find_by_id(&self.db_pool, project_extension.project_id)
@@ -285,6 +286,7 @@ impl AwsRdsProvisioner {
             if status.state != RdsState::Deleted {
                 self.handle_deletion(&mut status, &project.name).await?;
                 // Update status
+                lease_guard.ensure_held().await?;
                 db_extensions::update_status(
                     &self.db_pool,
                     project_extension.project_id,
@@ -298,6 +300,7 @@ impl AwsRdsProvisioner {
                     let finalizer = self.finalizer_name(&project_extension.extension);
 
                     // Remove finalizer so project can be deleted
+                    lease_guard.ensure_held().await?;
                     if let Err(e) = db_projects::remove_finalizer(
                         &self.db_pool,
                         project_extension.project_id,
@@ -316,6 +319,7 @@ impl AwsRdsProvisioner {
                         );
                     }
 
+                    lease_guard.ensure_held().await?;
                     db_extensions::delete_permanently(
                         &self.db_pool,
                         project_extension.project_id,
@@ -373,6 +377,7 @@ impl AwsRdsProvisioner {
         }
 
         // Update status in database
+        lease_guard.ensure_held().await?;
         db_extensions::update_status(
             &self.db_pool,
             project_extension.project_id,
@@ -1347,7 +1352,7 @@ impl Extension for AwsRdsProvisioner {
             let mut error_state: HashMap<Uuid, (usize, DateTime<Utc>)> = HashMap::new();
 
             loop {
-                match crate::db::leader_leases::try_acquire(
+                let lease_guard = match crate::db::leader_leases::acquire(
                     &provisioner.db_pool,
                     "rise-ext-rds",
                     holder_id,
@@ -1355,8 +1360,8 @@ impl Extension for AwsRdsProvisioner {
                 )
                 .await
                 {
-                    Ok(true) => {}
-                    Ok(false) => {
+                    Ok(Some(guard)) => guard,
+                    Ok(None) => {
                         tokio::time::sleep(std::time::Duration::from_secs(30)).await;
                         continue;
                     }
@@ -1365,7 +1370,7 @@ impl Extension for AwsRdsProvisioner {
                         tokio::time::sleep(std::time::Duration::from_secs(5)).await;
                         continue;
                     }
-                }
+                };
 
                 // List ALL project extensions of this type (across all projects)
                 match db_extensions::list_by_extension_type(
@@ -1399,7 +1404,15 @@ impl Extension for AwsRdsProvisioner {
                                 }
                             }
 
-                            match provisioner.reconcile_single(ext.clone()).await {
+                            if let Err(e) = lease_guard.ensure_held().await {
+                                warn!("Lost leadership before RDS reconcile: {:?}", e);
+                                break;
+                            }
+
+                            match provisioner
+                                .reconcile_single(ext.clone(), &lease_guard)
+                                .await
+                            {
                                 Ok(_) => {
                                     // Success - reset error state
                                     error_state.remove(&ext.project_id);

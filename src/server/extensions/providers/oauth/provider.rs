@@ -529,7 +529,7 @@ impl Extension for OAuthProvider {
             info!("Starting OAuth provider reconciliation loop");
 
             loop {
-                match crate::db::leader_leases::try_acquire(
+                let guard = match crate::db::leader_leases::acquire(
                     &provider.db_pool,
                     "rise-ext-oauth",
                     holder_id,
@@ -537,8 +537,8 @@ impl Extension for OAuthProvider {
                 )
                 .await
                 {
-                    Ok(true) => {}
-                    Ok(false) => {
+                    Ok(Some(guard)) => guard,
+                    Ok(None) => {
                         tokio::time::sleep(std::time::Duration::from_secs(30)).await;
                         continue;
                     }
@@ -547,7 +547,7 @@ impl Extension for OAuthProvider {
                         tokio::time::sleep(std::time::Duration::from_secs(5)).await;
                         continue;
                     }
-                }
+                };
 
                 match crate::db::extensions::list_by_extension_type(&provider.db_pool, "oauth")
                     .await
@@ -556,6 +556,13 @@ impl Extension for OAuthProvider {
                         for ext in extensions {
                             // Handle deleted extensions
                             if ext.deleted_at.is_some() {
+                                if let Err(e) = guard.ensure_held().await {
+                                    warn!(
+                                        "Lost leadership before OAuth deletion reconcile: {:?}",
+                                        e
+                                    );
+                                    break;
+                                }
                                 if let Err(e) = provider.reconcile_deletion(ext).await {
                                     error!("Failed to reconcile OAuth extension deletion: {:?}", e);
                                 }
@@ -563,6 +570,10 @@ impl Extension for OAuthProvider {
                             }
 
                             // Migrate client_secret_ref → client_secret_encrypted
+                            if let Err(e) = guard.ensure_held().await {
+                                warn!("Lost leadership before OAuth migration reconcile: {:?}", e);
+                                break;
+                            }
                             if let Err(e) = provider.migrate_client_secret_ref(&ext).await {
                                 error!(
                                     "Failed to migrate client_secret_ref for OAuth extension {}/{}: {:?}",

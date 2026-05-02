@@ -7,7 +7,8 @@ use uuid::Uuid;
 
 use crate::db::models::DeploymentStatus;
 use crate::db::{
-    deployments as db_deployments, extensions as db_extensions, projects as db_projects,
+    deployments as db_deployments, extensions as db_extensions, leader_leases::LeaderLeaseGuard,
+    projects as db_projects,
 };
 use crate::server::deployment::state_machine;
 use crate::server::state::ControllerState;
@@ -55,7 +56,7 @@ impl ProjectController {
         loop {
             ticker.tick().await;
 
-            match crate::db::leader_leases::try_acquire(
+            let lease_guard = match crate::db::leader_leases::acquire(
                 &self.state.db_pool,
                 "rise-project-controller",
                 holder_id,
@@ -63,8 +64,8 @@ impl ProjectController {
             )
             .await
             {
-                Ok(true) => {}
-                Ok(false) => {
+                Ok(Some(guard)) => guard,
+                Ok(None) => {
                     tokio::time::sleep(std::time::Duration::from_secs(30)).await;
                     continue;
                 }
@@ -72,9 +73,9 @@ impl ProjectController {
                     warn!("Leader election error in project controller: {:?}", e);
                     continue;
                 }
-            }
+            };
 
-            if let Err(e) = self.process_deleting_projects().await {
+            if let Err(e) = self.process_deleting_projects(&lease_guard).await {
                 error!("Error in deletion loop: {}", e);
             }
 
@@ -98,7 +99,10 @@ impl ProjectController {
     }
 
     /// Process all projects in Deleting status
-    async fn process_deleting_projects(&self) -> anyhow::Result<()> {
+    async fn process_deleting_projects(
+        &self,
+        lease_guard: &LeaderLeaseGuard,
+    ) -> anyhow::Result<()> {
         let deleting = db_projects::find_deleting(&self.state.db_pool, 10).await?;
 
         for project in deleting {
@@ -130,6 +134,7 @@ impl ProjectController {
                     // Cancel pre-infrastructure deployments
                     // These haven't provisioned resources yet
                     if deployment.status != DeploymentStatus::Cancelling {
+                        lease_guard.ensure_held().await?;
                         info!(
                             "Cancelling pre-infrastructure deployment {} (status={:?})",
                             deployment.deployment_id, deployment.status
@@ -140,6 +145,7 @@ impl ProjectController {
                     // Terminate post-infrastructure deployments
                     // These have containers/resources that need cleanup
                     if deployment.status != DeploymentStatus::Terminating {
+                        lease_guard.ensure_held().await?;
                         info!(
                             "Terminating post-infrastructure deployment {} (status={:?})",
                             deployment.deployment_id, deployment.status
@@ -184,6 +190,7 @@ impl ProjectController {
                 );
 
                 // Transition to Terminated status before removal
+                lease_guard.ensure_held().await?;
                 db_projects::update_status(
                     &self.state.db_pool,
                     project.id,
@@ -196,6 +203,7 @@ impl ProjectController {
                     project.name
                 );
 
+                lease_guard.ensure_held().await?;
                 db_projects::delete(&self.state.db_pool, project.id).await?;
             } else {
                 debug!(
