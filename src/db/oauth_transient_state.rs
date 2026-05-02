@@ -26,18 +26,6 @@ pub async fn insert<T: Serialize>(
     Ok(())
 }
 
-
-/// Delete a value by lookup key.
-pub async fn delete(pool: &PgPool, lookup_key: &str) -> Result<()> {
-    sqlx::query!(
-        "DELETE FROM oauth_transient_state WHERE lookup_key = $1",
-        lookup_key,
-    )
-    .execute(pool)
-    .await?;
-    Ok(())
-}
-
 /// Atomically remove and return a value. Returns None if missing or expired.
 /// Used for single-use tokens (auth codes) to prevent replay.
 pub async fn consume<T: DeserializeOwned>(pool: &PgPool, lookup_key: &str) -> Result<Option<T>> {

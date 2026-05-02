@@ -596,7 +596,7 @@ pub async fn run_entra_sync_loop(
             &pool,
             "rise-entra-sync",
             holder_id,
-            Duration::from_secs(interval_secs),
+            Duration::from_secs(interval_secs + 30),
         )
         .await
         {

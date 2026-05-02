@@ -824,10 +824,6 @@ pub async fn callback(
                 )
             })?;
 
-            if let Err(e) = oauth_transient_state::delete(&state.db_pool, &req.state).await {
-                warn!("Failed to delete OAuth state token: {:?}", e);
-            }
-
             // Redirect to UI with error
             let mut redirect_url = Url::parse(&final_redirect_uri).map_err(|e| {
                 (
@@ -864,10 +860,6 @@ pub async fn callback(
                 format!("Failed to update status: {}", e),
             )
         })?;
-
-        if let Err(e) = oauth_transient_state::delete(&state.db_pool, &req.state).await {
-            warn!("Failed to delete OAuth state token: {:?}", e);
-        }
 
         info!(
             "Completed test OAuth flow for project {} extension {}",
@@ -953,10 +945,6 @@ pub async fn callback(
                 format!("Failed to update status: {}", e),
             )
         })?;
-
-        if let Err(e) = oauth_transient_state::delete(&state.db_pool, &req.state).await {
-            warn!("Failed to delete OAuth state token: {:?}", e);
-        }
 
         // Generate authorization code for token exchange
         let authorization_code = generate_state_token();

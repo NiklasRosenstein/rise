@@ -1,3 +1,4 @@
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::time::interval;
@@ -18,6 +19,7 @@ use crate::server::state::ControllerState;
 pub struct ProjectController {
     state: Arc<ControllerState>,
     deletion_interval: Duration,
+    cleanup_tick: AtomicU64,
 }
 
 impl ProjectController {
@@ -26,6 +28,7 @@ impl ProjectController {
         Self {
             state,
             deletion_interval: Duration::from_secs(5),
+            cleanup_tick: AtomicU64::new(1),
         }
     }
 
@@ -83,10 +86,8 @@ impl ProjectController {
 
     /// Periodically clean up expired OAuth transient state rows (runs on leader only)
     async fn cleanup_expired_transient_state(&self) -> anyhow::Result<()> {
-        use std::sync::atomic::{AtomicU64, Ordering};
-        static TICK: AtomicU64 = AtomicU64::new(1);
         // Run cleanup roughly once per hour (every 720 ticks × 5s = 3600s)
-        let tick = TICK.fetch_add(1, Ordering::Relaxed);
+        let tick = self.cleanup_tick.fetch_add(1, Ordering::Relaxed);
         if tick.is_multiple_of(720) {
             let n = crate::db::oauth_transient_state::delete_expired(&self.state.db_pool).await?;
             if n > 0 {

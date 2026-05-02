@@ -41,7 +41,7 @@ pub trait TokenStore: Send + Sync {
     /// Save OAuth2 state with the given state token as the key
     async fn save(&self, state: String, data: OAuth2State) -> Result<()>;
 
-    /// Retrieve OAuth2 state by state token
+    /// Retrieve and consume OAuth2 state by state token (single-use)
     async fn get(&self, state: &str) -> Result<Option<OAuth2State>>;
 
     /// Save completed auth session for custom domain token exchange
