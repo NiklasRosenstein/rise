@@ -81,7 +81,10 @@ impl EcrController {
             .await
             {
                 Ok(true) => {}
-                Ok(false) => continue,
+                Ok(false) => {
+                    tokio::time::sleep(std::time::Duration::from_secs(30)).await;
+                    continue;
+                }
                 Err(e) => {
                     warn!("Leader election error in ECR provision loop: {:?}", e);
                     continue;
@@ -157,7 +160,10 @@ impl EcrController {
             .await
             {
                 Ok(true) => {}
-                Ok(false) => continue,
+                Ok(false) => {
+                    tokio::time::sleep(std::time::Duration::from_secs(30)).await;
+                    continue;
+                }
                 Err(e) => {
                     warn!("Leader election error in ECR cleanup loop: {:?}", e);
                     continue;
@@ -261,7 +267,10 @@ impl EcrController {
             .await
             {
                 Ok(true) => {}
-                Ok(false) => continue,
+                Ok(false) => {
+                    tokio::time::sleep(std::time::Duration::from_secs(30)).await;
+                    continue;
+                }
                 Err(e) => {
                     warn!("Leader election error in ECR drift detection loop: {:?}", e);
                     continue;

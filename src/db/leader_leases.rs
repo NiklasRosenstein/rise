@@ -18,28 +18,22 @@ pub async fn try_acquire(
     holder_id: Uuid,
     lease_duration: Duration,
 ) -> Result<bool> {
-    let expires_at = chrono::Utc::now() + chrono::Duration::from_std(lease_duration)?;
+    let lease_secs = lease_duration.as_secs() as f64;
 
-    // Insert a new lease or update ours if we already hold it or it has expired.
-    sqlx::query!(
+    let result = sqlx::query_scalar!(
         "INSERT INTO leader_leases (name, holder_id, heartbeat_at, expires_at)
-         VALUES ($1, $2, NOW(), $3)
+         VALUES ($1, $2, NOW(), NOW() + ($3 * INTERVAL '1 second'))
          ON CONFLICT (name) DO UPDATE
-           SET holder_id = $2, heartbeat_at = NOW(), expires_at = $3
+           SET holder_id = $2, heartbeat_at = NOW(), expires_at = NOW() + ($3 * INTERVAL '1 second')
            WHERE leader_leases.expires_at < NOW()
-              OR leader_leases.holder_id = $2",
+              OR leader_leases.holder_id = $2
+         RETURNING holder_id",
         name,
         holder_id,
-        expires_at,
+        lease_secs,
     )
-    .execute(pool)
+    .fetch_optional(pool)
     .await?;
 
-    // Check whether we actually hold the lease now.
-    let current_holder =
-        sqlx::query_scalar!("SELECT holder_id FROM leader_leases WHERE name = $1", name,)
-            .fetch_optional(pool)
-            .await?;
-
-    Ok(current_holder == Some(holder_id))
+    Ok(result == Some(holder_id))
 }

@@ -79,7 +79,7 @@ impl TokenStore for DbTokenStore {
     }
 
     async fn get(&self, state: &str) -> Result<Option<OAuth2State>> {
-        crate::db::oauth_transient_state::get(&self.pool, state).await
+        crate::db::oauth_transient_state::consume(&self.pool, state).await
     }
 
     async fn save_completed_session(

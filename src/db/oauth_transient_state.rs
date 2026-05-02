@@ -12,33 +12,20 @@ pub async fn insert<T: Serialize>(
     ttl: Duration,
 ) -> Result<()> {
     let data = serde_json::to_value(data)?;
-    let expires_at = chrono::Utc::now() + chrono::Duration::from_std(ttl)?;
+    let ttl_secs = ttl.as_secs() as f64;
     sqlx::query!(
         "INSERT INTO oauth_transient_state (lookup_key, data, expires_at)
-         VALUES ($1, $2, $3)
-         ON CONFLICT (lookup_key) DO UPDATE SET data = $2, expires_at = $3",
+         VALUES ($1, $2, NOW() + ($3 * INTERVAL '1 second'))
+         ON CONFLICT (lookup_key) DO UPDATE SET data = $2, expires_at = NOW() + ($3 * INTERVAL '1 second')",
         lookup_key,
         data,
-        expires_at,
+        ttl_secs,
     )
     .execute(pool)
     .await?;
     Ok(())
 }
 
-/// Retrieve a value by lookup key, returning None if missing or expired.
-pub async fn get<T: DeserializeOwned>(pool: &PgPool, lookup_key: &str) -> Result<Option<T>> {
-    let row = sqlx::query!(
-        "SELECT data FROM oauth_transient_state WHERE lookup_key = $1 AND expires_at > NOW()",
-        lookup_key,
-    )
-    .fetch_optional(pool)
-    .await?;
-    match row {
-        Some(r) => Ok(Some(serde_json::from_value(r.data)?)),
-        None => Ok(None),
-    }
-}
 
 /// Delete a value by lookup key.
 pub async fn delete(pool: &PgPool, lookup_key: &str) -> Result<()> {

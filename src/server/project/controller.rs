@@ -61,7 +61,10 @@ impl ProjectController {
             .await
             {
                 Ok(true) => {}
-                Ok(false) => continue,
+                Ok(false) => {
+                    tokio::time::sleep(std::time::Duration::from_secs(30)).await;
+                    continue;
+                }
                 Err(e) => {
                     warn!("Leader election error in project controller: {:?}", e);
                     continue;
@@ -81,7 +84,7 @@ impl ProjectController {
     /// Periodically clean up expired OAuth transient state rows (runs on leader only)
     async fn cleanup_expired_transient_state(&self) -> anyhow::Result<()> {
         use std::sync::atomic::{AtomicU64, Ordering};
-        static TICK: AtomicU64 = AtomicU64::new(0);
+        static TICK: AtomicU64 = AtomicU64::new(1);
         // Run cleanup roughly once per hour (every 720 ticks × 5s = 3600s)
         let tick = TICK.fetch_add(1, Ordering::Relaxed);
         if tick.is_multiple_of(720) {
