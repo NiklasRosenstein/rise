@@ -261,10 +261,9 @@ async fn process_sync(
     })
 }
 
-/// Perform status transitions based on observed Kubernetes state.
-///
-/// This replaces the reconcile loop, health check loop, expiration loop,
-/// and timeout checks from the old controller.
+/// Inspect the observed Kubernetes state for each non-terminal deployment and
+/// advance its status: Pushed → Deploying, Deploying → Healthy/Failed, timeouts,
+/// expiration, and cancellation.
 async fn perform_status_transitions(
     state: &AppState,
     project: &Project,
