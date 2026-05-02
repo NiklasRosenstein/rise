@@ -40,6 +40,7 @@ pub const LABEL_DEPLOYMENT_ID: &str = "rise.dev/deployment-id";
 pub const LABEL_DEPLOYMENT_UUID: &str = "rise.dev/deployment-uuid";
 pub const LABEL_ENVIRONMENT: &str = "rise.dev/environment";
 pub const ANNOTATION_LAST_REFRESH: &str = "rise.dev/last-refresh";
+pub const ANNOTATION_ENV_SECRET_HASH: &str = "rise.dev/env-secret-hash";
 pub const IMAGE_PULL_SECRET_NAME: &str = "rise-registry-creds";
 
 const EXTRA_SERVICE_TOKENS_VOLUME_NAME: &str = "rise-extra-service-tokens";
@@ -570,8 +571,15 @@ impl ResourceBuilder {
         deployment: &Deployment,
         namespace: &str,
         environment_name: Option<&str>,
+        env_secret_hash: &str,
         data: BTreeMap<String, ByteString>,
     ) -> Secret {
+        let mut annotations = BTreeMap::new();
+        annotations.insert(
+            ANNOTATION_ENV_SECRET_HASH.to_string(),
+            env_secret_hash.to_string(),
+        );
+
         Secret {
             metadata: ObjectMeta {
                 name: Some(Self::deployment_env_secret_name(project, deployment)),
@@ -581,6 +589,7 @@ impl ResourceBuilder {
                     deployment,
                     environment_name,
                 )),
+                annotations: Some(annotations),
                 ..Default::default()
             },
             type_: Some("Opaque".to_string()),
@@ -913,6 +922,7 @@ impl ResourceBuilder {
         http_port: u16,
         env_vars: Vec<EnvVar>,
         secret_env_name: Option<String>,
+        secret_env_hash: Option<String>,
         service_account_name: Option<String>,
         environment_name: Option<&str>,
     ) -> K8sDeployment {
@@ -963,6 +973,11 @@ impl ResourceBuilder {
                             deployment,
                             environment_name,
                         )),
+                        annotations: secret_env_hash.map(|hash| {
+                            let mut annotations = BTreeMap::new();
+                            annotations.insert(ANNOTATION_ENV_SECRET_HASH.to_string(), hash);
+                            annotations
+                        }),
                         ..Default::default()
                     }),
                     spec: Some(PodSpec {
@@ -994,7 +1009,7 @@ impl ResourceBuilder {
                             env_from: secret_env_name.map(|name| {
                                 vec![EnvFromSource {
                                     secret_ref: Some(SecretEnvSource {
-                                        name: Some(name),
+                                        name,
                                         ..Default::default()
                                     }),
                                     ..Default::default()
@@ -1341,6 +1356,7 @@ impl ResourceBuilder {
 }
 
 #[cfg(test)]
+#[allow(clippy::items_after_test_module)]
 mod tests {
     use super::*;
     use crate::server::registry::models::RegistryCredentials;
@@ -1461,8 +1477,14 @@ mod tests {
         let mut data = BTreeMap::new();
         data.insert("API_KEY".to_string(), ByteString(b"super-secret".to_vec()));
 
-        let secret =
-            builder.create_deployment_env_secret(&project, &deployment, "demo", None, data.clone());
+        let secret = builder.create_deployment_env_secret(
+            &project,
+            &deployment,
+            "demo",
+            None,
+            "abc123",
+            data.clone(),
+        );
 
         assert_eq!(
             secret.metadata.name.as_deref(),
@@ -1479,6 +1501,15 @@ mod tests {
             Some("20260502-000000")
         );
         assert_eq!(secret.type_.as_deref(), Some("Opaque"));
+        assert_eq!(
+            secret
+                .metadata
+                .annotations
+                .as_ref()
+                .and_then(|annotations| annotations.get(ANNOTATION_ENV_SECRET_HASH))
+                .map(String::as_str),
+            Some("abc123")
+        );
         assert_eq!(secret.data, Some(data));
     }
 
@@ -1500,6 +1531,7 @@ mod tests {
                 ..Default::default()
             }],
             Some("demo-20260502-000000-env".to_string()),
+            Some("abc123".to_string()),
             None,
             None,
         );
@@ -1521,8 +1553,21 @@ mod tests {
                 .as_ref()
                 .unwrap()
                 .name
-                .as_deref(),
-            Some("demo-20260502-000000-env")
+                .as_str(),
+            "demo-20260502-000000-env"
+        );
+        assert_eq!(
+            k8s_deployment
+                .spec
+                .as_ref()
+                .unwrap()
+                .template
+                .metadata
+                .as_ref()
+                .and_then(|metadata| metadata.annotations.as_ref())
+                .and_then(|annotations| annotations.get(ANNOTATION_ENV_SECRET_HASH))
+                .map(String::as_str),
+            Some("abc123")
         );
     }
 
@@ -1539,6 +1584,7 @@ mod tests {
             "registry.example.test/rise/demo:20260502-000000",
             8080,
             vec![],
+            None,
             None,
             None,
             None,

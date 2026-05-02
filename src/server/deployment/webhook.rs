@@ -21,6 +21,7 @@ use k8s_openapi::api::core::v1::{EnvVar, Secret};
 use k8s_openapi::apimachinery::pkg::apis::meta::v1::ObjectMeta;
 use k8s_openapi::ByteString;
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use tracing::{debug, error, info, warn};
 
 use crate::db::models::{
@@ -32,7 +33,7 @@ use crate::db::{
 };
 use crate::server::deployment::crd;
 use crate::server::deployment::resource_builder::{
-    ResourceBuilder, ANNOTATION_LAST_REFRESH, IMAGE_PULL_SECRET_NAME,
+    ResourceBuilder, ANNOTATION_ENV_SECRET_HASH, ANNOTATION_LAST_REFRESH, IMAGE_PULL_SECRET_NAME,
     IRRECOVERABLE_CONTAINER_REASONS, LABEL_DEPLOYMENT_ID,
 };
 use crate::server::deployment::state_machine;
@@ -107,6 +108,14 @@ const SECRET_REFRESH_HOURS: i64 = 6;
 struct ResolvedDeploymentEnvVars {
     plain_env_vars: Vec<EnvVar>,
     secret_env_vars: BTreeMap<String, ByteString>,
+}
+
+#[derive(Debug)]
+struct PreparedDeploymentEnvSecret {
+    secret_name: String,
+    secret_hash: String,
+    is_ready: bool,
+    secret: Secret,
 }
 
 // ── Webhook authentication ─────────────────────────────────────────────
@@ -927,13 +936,8 @@ async fn compute_desired_children(
     }
 
     // 5. K8s Deployments, Services, Ingresses, NetworkPolicies per deployment/group
-    // Track which deployment groups have active deployments (for Service selector)
+    // Track which deployment groups have active deployments that are ready for phase 2.
     let mut active_by_group: HashMap<String, &Deployment> = HashMap::new();
-    for deployment in &infra_deployments {
-        if deployment.is_active {
-            active_by_group.insert(deployment.deployment_group.clone(), deployment);
-        }
-    }
 
     // Helper: look up environment name from preloaded cache
     let env_name_for = |deployment: &Deployment| -> Option<String> {
@@ -948,19 +952,41 @@ async fn compute_desired_children(
         let env_name = env_name_for(deployment);
         let env_vars = load_env_vars(state, project, deployment).await?;
 
-        let secret_env_name = if env_vars.secret_env_vars.is_empty() {
+        let secret_env = if env_vars.secret_env_vars.is_empty() {
             None
         } else {
-            let secret = resource_builder.create_deployment_env_secret(
+            Some(prepare_deployment_env_secret(
+                resource_builder,
                 project,
                 deployment,
                 &namespace,
                 env_name.as_deref(),
+                &observed.secrets,
                 env_vars.secret_env_vars,
-            );
-            let secret_name = secret.metadata.name.clone();
-            children.push(serde_json::to_value(&secret)?);
-            secret_name
+            ))
+        };
+
+        if let Some(secret_env) = secret_env.as_ref() {
+            let secret_name = secret_env.secret_name.clone();
+            let is_ready = secret_env.is_ready;
+            children.push(serde_json::to_value(&secret_env.secret)?);
+
+            if !is_ready {
+                debug!(
+                    deployment_id = %deployment.deployment_id,
+                    secret_name,
+                    "Waiting for deployment env secret before returning Deployment"
+                );
+                continue;
+            }
+        }
+
+        let (secret_env_name, secret_env_hash) = match secret_env {
+            Some(secret_env) => (
+                Some(secret_env.secret_name),
+                Some(secret_env.secret_hash),
+            ),
+            None => (None, None),
         };
 
         // Resolve image
@@ -1002,10 +1028,15 @@ async fn compute_desired_children(
             deployment.http_port as u16,
             env_vars.plain_env_vars,
             secret_env_name,
+            secret_env_hash,
             sa_name,
             env_name.as_deref(),
         );
         children.push(serde_json::to_value(&k8s_deploy)?);
+
+        if deployment.is_active {
+            active_by_group.insert(deployment.deployment_group.clone(), deployment);
+        }
     }
 
     // Services, Ingresses, NetworkPolicies — one per group with an active deployment
@@ -1158,6 +1189,75 @@ async fn build_image_pull_secret(
     )?;
 
     Ok(Some(secret))
+}
+
+fn hash_deployment_env_secret(data: &BTreeMap<String, ByteString>) -> String {
+    let mut hasher = Sha256::new();
+
+    for (key, value) in data {
+        let key_len = key.len() as u64;
+        let value_len = value.0.len() as u64;
+        hasher.update(key_len.to_le_bytes());
+        hasher.update(key.as_bytes());
+        hasher.update(value_len.to_le_bytes());
+        hasher.update(&value.0);
+    }
+
+    hasher
+        .finalize()
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect()
+}
+
+fn observed_secret_matches_hash(
+    observed_secrets: &HashMap<String, serde_json::Value>,
+    namespace: &str,
+    secret_name: &str,
+    expected_hash: &str,
+) -> bool {
+    let secret_key = format!("{}/{}", namespace, secret_name);
+    observed_secrets
+        .get(&secret_key)
+        .and_then(|secret| secret.get("metadata"))
+        .and_then(|metadata| metadata.get("annotations"))
+        .and_then(|annotations| annotations.get(ANNOTATION_ENV_SECRET_HASH))
+        .and_then(|hash| hash.as_str())
+        == Some(expected_hash)
+}
+
+fn prepare_deployment_env_secret(
+    resource_builder: &ResourceBuilder,
+    project: &Project,
+    deployment: &Deployment,
+    namespace: &str,
+    environment_name: Option<&str>,
+    observed_secrets: &HashMap<String, serde_json::Value>,
+    data: BTreeMap<String, ByteString>,
+) -> PreparedDeploymentEnvSecret {
+    let secret_hash = hash_deployment_env_secret(&data);
+    let secret = resource_builder.create_deployment_env_secret(
+        project,
+        deployment,
+        namespace,
+        environment_name,
+        &secret_hash,
+        data,
+    );
+    let secret_name = secret
+        .metadata
+        .name
+        .clone()
+        .unwrap_or_else(|| ResourceBuilder::deployment_env_secret_name(project, deployment));
+    let is_ready =
+        observed_secret_matches_hash(observed_secrets, namespace, &secret_name, &secret_hash);
+
+    PreparedDeploymentEnvSecret {
+        secret_name,
+        secret_hash,
+        is_ready,
+        secret,
+    }
 }
 
 /// Add backend service + endpoints resources.
@@ -1385,8 +1485,39 @@ async fn process_finalize(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::db::models::DeploymentStatus;
     use crate::server::encryption::EncryptionProvider;
+    use crate::db::models::{DeploymentStatus, Project, ProjectStatus};
+    use crate::server::deployment::resource_builder::ResourceBuilder;
+    use crate::server::registry::models::RegistryCredentials;
+    use crate::server::registry::{ImageTagType, RegistryProvider};
+    use anyhow::Result;
+    use async_trait::async_trait;
+    use std::sync::Arc;
+
+    struct TestRegistryProvider;
+
+    #[async_trait]
+    impl RegistryProvider for TestRegistryProvider {
+        async fn get_credentials(&self, _repository: &str) -> Result<RegistryCredentials> {
+            unreachable!("not used in these tests")
+        }
+
+        async fn get_pull_credentials(&self) -> Result<(String, String)> {
+            unreachable!("not used in these tests")
+        }
+
+        fn registry_host(&self) -> &str {
+            "registry.example.test"
+        }
+
+        fn registry_url(&self) -> &str {
+            "registry.example.test/rise"
+        }
+
+        fn get_image_tag(&self, repository: &str, tag: &str, _tag_type: ImageTagType) -> String {
+            format!("registry.example.test/rise/{repository}:{tag}")
+        }
+    }
 
     // ── should_have_infrastructure ─────────────────────────────────────
 
@@ -1518,7 +1649,117 @@ mod tests {
         );
     }
 
+    #[test]
+    fn deployment_env_secret_hash_is_stable_for_identical_data() {
+        let mut data_a = BTreeMap::new();
+        data_a.insert("API_KEY".to_string(), ByteString(b"secret-a".to_vec()));
+        data_a.insert("SESSION_SECRET".to_string(), ByteString(b"secret-b".to_vec()));
+
+        let mut data_b = BTreeMap::new();
+        data_b.insert("SESSION_SECRET".to_string(), ByteString(b"secret-b".to_vec()));
+        data_b.insert("API_KEY".to_string(), ByteString(b"secret-a".to_vec()));
+
+        assert_eq!(
+            hash_deployment_env_secret(&data_a),
+            hash_deployment_env_secret(&data_b)
+        );
+    }
+
+    #[test]
+    fn prepare_deployment_env_secret_waits_for_matching_observed_hash() {
+        let builder = test_resource_builder();
+        let project = test_project();
+        let deployment = test_deployment(DeploymentStatus::Deploying);
+        let mut data = BTreeMap::new();
+        data.insert("API_KEY".to_string(), ByteString(b"secret-a".to_vec()));
+
+        let prepared = prepare_deployment_env_secret(
+            &builder,
+            &project,
+            &deployment,
+            "demo",
+            None,
+            &HashMap::new(),
+            data.clone(),
+        );
+
+        assert!(!prepared.is_ready);
+
+        let mut observed_secrets = HashMap::new();
+        observed_secrets.insert(
+            "demo/demo-20260429-000000-env".to_string(),
+            serde_json::json!({
+                "metadata": {
+                    "annotations": {
+                        ANNOTATION_ENV_SECRET_HASH: prepared.secret_hash
+                    }
+                }
+            }),
+        );
+
+        let prepared_ready = prepare_deployment_env_secret(
+            &builder,
+            &project,
+            &deployment,
+            "demo",
+            None,
+            &observed_secrets,
+            data,
+        );
+
+        assert!(prepared_ready.is_ready);
+    }
+
     // ── Helper ─────────────────────────────────────────────────────────
+
+    fn test_resource_builder() -> ResourceBuilder {
+        ResourceBuilder {
+            production_ingress_url_template: "{project_name}.example.test".to_string(),
+            staging_ingress_url_template: None,
+            environment_ingress_url_template: None,
+            ingress_port: None,
+            ingress_schema: "https".to_string(),
+            registry_provider: Arc::new(TestRegistryProvider),
+            auth_backend_url: "https://auth.example.test".to_string(),
+            auth_signin_url: "https://signin.example.test".to_string(),
+            backend_address: None,
+            namespace_labels: HashMap::new(),
+            namespace_annotations: HashMap::new(),
+            ingress_annotations: HashMap::new(),
+            ingress_tls_secret_name: None,
+            custom_domain_tls_mode: crate::server::settings::CustomDomainTlsMode::PerDomain,
+            custom_domain_ingress_annotations: HashMap::new(),
+            node_selector: HashMap::new(),
+            image_pull_secret_name: None,
+            access_classes: HashMap::new(),
+            host_aliases: HashMap::new(),
+            extra_service_token_audiences: HashMap::new(),
+            use_default_service_account_for_production: true,
+            network_policy: crate::server::settings::NetworkPolicyConfig {
+                ingress: vec![],
+                egress: None,
+            },
+            pod_security_enabled: true,
+            pod_resources: None,
+            health_probes: None,
+            namespace_format: "{project_name}".to_string(),
+        }
+    }
+
+    fn test_project() -> Project {
+        Project {
+            id: uuid::Uuid::nil(),
+            name: "demo".to_string(),
+            status: ProjectStatus::Running,
+            access_class: "default".to_string(),
+            owner_user_id: None,
+            owner_team_id: None,
+            finalizers: vec![],
+            source_url: None,
+            created_at: chrono::Utc::now(),
+            updated_at: chrono::Utc::now(),
+        }
+    }
 
     fn test_deployment(status: DeploymentStatus) -> Deployment {
         Deployment {
