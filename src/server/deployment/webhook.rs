@@ -8,22 +8,27 @@
 //! Metacontroller then reconciles: it creates/updates resources that are returned
 //! and deletes resources that are NOT returned (garbage collection).
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 
+use anyhow::Context;
 use axum::extract::{ConnectInfo, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use axum::Json;
 use chrono::Utc;
 use k8s_openapi::api::apps::v1::Deployment as K8sDeployment;
-use k8s_openapi::api::core::v1::Secret;
+use k8s_openapi::api::core::v1::{EnvVar, Secret};
 use k8s_openapi::apimachinery::pkg::apis::meta::v1::ObjectMeta;
+use k8s_openapi::ByteString;
 use serde::{Deserialize, Serialize};
 use tracing::{debug, error, info, warn};
 
-use crate::db::models::{Deployment, DeploymentStatus, Project, TerminationReason};
+use crate::db::models::{
+    Deployment, DeploymentEnvVar, DeploymentStatus, Project, TerminationReason,
+};
 use crate::db::{
-    deployments as db_deployments, environments as db_environments, projects as db_projects,
+    deployments as db_deployments, env_vars as db_env_vars, environments as db_environments,
+    projects as db_projects,
 };
 use crate::server::deployment::crd;
 use crate::server::deployment::resource_builder::{
@@ -97,6 +102,12 @@ const DEPLOYING_TIMEOUT_MINUTES: i64 = 5;
 const PRE_PUSHED_TIMEOUT_MINUTES: i64 = 10;
 /// Duration after which image pull secret is refreshed (6 hours)
 const SECRET_REFRESH_HOURS: i64 = 6;
+
+#[derive(Debug, Default)]
+struct ResolvedDeploymentEnvVars {
+    plain_env_vars: Vec<EnvVar>,
+    secret_env_vars: BTreeMap<String, ByteString>,
+}
 
 // ── Webhook authentication ─────────────────────────────────────────────
 
@@ -937,6 +948,21 @@ async fn compute_desired_children(
         let env_name = env_name_for(deployment);
         let env_vars = load_env_vars(state, project, deployment).await?;
 
+        let secret_env_name = if env_vars.secret_env_vars.is_empty() {
+            None
+        } else {
+            let secret = resource_builder.create_deployment_env_secret(
+                project,
+                deployment,
+                &namespace,
+                env_name.as_deref(),
+                env_vars.secret_env_vars,
+            );
+            let secret_name = secret.metadata.name.clone();
+            children.push(serde_json::to_value(&secret)?);
+            secret_name
+        };
+
         // Resolve image
         let source_deployment_id =
             if let Some(source_id) = deployment.rolled_back_from_deployment_id {
@@ -974,7 +1000,8 @@ async fn compute_desired_children(
             &namespace,
             &image,
             deployment.http_port as u16,
-            env_vars,
+            env_vars.plain_env_vars,
+            secret_env_name,
             sa_name,
             env_name.as_deref(),
         );
@@ -1208,22 +1235,53 @@ async fn load_env_vars(
     state: &AppState,
     _project: &Project,
     deployment: &Deployment,
-) -> anyhow::Result<Vec<k8s_openapi::api::core::v1::EnvVar>> {
-    let env_vars = crate::db::env_vars::load_deployment_env_vars_decrypted(
-        &state.db_pool,
-        deployment.id,
-        state.encryption_provider.as_deref(),
-    )
-    .await?;
+) -> anyhow::Result<ResolvedDeploymentEnvVars> {
+    let env_vars = db_env_vars::list_deployment_env_vars(&state.db_pool, deployment.id).await?;
+    resolve_deployment_env_vars(env_vars, state.encryption_provider.as_deref()).await
+}
 
-    Ok(env_vars
-        .into_iter()
-        .map(|(key, value)| k8s_openapi::api::core::v1::EnvVar {
-            name: key,
-            value: Some(value),
-            ..Default::default()
-        })
-        .collect())
+async fn resolve_deployment_env_vars(
+    env_vars: Vec<DeploymentEnvVar>,
+    encryption_provider: Option<&dyn crate::server::encryption::EncryptionProvider>,
+) -> anyhow::Result<ResolvedDeploymentEnvVars> {
+    let mut resolved = ResolvedDeploymentEnvVars::default();
+
+    for var in env_vars {
+        let value = if var.is_secret {
+            match encryption_provider {
+                Some(provider) => provider
+                    .decrypt(&var.value)
+                    .await
+                    .with_context(|| format!("Failed to decrypt secret variable '{}'", var.key))?,
+                None => {
+                    tracing::error!(
+                        "Encountered secret variable '{}' but no encryption provider configured",
+                        var.key
+                    );
+                    return Err(anyhow::anyhow!(
+                        "Cannot decrypt secret variable '{}': no encryption provider",
+                        var.key
+                    ));
+                }
+            }
+        } else {
+            var.value
+        };
+
+        if var.is_secret {
+            resolved
+                .secret_env_vars
+                .insert(var.key, ByteString(value.into_bytes()));
+        } else {
+            resolved.plain_env_vars.push(EnvVar {
+                name: var.key,
+                value: Some(value),
+                ..Default::default()
+            });
+        }
+    }
+
+    Ok(resolved)
 }
 
 // ── Finalize webhook handler ───────────────────────────────────────────
@@ -1328,6 +1386,7 @@ async fn process_finalize(
 mod tests {
     use super::*;
     use crate::db::models::DeploymentStatus;
+    use crate::server::encryption::EncryptionProvider;
 
     // ── should_have_infrastructure ─────────────────────────────────────
 
@@ -1422,6 +1481,43 @@ mod tests {
         assert_eq!(json["resyncAfterSeconds"], 30.0);
     }
 
+    #[tokio::test]
+    async fn resolve_deployment_env_vars_splits_plain_and_secret_values() {
+        let env_vars = vec![
+            test_env_var("API_KEY", "ciphertext-a", true, true),
+            test_env_var("PORT", "8080", false, false),
+            test_env_var("SESSION_SECRET", "ciphertext-b", true, false),
+        ];
+        let provider =
+            crate::server::encryption::providers::local::LocalEncryptionProvider::new("test-key")
+                .unwrap();
+
+        let mut encrypted_env_vars = Vec::new();
+        for mut var in env_vars {
+            if var.is_secret {
+                var.value = provider.encrypt(&var.value).await.unwrap();
+            }
+            encrypted_env_vars.push(var);
+        }
+
+        let resolved = resolve_deployment_env_vars(encrypted_env_vars, Some(&provider))
+            .await
+            .unwrap();
+
+        assert_eq!(resolved.plain_env_vars.len(), 1);
+        assert_eq!(resolved.plain_env_vars[0].name, "PORT");
+        assert_eq!(resolved.plain_env_vars[0].value.as_deref(), Some("8080"));
+        assert_eq!(resolved.secret_env_vars.len(), 2);
+        assert_eq!(
+            resolved.secret_env_vars["API_KEY"].0,
+            b"ciphertext-a".to_vec()
+        );
+        assert_eq!(
+            resolved.secret_env_vars["SESSION_SECRET"].0,
+            b"ciphertext-b".to_vec()
+        );
+    }
+
     // ── Helper ─────────────────────────────────────────────────────────
 
     fn test_deployment(status: DeploymentStatus) -> Deployment {
@@ -1449,6 +1545,25 @@ mod tests {
             first_healthy_at: None,
             job_url: None,
             pull_request_url: None,
+            created_at: chrono::Utc::now(),
+            updated_at: chrono::Utc::now(),
+        }
+    }
+
+    fn test_env_var(
+        key: &str,
+        value: &str,
+        is_secret: bool,
+        is_protected: bool,
+    ) -> DeploymentEnvVar {
+        DeploymentEnvVar {
+            id: uuid::Uuid::new_v4(),
+            deployment_id: uuid::Uuid::nil(),
+            key: key.to_string(),
+            value: value.to_string(),
+            is_secret,
+            is_protected,
+            source: "global".to_string(),
             created_at: chrono::Utc::now(),
             updated_at: chrono::Utc::now(),
         }

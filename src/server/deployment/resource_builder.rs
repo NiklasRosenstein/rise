@@ -9,16 +9,18 @@
 
 use k8s_openapi::api::apps::v1::{Deployment as K8sDeployment, DeploymentSpec};
 use k8s_openapi::api::core::v1::{
-    Capabilities, Container, ContainerPort, EnvVar, HTTPGetAction, HostAlias, LocalObjectReference,
-    Namespace, PodSecurityContext, PodSpec, PodTemplateSpec, Probe, ProjectedVolumeSource,
-    ResourceRequirements, SeccompProfile, Secret, SecurityContext, Service, ServiceAccount,
-    ServiceAccountTokenProjection, ServicePort, ServiceSpec, Volume, VolumeMount, VolumeProjection,
+    Capabilities, Container, ContainerPort, EnvFromSource, EnvVar, HTTPGetAction, HostAlias,
+    LocalObjectReference, Namespace, PodSecurityContext, PodSpec, PodTemplateSpec, Probe,
+    ProjectedVolumeSource, ResourceRequirements, SeccompProfile, Secret, SecretEnvSource,
+    SecurityContext, Service, ServiceAccount, ServiceAccountTokenProjection, ServicePort,
+    ServiceSpec, Volume, VolumeMount, VolumeProjection,
 };
 use k8s_openapi::api::networking::v1::{
     HTTPIngressPath, HTTPIngressRuleValue, Ingress, IngressBackend, IngressRule,
     IngressServiceBackend, IngressSpec, NetworkPolicy, NetworkPolicySpec, ServiceBackendPort,
 };
 use k8s_openapi::apimachinery::pkg::apis::meta::v1::{LabelSelector, ObjectMeta};
+use k8s_openapi::ByteString;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 use tracing::warn;
@@ -129,6 +131,14 @@ impl ResourceBuilder {
 
     pub fn service_name(_project: &Project, deployment: &Deployment) -> String {
         Self::escaped_group_name(&deployment.deployment_group)
+    }
+
+    pub fn deployment_name(project: &Project, deployment: &Deployment) -> String {
+        format!("{}-{}", project.name, deployment.deployment_id)
+    }
+
+    pub fn deployment_env_secret_name(project: &Project, deployment: &Deployment) -> String {
+        format!("{}-env", Self::deployment_name(project, deployment))
     }
 
     pub fn ingress_name(_project: &Project, deployment: &Deployment) -> String {
@@ -554,6 +564,31 @@ impl ResourceBuilder {
         })
     }
 
+    pub fn create_deployment_env_secret(
+        &self,
+        project: &Project,
+        deployment: &Deployment,
+        namespace: &str,
+        environment_name: Option<&str>,
+        data: BTreeMap<String, ByteString>,
+    ) -> Secret {
+        Secret {
+            metadata: ObjectMeta {
+                name: Some(Self::deployment_env_secret_name(project, deployment)),
+                namespace: Some(namespace.to_string()),
+                labels: Some(Self::deployment_labels(
+                    project,
+                    deployment,
+                    environment_name,
+                )),
+                ..Default::default()
+            },
+            type_: Some("Opaque".to_string()),
+            data: Some(data),
+            ..Default::default()
+        }
+    }
+
     pub fn create_service(
         &self,
         project: &Project,
@@ -877,6 +912,7 @@ impl ResourceBuilder {
         image: &str,
         http_port: u16,
         env_vars: Vec<EnvVar>,
+        secret_env_name: Option<String>,
         service_account_name: Option<String>,
         environment_name: Option<&str>,
     ) -> K8sDeployment {
@@ -889,7 +925,7 @@ impl ResourceBuilder {
 
         K8sDeployment {
             metadata: ObjectMeta {
-                name: Some(format!("{}-{}", project.name, deployment.deployment_id)),
+                name: Some(Self::deployment_name(project, deployment)),
                 namespace: Some(namespace.to_string()),
                 labels: Some(Self::deployment_labels(
                     project,
@@ -954,7 +990,16 @@ impl ResourceBuilder {
                                 ..Default::default()
                             }]),
                             image_pull_policy: Some("Always".to_string()),
-                            env: Some(env_vars),
+                            env: (!env_vars.is_empty()).then_some(env_vars),
+                            env_from: secret_env_name.map(|name| {
+                                vec![EnvFromSource {
+                                    secret_ref: Some(SecretEnvSource {
+                                        name: Some(name),
+                                        ..Default::default()
+                                    }),
+                                    ..Default::default()
+                                }]
+                            }),
                             security_context: self.create_container_security_context(),
                             resources: self.create_resource_requirements(),
                             liveness_probe: self
@@ -1292,6 +1337,225 @@ impl ResourceBuilder {
                 crate::server::registry::ImageTagType::Internal,
             )
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::server::registry::models::RegistryCredentials;
+    use crate::server::registry::{ImageTagType, RegistryProvider};
+    use anyhow::Result;
+    use async_trait::async_trait;
+
+    struct TestRegistryProvider;
+
+    #[async_trait]
+    impl RegistryProvider for TestRegistryProvider {
+        async fn get_credentials(&self, _repository: &str) -> Result<RegistryCredentials> {
+            unreachable!("not used in these tests")
+        }
+
+        async fn get_pull_credentials(&self) -> Result<(String, String)> {
+            unreachable!("not used in these tests")
+        }
+
+        fn registry_host(&self) -> &str {
+            "registry.example.test"
+        }
+
+        fn registry_url(&self) -> &str {
+            "registry.example.test/rise"
+        }
+
+        fn get_image_tag(&self, repository: &str, tag: &str, _tag_type: ImageTagType) -> String {
+            format!("registry.example.test/rise/{repository}:{tag}")
+        }
+    }
+
+    fn test_resource_builder() -> ResourceBuilder {
+        ResourceBuilder {
+            production_ingress_url_template: "{project_name}.example.test".to_string(),
+            staging_ingress_url_template: None,
+            environment_ingress_url_template: None,
+            ingress_port: None,
+            ingress_schema: "https".to_string(),
+            registry_provider: Arc::new(TestRegistryProvider),
+            auth_backend_url: "https://auth.example.test".to_string(),
+            auth_signin_url: "https://signin.example.test".to_string(),
+            backend_address: None,
+            namespace_labels: std::collections::HashMap::new(),
+            namespace_annotations: std::collections::HashMap::new(),
+            ingress_annotations: std::collections::HashMap::new(),
+            ingress_tls_secret_name: None,
+            custom_domain_tls_mode: crate::server::settings::CustomDomainTlsMode::PerDomain,
+            custom_domain_ingress_annotations: std::collections::HashMap::new(),
+            node_selector: std::collections::HashMap::new(),
+            image_pull_secret_name: None,
+            access_classes: std::collections::HashMap::new(),
+            host_aliases: std::collections::HashMap::new(),
+            extra_service_token_audiences: std::collections::HashMap::new(),
+            use_default_service_account_for_production: true,
+            network_policy: crate::server::settings::NetworkPolicyConfig {
+                ingress: vec![],
+                egress: None,
+            },
+            pod_security_enabled: true,
+            pod_resources: None,
+            health_probes: None,
+            namespace_format: "{project_name}".to_string(),
+        }
+    }
+
+    fn test_project() -> Project {
+        Project {
+            id: uuid::Uuid::nil(),
+            name: "demo".to_string(),
+            status: crate::db::models::ProjectStatus::Running,
+            access_class: "default".to_string(),
+            owner_user_id: None,
+            owner_team_id: None,
+            finalizers: vec![],
+            source_url: None,
+            created_at: chrono::Utc::now(),
+            updated_at: chrono::Utc::now(),
+        }
+    }
+
+    fn test_deployment() -> Deployment {
+        Deployment {
+            id: uuid::Uuid::nil(),
+            deployment_id: "20260502-000000".to_string(),
+            project_id: uuid::Uuid::nil(),
+            created_by_id: uuid::Uuid::nil(),
+            status: crate::db::models::DeploymentStatus::Healthy,
+            deployment_group: "default".to_string(),
+            environment_id: None,
+            expires_at: None,
+            termination_reason: None,
+            completed_at: None,
+            error_message: None,
+            build_logs: None,
+            controller_metadata: serde_json::Value::Null,
+            image: None,
+            image_digest: None,
+            rolled_back_from_deployment_id: None,
+            http_port: 8080,
+            needs_reconcile: false,
+            is_active: true,
+            deploying_started_at: None,
+            first_healthy_at: None,
+            job_url: None,
+            pull_request_url: None,
+            created_at: chrono::Utc::now(),
+            updated_at: chrono::Utc::now(),
+        }
+    }
+
+    #[test]
+    fn create_deployment_env_secret_uses_stable_name_and_labels() {
+        let builder = test_resource_builder();
+        let project = test_project();
+        let deployment = test_deployment();
+
+        let mut data = BTreeMap::new();
+        data.insert("API_KEY".to_string(), ByteString(b"super-secret".to_vec()));
+
+        let secret =
+            builder.create_deployment_env_secret(&project, &deployment, "demo", None, data.clone());
+
+        assert_eq!(
+            secret.metadata.name.as_deref(),
+            Some("demo-20260502-000000-env")
+        );
+        assert_eq!(secret.metadata.namespace.as_deref(), Some("demo"));
+        assert_eq!(
+            secret
+                .metadata
+                .labels
+                .as_ref()
+                .and_then(|labels| labels.get(LABEL_DEPLOYMENT_ID))
+                .map(String::as_str),
+            Some("20260502-000000")
+        );
+        assert_eq!(secret.type_.as_deref(), Some("Opaque"));
+        assert_eq!(secret.data, Some(data));
+    }
+
+    #[test]
+    fn create_k8s_deployment_uses_env_from_for_secret_env() {
+        let builder = test_resource_builder();
+        let project = test_project();
+        let deployment = test_deployment();
+
+        let k8s_deployment = builder.create_k8s_deployment(
+            &project,
+            &deployment,
+            "demo",
+            "registry.example.test/rise/demo:20260502-000000",
+            8080,
+            vec![EnvVar {
+                name: "PORT".to_string(),
+                value: Some("8080".to_string()),
+                ..Default::default()
+            }],
+            Some("demo-20260502-000000-env".to_string()),
+            None,
+            None,
+        );
+
+        let container = &k8s_deployment
+            .spec
+            .as_ref()
+            .unwrap()
+            .template
+            .spec
+            .as_ref()
+            .unwrap()
+            .containers[0];
+
+        assert_eq!(container.env.as_ref().unwrap().len(), 1);
+        assert_eq!(
+            container.env_from.as_ref().unwrap()[0]
+                .secret_ref
+                .as_ref()
+                .unwrap()
+                .name
+                .as_deref(),
+            Some("demo-20260502-000000-env")
+        );
+    }
+
+    #[test]
+    fn create_k8s_deployment_omits_empty_env_and_env_from() {
+        let builder = test_resource_builder();
+        let project = test_project();
+        let deployment = test_deployment();
+
+        let k8s_deployment = builder.create_k8s_deployment(
+            &project,
+            &deployment,
+            "demo",
+            "registry.example.test/rise/demo:20260502-000000",
+            8080,
+            vec![],
+            None,
+            None,
+            None,
+        );
+
+        let container = &k8s_deployment
+            .spec
+            .as_ref()
+            .unwrap()
+            .template
+            .spec
+            .as_ref()
+            .unwrap()
+            .containers[0];
+
+        assert!(container.env.is_none());
+        assert!(container.env_from.is_none());
     }
 }
 
