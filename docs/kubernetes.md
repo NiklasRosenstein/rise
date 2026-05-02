@@ -79,6 +79,29 @@ Rise creates a `RiseProject` custom resource per project. Metacontroller watches
 | ServiceAccount | One per environment | Per-environment workload identity |
 | Secret | One per project | Stores image pull credentials |
 
+### Metacontroller Integration
+
+[Metacontroller](https://metacontroller.github.io/metacontroller/) is a Kubernetes operator that implements the composite-controller pattern on top of a simple webhook protocol — so Rise does not need to run a watch loop or write reconciliation logic from scratch.
+
+**Sync webhook**
+
+Metacontroller calls `POST /api/v1/metacontroller/sync` whenever a `RiseProject` resource changes or the configured resync interval elapses. The request body contains:
+
+- `parent`: the `RiseProject` object (name equals the project slug; spec is intentionally empty — the database is the source of truth)
+- `children`: a snapshot of every child resource Metacontroller currently owns, grouped by kind
+
+Rise reads the project state from the database, inspects the observed children to update deployment health/status, then returns the fully-specified set of child resources that should exist. Metacontroller creates, updates, or deletes child resources to match — including garbage-collecting anything no longer returned.
+
+**Finalize webhook**
+
+When a `RiseProject` is deleted, Metacontroller calls `POST /api/v1/metacontroller/finalize` before removing child resources. Rise marks all deployments for the project as `Stopped`, then returns `finalized: true`, at which point Metacontroller deletes the owned children.
+
+**Why Metacontroller**
+
+Using Metacontroller lets Rise express desired cluster state as a stateless function (database state → JSON list of resources) without owning the watch loop, retry logic, or garbage collection. Metacontroller handles watch/cache/retry; Rise handles business logic.
+
+For webhook authentication details, see [Webhook Security](#webhook-security).
+
 ### Naming Scheme
 
 Resources follow consistent naming patterns:
@@ -878,8 +901,8 @@ Verify with: `docker run --rm <image> id` (should show uid != 0)
 ### Starting the Controller
 
 ```bash
-# Run Kubernetes deployment controller
-rise backend controller deployment-kubernetes
+# Start the Rise backend (includes the Kubernetes deployment controller)
+rise backend server
 ```
 
 The controller will:
@@ -966,6 +989,14 @@ The Metacontroller sync/finalize webhooks are served on a **separate internal po
 2. **Pod-IP validation** — on every request, Rise checks that the TCP source IP belongs to a live metacontroller pod by querying the Kubernetes API (result cached for 15 seconds). If the Kubernetes API is unreachable, stale cache is used with a warning; if no cache exists yet, the request is rejected with `503`.
 
 Together these layers mean an attacker must both bypass the NetworkPolicy *and* spoof the source IP of a live metacontroller pod — neither is possible without deep cluster compromise.
+
+### In-transit confidentiality
+
+The webhook speaks plain HTTP. The two layers above address *who can call* the webhook, but not *traffic sniffing* by a compromised pod with `NET_RAW` capability or a node-level attacker. The webhook response can include Kubernetes `Secret` resources (image pull credentials), so confidentiality of that traffic matters.
+
+In most managed clusters (EKS, GKE, AKS) this is covered by node-level or CNI-level encryption. On bare-metal or on-prem clusters with an unencrypted CNI (e.g. plain VXLAN Flannel), you should either enable CNI encryption (WireGuard mode in Cilium/Calico, IPsec in Flannel) or deploy a service mesh with mTLS (Istio, Linkerd) to cover this gap.
+
+A future alternative would be serving port 3001 over HTTPS directly, which would require a TLS certificate for the webhook service (e.g. issued by cert-manager) and the CA bundle injected into the `CompositeController` so Metacontroller can verify the server. This is not currently implemented.
 
 ### Configuration
 
