@@ -1631,9 +1631,11 @@ mod tests {
             test_env_var("PORT", "8080", false, false),
             test_env_var("SESSION_SECRET", "ciphertext-b", true, false),
         ];
-        let provider =
-            crate::server::encryption::providers::local::LocalEncryptionProvider::new("test-key")
-                .unwrap();
+        // 32 zero bytes encoded as standard base64
+        let provider = crate::server::encryption::providers::local::LocalEncryptionProvider::new(
+            "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+        )
+        .unwrap();
 
         let mut encrypted_env_vars = Vec::new();
         for mut var in env_vars {
