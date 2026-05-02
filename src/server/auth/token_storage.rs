@@ -6,7 +6,6 @@ use base64::Engine;
 use rand::Rng;
 use sha2::{Digest, Sha256};
 use sqlx::PgPool;
-use uuid::Uuid;
 
 /// OAuth2 state data stored temporarily during the PKCE flow
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -45,12 +44,6 @@ pub trait TokenStore: Send + Sync {
     /// Claim OAuth2 state by state token.
     async fn claim(&self, state: &str) -> Result<Option<ClaimedToken<OAuth2State>>>;
 
-    /// Finalize a previously claimed OAuth2 state token.
-    async fn finalize(&self, state: &str, claimant_id: Uuid) -> Result<bool>;
-
-    /// Release a previously claimed OAuth2 state token.
-    async fn release(&self, state: &str, claimant_id: Uuid) -> Result<bool>;
-
     /// Save completed auth session for custom domain token exchange
     async fn save_completed_session(
         &self,
@@ -63,18 +56,9 @@ pub trait TokenStore: Send + Sync {
         &self,
         token: &str,
     ) -> Result<Option<ClaimedToken<CompletedAuthSession>>>;
-
-    /// Finalize a previously claimed completed auth session token.
-    async fn finalize_completed_session(&self, token: &str, claimant_id: Uuid) -> Result<bool>;
-
-    /// Release a previously claimed completed auth session token.
-    async fn release_completed_session(&self, token: &str, claimant_id: Uuid) -> Result<bool>;
 }
 
-pub struct ClaimedToken<T> {
-    pub claimant_id: Uuid,
-    pub data: T,
-}
+pub type ClaimedToken<T> = crate::db::oauth_transient_state::ClaimedState<T>;
 
 /// Database-backed implementation of TokenStore — safe to use in multi-replica deployments
 pub struct DbTokenStore {
@@ -100,24 +84,13 @@ impl TokenStore for DbTokenStore {
     }
 
     async fn claim(&self, state: &str) -> Result<Option<ClaimedToken<OAuth2State>>> {
-        let claimant_id = Uuid::new_v4();
-        let data = crate::db::oauth_transient_state::claim(
+        crate::db::oauth_transient_state::claim(
             &self.pool,
             state,
-            claimant_id,
+            uuid::Uuid::new_v4(),
             Duration::from_secs(60),
         )
-        .await?;
-
-        Ok(data.map(|data| ClaimedToken { claimant_id, data }))
-    }
-
-    async fn finalize(&self, state: &str, claimant_id: Uuid) -> Result<bool> {
-        crate::db::oauth_transient_state::finalize(&self.pool, state, claimant_id).await
-    }
-
-    async fn release(&self, state: &str, claimant_id: Uuid) -> Result<bool> {
-        crate::db::oauth_transient_state::release_claim(&self.pool, state, claimant_id).await
+        .await
     }
 
     async fn save_completed_session(
@@ -133,24 +106,13 @@ impl TokenStore for DbTokenStore {
         &self,
         token: &str,
     ) -> Result<Option<ClaimedToken<CompletedAuthSession>>> {
-        let claimant_id = Uuid::new_v4();
-        let data = crate::db::oauth_transient_state::claim(
+        crate::db::oauth_transient_state::claim(
             &self.pool,
             token,
-            claimant_id,
+            uuid::Uuid::new_v4(),
             Duration::from_secs(60),
         )
-        .await?;
-
-        Ok(data.map(|data| ClaimedToken { claimant_id, data }))
-    }
-
-    async fn finalize_completed_session(&self, token: &str, claimant_id: Uuid) -> Result<bool> {
-        crate::db::oauth_transient_state::finalize(&self.pool, token, claimant_id).await
-    }
-
-    async fn release_completed_session(&self, token: &str, claimant_id: Uuid) -> Result<bool> {
-        crate::db::oauth_transient_state::release_claim(&self.pool, token, claimant_id).await
+        .await
     }
 }
 

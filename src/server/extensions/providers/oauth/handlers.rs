@@ -623,11 +623,10 @@ pub async fn callback(
         return Ok(crate::server::rate_limit::rate_limit_response(retry_after));
     }
 
-    let state_claimant_id = Uuid::new_v4();
-    let oauth_state: OAuthState = oauth_transient_state::claim(
+    let claimed_state = oauth_transient_state::claim(
         &state.db_pool,
         &req.state,
-        state_claimant_id,
+        Uuid::new_v4(),
         StdDuration::from_secs(60),
     )
     .await
@@ -640,21 +639,22 @@ pub async fn callback(
     })?
     .ok_or((StatusCode::BAD_REQUEST, "Invalid state token".to_string()))?;
 
+    let claimed_state: oauth_transient_state::ClaimedState<OAuthState> = claimed_state;
+
     // Verify project and extension match
-    if oauth_state.project_name != project_name || oauth_state.extension_name != extension_name {
-        settle_oauth_claim(&state.db_pool, &req.state, state_claimant_id, false).await;
+    if claimed_state.project_name != project_name || claimed_state.extension_name != extension_name
+    {
         return Err((StatusCode::BAD_REQUEST, "State mismatch".to_string()));
     }
 
     // Detect test vs real flow early (before expensive token parsing/encryption)
-    let final_redirect_uri = match oauth_state.redirect_uri.clone() {
+    let final_redirect_uri = match claimed_state.redirect_uri.clone() {
         Some(uri) => uri,
         None => {
-            settle_oauth_claim(&state.db_pool, &req.state, state_claimant_id, false).await;
             return Err((
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "Missing redirect URI in state".to_string(),
-            ));
+            ))
         }
     };
 
@@ -669,12 +669,9 @@ pub async fn callback(
     // Get project
     let project = match db_projects::find_by_name(&state.db_pool, &project_name).await {
         Ok(Some(project)) => project,
-        Ok(None) => {
-            settle_oauth_claim(&state.db_pool, &req.state, state_claimant_id, false).await;
-            return Err((StatusCode::NOT_FOUND, "Project not found".to_string()));
-        }
+        Ok(None) => return Err((StatusCode::NOT_FOUND, "Project not found".to_string())),
         Err(e) => {
-            settle_oauth_claim(&state.db_pool, &req.state, state_claimant_id, true).await;
+            release_oauth_claim(claimed_state).await?;
             return Err((StatusCode::INTERNAL_SERVER_ERROR, e.to_string()));
         }
     };
@@ -686,14 +683,13 @@ pub async fn callback(
         {
             Ok(Some(extension)) => extension,
             Ok(None) => {
-                settle_oauth_claim(&state.db_pool, &req.state, state_claimant_id, false).await;
                 return Err((
                     StatusCode::NOT_FOUND,
                     "OAuth extension not configured".to_string(),
                 ));
             }
             Err(e) => {
-                settle_oauth_claim(&state.db_pool, &req.state, state_claimant_id, true).await;
+                release_oauth_claim(claimed_state).await?;
                 return Err((StatusCode::INTERNAL_SERVER_ERROR, e.to_string()));
             }
         };
@@ -702,7 +698,7 @@ pub async fn callback(
     let spec: OAuthExtensionSpec = match serde_json::from_value(extension.spec.clone()) {
         Ok(spec) => spec,
         Err(e) => {
-            settle_oauth_claim(&state.db_pool, &req.state, state_claimant_id, true).await;
+            release_oauth_claim(claimed_state).await?;
             return Err((
                 StatusCode::INTERNAL_SERVER_ERROR,
                 format!("Invalid spec: {}", e),
@@ -712,7 +708,7 @@ pub async fn callback(
 
     // Resolve OAuth provider's client secret (prefers encrypted in spec, falls back to env var ref)
     let Some(encryption_provider) = state.encryption_provider.as_ref() else {
-        settle_oauth_claim(&state.db_pool, &req.state, state_claimant_id, true).await;
+        release_oauth_claim(claimed_state).await?;
         return Err((
             StatusCode::INTERNAL_SERVER_ERROR,
             "Encryption provider not configured".to_string(),
@@ -734,24 +730,24 @@ pub async fn callback(
         .await
         .map_err(|e| {
             error!("Failed to resolve OAuth client secret: {:?}", e);
-            tokio::spawn({
-                let pool = state.db_pool.clone();
-                let lookup_key = req.state.clone();
-                async move {
-                    settle_oauth_claim(&pool, &lookup_key, state_claimant_id, true).await;
-                }
-            });
             (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 format!("Failed to resolve OAuth client secret: {}", e),
             )
-        })?;
+        });
+    let client_secret = match client_secret {
+        Ok(client_secret) => client_secret,
+        Err(err) => {
+            release_oauth_claim(claimed_state).await?;
+            return Err(err);
+        }
+    };
 
     // Compute callback redirect URI - must match exactly what was sent in authorize request
     let api_url = match Url::parse(&state.public_url) {
         Ok(url) => url,
         Err(e) => {
-            settle_oauth_claim(&state.db_pool, &req.state, state_claimant_id, true).await;
+            release_oauth_claim(claimed_state).await?;
             return Err((
                 StatusCode::INTERNAL_SERVER_ERROR,
                 format!("Invalid API URL configuration: {}", e),
@@ -760,7 +756,7 @@ pub async fn callback(
     };
 
     let Some(api_host) = api_url.host_str() else {
-        settle_oauth_claim(&state.db_pool, &req.state, state_claimant_id, true).await;
+        release_oauth_claim(claimed_state).await?;
         return Err((
             StatusCode::INTERNAL_SERVER_ERROR,
             "Missing host in API URL".to_string(),
@@ -790,7 +786,7 @@ pub async fn callback(
     let endpoints = match resolve_oauth_endpoints(&spec, ssrf_config).await {
         Ok(endpoints) => endpoints,
         Err(e) => {
-            settle_oauth_claim(&state.db_pool, &req.state, state_claimant_id, true).await;
+            release_oauth_claim(claimed_state).await?;
             return Err((
                 StatusCode::INTERNAL_SERVER_ERROR,
                 format!("Failed to resolve OAuth endpoints: {}", e),
@@ -803,13 +799,6 @@ pub async fn callback(
         .await
         .map_err(|e| {
             error!("Token endpoint failed SSRF validation: {}", e);
-            tokio::spawn({
-                let pool = state.db_pool.clone();
-                let lookup_key = req.state.clone();
-                async move {
-                    settle_oauth_claim(&pool, &lookup_key, state_claimant_id, false).await;
-                }
-            });
             (
                 StatusCode::BAD_REQUEST,
                 format!("Token endpoint failed SSRF validation: {}", e),
@@ -827,24 +816,24 @@ pub async fn callback(
             ("client_id", &spec.client_id),
             ("client_secret", &client_secret),
             ("redirect_uri", &redirect_uri),
-            ("code_verifier", &oauth_state.code_verifier),
+            ("code_verifier", &claimed_state.code_verifier),
         ])
         .send()
         .await
         .map_err(|e| {
             error!("Token exchange request failed: {:?}", e);
-            tokio::spawn({
-                let pool = state.db_pool.clone();
-                let lookup_key = req.state.clone();
-                async move {
-                    settle_oauth_claim(&pool, &lookup_key, state_claimant_id, true).await;
-                }
-            });
             (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 format!("Token exchange request failed: {}", e),
             )
-        })?;
+        });
+    let response = match response {
+        Ok(response) => response,
+        Err(err) => {
+            release_oauth_claim(claimed_state).await?;
+            return Err(err);
+        }
+    };
 
     // Branch based on flow type: test flows skip token parsing/encryption
     if is_test_flow {
@@ -875,7 +864,7 @@ pub async fn callback(
             ));
             ext_status.auth_verified = false;
 
-            db_extensions::update_status(
+            let update_status_result = db_extensions::update_status(
                 &state.db_pool,
                 project.id,
                 &extension_name,
@@ -888,7 +877,11 @@ pub async fn callback(
                     StatusCode::INTERNAL_SERVER_ERROR,
                     format!("Failed to update status: {}", e),
                 )
-            })?;
+            });
+            if let Err(err) = update_status_result {
+                release_oauth_claim(claimed_state).await?;
+                return Err(err);
+            }
 
             // Redirect to UI with error
             let mut redirect_url = Url::parse(&final_redirect_uri).map_err(|e| {
@@ -901,7 +894,13 @@ pub async fn callback(
                 .query_pairs_mut()
                 .append_pair("error", "oauth_token_exchange_failed");
 
-            settle_oauth_claim(&state.db_pool, &req.state, state_claimant_id, false).await;
+            claimed_state.finalize().await.map_err(|e| {
+                error!("Failed to finalize OAuth callback state: {:?}", e);
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "OAuth callback failed".to_string(),
+                )
+            })?;
             return Ok(Redirect::to(redirect_url.as_str()).into_response());
         }
 
@@ -913,7 +912,7 @@ pub async fn callback(
         ext_status.auth_verified = true;
         ext_status.error = None;
 
-        db_extensions::update_status(
+        let update_status_result = db_extensions::update_status(
             &state.db_pool,
             project.id,
             &extension_name,
@@ -922,18 +921,15 @@ pub async fn callback(
         .await
         .map_err(|e| {
             warn!("Failed to update extension status: {:?}", e);
-            tokio::spawn({
-                let pool = state.db_pool.clone();
-                let lookup_key = req.state.clone();
-                async move {
-                    settle_oauth_claim(&pool, &lookup_key, state_claimant_id, true).await;
-                }
-            });
             (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 format!("Failed to update status: {}", e),
             )
-        })?;
+        });
+        if let Err(err) = update_status_result {
+            release_oauth_claim(claimed_state).await?;
+            return Err(err);
+        }
 
         info!(
             "Completed test OAuth flow for project {} extension {}",
@@ -944,7 +940,7 @@ pub async fn callback(
         let redirect_url = match Url::parse(&final_redirect_uri) {
             Ok(url) => url,
             Err(e) => {
-                settle_oauth_claim(&state.db_pool, &req.state, state_claimant_id, true).await;
+                release_oauth_claim(claimed_state).await?;
                 return Err((
                     StatusCode::INTERNAL_SERVER_ERROR,
                     format!("Invalid redirect URI: {}", e),
@@ -952,7 +948,13 @@ pub async fn callback(
             }
         };
 
-        settle_oauth_claim(&state.db_pool, &req.state, state_claimant_id, false).await;
+        claimed_state.finalize().await.map_err(|e| {
+            error!("Failed to finalize OAuth callback state: {:?}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "OAuth callback failed".to_string(),
+            )
+        })?;
         Ok(Redirect::to(redirect_url.as_str()).into_response())
     } else {
         // ===== REAL FLOW: Cache raw token response (no parsing) =====
@@ -973,22 +975,22 @@ pub async fn callback(
         // Get raw response body (cache ALL responses - we're a passthrough proxy)
         let response_body = response.bytes().await.map_err(|e| {
             error!("Failed to read token response body: {:?}", e);
-            tokio::spawn({
-                let pool = state.db_pool.clone();
-                let lookup_key = req.state.clone();
-                async move {
-                    settle_oauth_claim(&pool, &lookup_key, state_claimant_id, true).await;
-                }
-            });
             (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "Failed to read token response".to_string(),
             )
-        })?;
+        });
+        let response_body = match response_body {
+            Ok(response_body) => response_body,
+            Err(err) => {
+                release_oauth_claim(claimed_state).await?;
+                return Err(err);
+            }
+        };
 
         // Encrypt raw response body
         let Some(encryption_provider) = state.encryption_provider.as_ref() else {
-            settle_oauth_claim(&state.db_pool, &req.state, state_claimant_id, true).await;
+            release_oauth_claim(claimed_state).await?;
             return Err((
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "Encryption provider not configured".to_string(),
@@ -1000,18 +1002,18 @@ pub async fn callback(
             .await
             .map_err(|e| {
                 error!("Failed to encrypt token response: {:?}", e);
-                tokio::spawn({
-                    let pool = state.db_pool.clone();
-                    let lookup_key = req.state.clone();
-                    async move {
-                        settle_oauth_claim(&pool, &lookup_key, state_claimant_id, true).await;
-                    }
-                });
                 (
                     StatusCode::INTERNAL_SERVER_ERROR,
                     "Failed to encrypt token response".to_string(),
                 )
-            })?;
+            });
+        let token_response_encrypted = match token_response_encrypted {
+            Ok(token_response_encrypted) => token_response_encrypted,
+            Err(err) => {
+                release_oauth_claim(claimed_state).await?;
+                return Err(err);
+            }
+        };
 
         debug!(
             "Cached token response: status={}, content_type={}",
@@ -1027,7 +1029,7 @@ pub async fn callback(
         ext_status.auth_verified = true;
         ext_status.error = None;
 
-        db_extensions::update_status(
+        let update_status_result = db_extensions::update_status(
             &state.db_pool,
             project.id,
             &extension_name,
@@ -1036,18 +1038,15 @@ pub async fn callback(
         .await
         .map_err(|e| {
             warn!("Failed to update extension status: {:?}", e);
-            tokio::spawn({
-                let pool = state.db_pool.clone();
-                let lookup_key = req.state.clone();
-                async move {
-                    settle_oauth_claim(&pool, &lookup_key, state_claimant_id, true).await;
-                }
-            });
             (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 format!("Failed to update status: {}", e),
             )
-        })?;
+        });
+        if let Err(err) = update_status_result {
+            release_oauth_claim(claimed_state).await?;
+            return Err(err);
+        }
 
         // Generate authorization code for token exchange
         let authorization_code = generate_state_token();
@@ -1057,16 +1056,16 @@ pub async fn callback(
             project_id: project.id,
             extension_name: extension_name.clone(),
             created_at: Utc::now(),
-            redirect_uri: oauth_state.redirect_uri.clone(),
-            code_challenge: oauth_state.client_code_challenge.clone(),
-            code_challenge_method: oauth_state.client_code_challenge_method.clone(),
+            redirect_uri: claimed_state.redirect_uri.clone(),
+            code_challenge: claimed_state.client_code_challenge.clone(),
+            code_challenge_method: claimed_state.client_code_challenge_method.clone(),
             token_response_encrypted,
             content_type,
             status_code,
         };
 
         // Store authorization code in DB (5-minute TTL, single-use via consume)
-        oauth_transient_state::insert(
+        let insert_code_result = oauth_transient_state::insert(
             &state.db_pool,
             &authorization_code,
             &code_state,
@@ -1075,24 +1074,21 @@ pub async fn callback(
         .await
         .map_err(|e| {
             error!("Failed to store authorization code: {:?}", e);
-            tokio::spawn({
-                let pool = state.db_pool.clone();
-                let lookup_key = req.state.clone();
-                async move {
-                    settle_oauth_claim(&pool, &lookup_key, state_claimant_id, true).await;
-                }
-            });
             (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "OAuth callback failed".to_string(),
             )
-        })?;
+        });
+        if let Err(err) = insert_code_result {
+            release_oauth_claim(claimed_state).await?;
+            return Err(err);
+        }
 
         // Build redirect URL with authorization code (RFC 6749)
         let mut redirect_url = match Url::parse(&final_redirect_uri) {
             Ok(url) => url,
             Err(e) => {
-                settle_oauth_claim(&state.db_pool, &req.state, state_claimant_id, true).await;
+                release_oauth_claim(claimed_state).await?;
                 return Err((
                     StatusCode::INTERNAL_SERVER_ERROR,
                     format!("Invalid redirect URI: {}", e),
@@ -1106,7 +1102,7 @@ pub async fn callback(
             .append_pair("code", &authorization_code);
 
         // Pass through application's CSRF state
-        if let Some(app_state) = oauth_state.application_state {
+        if let Some(app_state) = claimed_state.application_state.clone() {
             redirect_url
                 .query_pairs_mut()
                 .append_pair("state", &app_state);
@@ -1122,7 +1118,13 @@ pub async fn callback(
             redirect_url.as_str()
         );
 
-        settle_oauth_claim(&state.db_pool, &req.state, state_claimant_id, false).await;
+        claimed_state.finalize().await.map_err(|e| {
+            error!("Failed to finalize OAuth callback state: {:?}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "OAuth callback failed".to_string(),
+            )
+        })?;
         Ok(Redirect::to(redirect_url.as_str()).into_response())
     }
 }
@@ -1182,27 +1184,16 @@ fn oauth2_error(
     )
 }
 
-async fn settle_oauth_claim(
-    pool: &sqlx::PgPool,
-    lookup_key: &str,
-    claimant_id: Uuid,
-    release: bool,
-) {
-    let result = if release {
-        oauth_transient_state::release_claim(pool, lookup_key, claimant_id).await
-    } else {
-        oauth_transient_state::finalize(pool, lookup_key, claimant_id).await
-    };
-
-    if let Err(error) = result {
-        warn!(
-            ?error,
-            lookup_key,
-            claimant_id = %claimant_id,
-            release,
-            "failed to settle oauth transient state claim"
-        );
-    }
+async fn release_oauth_claim<T>(
+    claim: oauth_transient_state::ClaimedState<T>,
+) -> Result<(), (StatusCode, String)> {
+    claim.release().await.map_err(|e| {
+        error!("Failed to release OAuth transient state: {:?}", e);
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "OAuth callback failed".to_string(),
+        )
+    })
 }
 
 /// RFC 6749-compliant token endpoint with per-project CORS support
@@ -1522,11 +1513,10 @@ async fn handle_authorization_code_grant(
         )
     })?;
 
-    let code_claimant_id = Uuid::new_v4();
-    let code_state: OAuthCodeState = oauth_transient_state::claim(
+    let code_state = oauth_transient_state::claim(
         &state.db_pool,
         &code,
-        code_claimant_id,
+        Uuid::new_v4(),
         StdDuration::from_secs(60),
     )
     .await
@@ -1541,9 +1531,10 @@ async fn handle_authorization_code_grant(
         )
     })?;
 
+    let code_state: oauth_transient_state::ClaimedState<OAuthCodeState> = code_state;
+
     // Verify project and extension match
     if code_state.project_id != project.id || code_state.extension_name != extension_name {
-        settle_oauth_claim(&state.db_pool, &code, code_claimant_id, false).await;
         return Err(oauth2_error(
             "invalid_grant",
             Some("Authorization code mismatch".to_string()),
@@ -1558,14 +1549,12 @@ async fn handle_authorization_code_grant(
                 // Match - validation passed
             }
             Some(_) => {
-                settle_oauth_claim(&state.db_pool, &code, code_claimant_id, false).await;
                 return Err(oauth2_error(
                     "invalid_grant",
                     Some("redirect_uri does not match authorization request".to_string()),
                 ));
             }
             None => {
-                settle_oauth_claim(&state.db_pool, &code, code_claimant_id, false).await;
                 return Err(oauth2_error(
                     "invalid_request",
                     Some("redirect_uri required (was provided during authorization)".to_string()),
@@ -1574,7 +1563,6 @@ async fn handle_authorization_code_grant(
         }
     } else if req.redirect_uri.is_some() {
         // redirect_uri provided in token request but not in authorization request
-        settle_oauth_claim(&state.db_pool, &code, code_claimant_id, false).await;
         return Err(oauth2_error(
             "invalid_request",
             Some("redirect_uri was not provided during authorization".to_string()),
@@ -1584,7 +1572,6 @@ async fn handle_authorization_code_grant(
     // CRITICAL: If code_verifier provided, challenge must have been provided during authz
     // This prevents bypassing authentication by providing code_verifier without prior code_challenge
     if req.code_verifier.is_some() && code_state.code_challenge.is_none() {
-        settle_oauth_claim(&state.db_pool, &code, code_claimant_id, false).await;
         return Err(oauth2_error(
             "invalid_request",
             Some("code_verifier requires prior code_challenge during authorization".to_string()),
@@ -1595,13 +1582,6 @@ async fn handle_authorization_code_grant(
     if let Some(ref code_challenge) = code_state.code_challenge {
         // PKCE flow - require code_verifier
         let code_verifier = req.code_verifier.ok_or_else(|| {
-            tokio::spawn({
-                let pool = state.db_pool.clone();
-                let code = code.clone();
-                async move {
-                    settle_oauth_claim(&pool, &code, code_claimant_id, false).await;
-                }
-            });
             oauth2_error(
                 "invalid_request",
                 Some("Missing code_verifier for PKCE flow".to_string()),
@@ -1610,7 +1590,6 @@ async fn handle_authorization_code_grant(
 
         // RFC 7636: code_verifier must be 43-128 characters, unreserved charset [A-Za-z0-9-._~]
         if code_verifier.len() < 43 || code_verifier.len() > 128 {
-            settle_oauth_claim(&state.db_pool, &code, code_claimant_id, false).await;
             return Err(oauth2_error(
                 "invalid_request",
                 Some("code_verifier must be 43-128 characters".to_string()),
@@ -1620,7 +1599,6 @@ async fn handle_authorization_code_grant(
             .chars()
             .all(|c| c.is_ascii_alphanumeric() || "-._~".contains(c))
         {
-            settle_oauth_claim(&state.db_pool, &code, code_claimant_id, false).await;
             return Err(oauth2_error(
                 "invalid_request",
                 Some("code_verifier contains invalid characters".to_string()),
@@ -1633,7 +1611,6 @@ async fn handle_authorization_code_grant(
             .unwrap_or("S256");
 
         if !validate_pkce(&code_verifier, code_challenge, code_challenge_method) {
-            settle_oauth_claim(&state.db_pool, &code, code_claimant_id, false).await;
             return Err(oauth2_error(
                 "invalid_grant",
                 Some("PKCE validation failed".to_string()),
@@ -1648,30 +1625,36 @@ async fn handle_authorization_code_grant(
     // Decrypt raw token response from code_state (Rise acts as passthrough proxy)
     let encryption_provider = state.encryption_provider.as_ref().ok_or_else(|| {
         error!("Encryption provider not configured");
-        tokio::spawn({
-            let pool = state.db_pool.clone();
-            let code = code.clone();
-            async move {
-                settle_oauth_claim(&pool, &code, code_claimant_id, true).await;
-            }
-        });
         oauth2_error("server_error", Some("Internal server error".to_string()))
-    })?;
+    });
+    let encryption_provider = match encryption_provider {
+        Ok(encryption_provider) => encryption_provider,
+        Err(err) => {
+            code_state.release().await.map_err(|e| {
+                error!("Failed to release authorization code: {:?}", e);
+                oauth2_error("server_error", Some("Internal server error".to_string()))
+            })?;
+            return Err(err);
+        }
+    };
 
     let token_response_body = encryption_provider
         .decrypt(&code_state.token_response_encrypted)
         .await
         .map_err(|e| {
             error!("Failed to decrypt token response: {:?}", e);
-            tokio::spawn({
-                let pool = state.db_pool.clone();
-                let code = code.clone();
-                async move {
-                    settle_oauth_claim(&pool, &code, code_claimant_id, true).await;
-                }
-            });
             oauth2_error("server_error", Some("Internal server error".to_string()))
-        })?;
+        });
+    let token_response_body = match token_response_body {
+        Ok(token_response_body) => token_response_body,
+        Err(err) => {
+            code_state.release().await.map_err(|e| {
+                error!("Failed to release authorization code: {:?}", e);
+                oauth2_error("server_error", Some("Internal server error".to_string()))
+            })?;
+            return Err(err);
+        }
+    };
 
     info!(
         "Authorization code grant successful for project {} extension {}",
@@ -1682,11 +1665,14 @@ async fn handle_authorization_code_grant(
     use axum::body::Body;
     let response = Response::builder()
         .status(StatusCode::from_u16(code_state.status_code).unwrap_or(StatusCode::OK))
-        .header(header::CONTENT_TYPE, code_state.content_type)
+        .header(header::CONTENT_TYPE, code_state.content_type.clone())
         .body(Body::from(token_response_body))
         .unwrap();
 
-    settle_oauth_claim(&state.db_pool, &code, code_claimant_id, false).await;
+    code_state.finalize().await.map_err(|e| {
+        error!("Failed to finalize authorization code: {:?}", e);
+        oauth2_error("server_error", Some("Internal server error".to_string()))
+    })?;
     Ok(response)
 }
 
