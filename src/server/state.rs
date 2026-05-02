@@ -3,7 +3,7 @@ use crate::server::auth::{
     jwt::JwtValidator,
     jwt_signer::JwtSigner,
     oauth::OAuthClient,
-    token_storage::{InMemoryTokenStore, TokenStore},
+    token_storage::{DbTokenStore, TokenStore},
 };
 use crate::server::encryption::EncryptionProvider;
 use crate::server::registry::{
@@ -53,11 +53,6 @@ pub struct AppState {
     pub encryption_provider: Option<Arc<dyn EncryptionProvider>>,
     pub deployment_backend: Arc<dyn crate::server::deployment::controller::DeploymentBackend>,
     pub extension_registry: Arc<crate::server::extensions::registry::ExtensionRegistry>,
-    pub oauth_state_store:
-        Arc<moka::future::Cache<String, crate::server::extensions::providers::oauth::OAuthState>>,
-    pub oauth_code_store: Arc<
-        moka::future::Cache<String, crate::server::extensions::providers::oauth::OAuthCodeState>,
-    >,
     /// Rate limiter for encrypt endpoint (key: "encrypt:{user_id}", value: request count)
     pub encrypt_rate_limiter: Arc<moka::future::Cache<String, u32>>,
     /// Rate limiter for OAuth endpoints (token, authorize, callback)
@@ -369,10 +364,9 @@ impl AppState {
         // Store server settings for frontend config injection
         let server_settings = Arc::new(settings.server.clone());
 
-        // Initialize token store for OAuth2 PKCE flow (10 minute TTL)
-        let token_store: Arc<dyn TokenStore> =
-            Arc::new(InMemoryTokenStore::new(Duration::from_secs(600)));
-        tracing::info!("Initialized in-memory token store for OAuth2 state");
+        // Initialize token store for OAuth2 PKCE flow (DB-backed, safe in multi-replica deployments)
+        let token_store: Arc<dyn TokenStore> = Arc::new(DbTokenStore::new(db_pool.clone()));
+        tracing::info!("Initialized DB-backed token store for OAuth2 state");
 
         // Initialize cookie settings for session management
         let cookie_settings = CookieSettings {
@@ -767,24 +761,6 @@ impl AppState {
 
         let extension_registry = Arc::new(extension_registry);
 
-        // Initialize OAuth state store for OAuth extension (10 minute TTL)
-        let oauth_state_store = Arc::new(
-            moka::future::Cache::builder()
-                .time_to_live(Duration::from_secs(600))
-                .max_capacity(10_000) // Prevent memory exhaustion
-                .build(),
-        );
-        tracing::info!("Initialized OAuth state store for OAuth extensions");
-
-        // Initialize OAuth authorization code store (5 minute TTL, single-use)
-        let oauth_code_store = Arc::new(
-            moka::future::Cache::builder()
-                .time_to_live(Duration::from_secs(300))
-                .max_capacity(10_000) // Prevent memory exhaustion
-                .build(),
-        );
-        tracing::info!("Initialized OAuth authorization code store for secure backend flow");
-
         // Initialize encrypt endpoint rate limiter (100 requests/hour per user)
         let encrypt_rate_limiter = Arc::new(
             moka::future::Cache::builder()
@@ -844,8 +820,6 @@ impl AppState {
             encryption_provider,
             deployment_backend,
             extension_registry,
-            oauth_state_store,
-            oauth_code_store,
             encrypt_rate_limiter,
             oauth_rate_limiter,
             access_classes,

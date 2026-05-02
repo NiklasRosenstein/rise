@@ -2,6 +2,7 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio::time::interval;
 use tracing::{debug, error, info, warn};
+use uuid::Uuid;
 
 use crate::db::projects as db_projects;
 use crate::server::ecr::{EcrRepoManager, ECR_FINALIZER};
@@ -41,19 +42,21 @@ impl EcrController {
 
     /// Start provision, cleanup, and drift detection loops
     pub fn start(self: Arc<Self>) {
+        let holder_id = Uuid::new_v4();
+
         let provision_self = Arc::clone(&self);
         tokio::spawn(async move {
-            provision_self.provision_loop().await;
+            provision_self.provision_loop(holder_id).await;
         });
 
         let cleanup_self = Arc::clone(&self);
         tokio::spawn(async move {
-            cleanup_self.cleanup_loop().await;
+            cleanup_self.cleanup_loop(holder_id).await;
         });
 
         let drift_self = Arc::clone(&self);
         tokio::spawn(async move {
-            drift_self.drift_detection_loop().await;
+            drift_self.drift_detection_loop(holder_id).await;
         });
     }
 
@@ -63,12 +66,27 @@ impl EcrController {
     /// 1. Lists all active projects (not Deleting/Terminated)
     /// 2. For each project without the ECR finalizer, creates the repo
     /// 3. Adds the ECR finalizer to track that cleanup is needed
-    async fn provision_loop(&self) {
+    async fn provision_loop(&self, holder_id: Uuid) {
         info!("ECR provision loop started");
         let mut ticker = interval(self.provision_interval);
 
         loop {
             ticker.tick().await;
+            match crate::db::leader_leases::try_acquire(
+                &self.state.db_pool,
+                "rise-ecr-controller",
+                holder_id,
+                Duration::from_secs(60),
+            )
+            .await
+            {
+                Ok(true) => {}
+                Ok(false) => continue,
+                Err(e) => {
+                    warn!("Leader election error in ECR provision loop: {:?}", e);
+                    continue;
+                }
+            }
             if let Err(e) = self.provision_repositories().await {
                 error!("Error in ECR provision loop: {}", e);
             }
@@ -124,12 +142,27 @@ impl EcrController {
     /// 1. Finds projects in Deleting status with ECR finalizer
     /// 2. Deletes or tags the ECR repo based on auto_remove setting
     /// 3. Removes the ECR finalizer so project can be fully deleted
-    async fn cleanup_loop(&self) {
+    async fn cleanup_loop(&self, holder_id: Uuid) {
         info!("ECR cleanup loop started");
         let mut ticker = interval(self.cleanup_interval);
 
         loop {
             ticker.tick().await;
+            match crate::db::leader_leases::try_acquire(
+                &self.state.db_pool,
+                "rise-ecr-controller",
+                holder_id,
+                Duration::from_secs(60),
+            )
+            .await
+            {
+                Ok(true) => {}
+                Ok(false) => continue,
+                Err(e) => {
+                    warn!("Leader election error in ECR cleanup loop: {:?}", e);
+                    continue;
+                }
+            }
             if let Err(e) = self.cleanup_repositories().await {
                 error!("Error in ECR cleanup loop: {}", e);
             }
@@ -213,12 +246,27 @@ impl EcrController {
     /// 1. Lists all active projects WITH the ECR finalizer
     /// 2. Checks if the ECR repository actually exists
     /// 3. If missing, removes finalizer so provision loop can recreate it
-    async fn drift_detection_loop(&self) {
+    async fn drift_detection_loop(&self, holder_id: Uuid) {
         info!("ECR drift detection loop started");
         let mut ticker = interval(self.drift_interval);
 
         loop {
             ticker.tick().await;
+            match crate::db::leader_leases::try_acquire(
+                &self.state.db_pool,
+                "rise-ecr-controller",
+                holder_id,
+                Duration::from_secs(60),
+            )
+            .await
+            {
+                Ok(true) => {}
+                Ok(false) => continue,
+                Err(e) => {
+                    warn!("Leader election error in ECR drift detection loop: {:?}", e);
+                    continue;
+                }
+            }
             if let Err(e) = self.detect_repository_drift().await {
                 error!("Error in ECR drift detection loop: {}", e);
             }

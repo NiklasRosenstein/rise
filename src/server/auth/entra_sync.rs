@@ -581,12 +581,33 @@ pub async fn run_entra_sync_loop(
         }
     });
 
+    let holder_id = uuid::Uuid::new_v4();
+
     loop {
         tokio::select! {
             _ = interval.tick() => {}
             _ = &mut shutdown => {
                 tracing::info!("Entra active sync shutting down");
                 break;
+            }
+        }
+
+        match crate::db::leader_leases::try_acquire(
+            &pool,
+            "rise-entra-sync",
+            holder_id,
+            Duration::from_secs(60),
+        )
+        .await
+        {
+            Ok(true) => {}
+            Ok(false) => {
+                tracing::debug!("Skipping Entra sync cycle — another replica is the leader");
+                continue;
+            }
+            Err(e) => {
+                tracing::warn!("Leader election error in Entra sync: {:?}", e);
+                continue;
             }
         }
 

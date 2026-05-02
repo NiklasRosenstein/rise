@@ -2,7 +2,7 @@ use super::models::{
     AuthorizeFlowQuery, CallbackRequest, OAuth2ErrorResponse, OAuth2TokenResponse, OAuthCodeState,
     OAuthExtensionSpec, OAuthExtensionStatus, OAuthState, TokenRequest,
 };
-use crate::db::{extensions as db_extensions, projects as db_projects};
+use crate::db::{extensions as db_extensions, oauth_transient_state, projects as db_projects};
 use crate::server::state::AppState;
 use axum::{
     extract::{Path, Query, State},
@@ -13,6 +13,7 @@ use axum::{
 use base64::Engine;
 use chrono::Utc;
 use std::sync::Arc;
+use std::time::Duration as StdDuration;
 use tracing::{debug, error, info, warn};
 use url::Url;
 
@@ -502,11 +503,21 @@ pub async fn authorize(
         client_code_challenge_method: req.code_challenge_method,
     };
 
-    // Store state in cache (TTL configured on cache builder)
-    state
-        .oauth_state_store
-        .insert(state_token.clone(), oauth_state)
-        .await;
+    // Store state in DB (10-minute TTL)
+    oauth_transient_state::insert(
+        &state.db_pool,
+        &state_token,
+        &oauth_state,
+        StdDuration::from_secs(600),
+    )
+    .await
+    .map_err(|e| {
+        error!("Failed to store OAuth state: {:?}", e);
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to initiate OAuth flow".to_string(),
+        )
+    })?;
 
     // Compute callback redirect URI for this extension
     // Use the same scheme and host as the API URL
@@ -612,10 +623,15 @@ pub async fn callback(
     }
 
     // Retrieve and validate state
-    let oauth_state = state
-        .oauth_state_store
-        .get(&req.state)
+    let oauth_state: OAuthState = oauth_transient_state::get(&state.db_pool, &req.state)
         .await
+        .map_err(|e| {
+            error!("Failed to retrieve OAuth state: {:?}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "OAuth callback failed".to_string(),
+            )
+        })?
         .ok_or((StatusCode::BAD_REQUEST, "Invalid state token".to_string()))?;
 
     // Verify project and extension match
@@ -808,8 +824,8 @@ pub async fn callback(
                 )
             })?;
 
-            // Clear state token from cache
-            state.oauth_state_store.invalidate(&req.state).await;
+            // Clear state token from DB
+            let _ = oauth_transient_state::delete(&state.db_pool, &req.state).await;
 
             // Redirect to UI with error
             let mut redirect_url = Url::parse(&final_redirect_uri).map_err(|e| {
@@ -848,8 +864,8 @@ pub async fn callback(
             )
         })?;
 
-        // Clear state token from cache
-        state.oauth_state_store.invalidate(&req.state).await;
+        // Clear state token from DB
+        let _ = oauth_transient_state::delete(&state.db_pool, &req.state).await;
 
         info!(
             "Completed test OAuth flow for project {} extension {}",
@@ -936,8 +952,8 @@ pub async fn callback(
             )
         })?;
 
-        // Clear state token from cache
-        state.oauth_state_store.invalidate(&req.state).await;
+        // Clear state token from DB
+        let _ = oauth_transient_state::delete(&state.db_pool, &req.state).await;
 
         // Generate authorization code for token exchange
         let authorization_code = generate_state_token();
@@ -955,10 +971,21 @@ pub async fn callback(
             status_code,
         };
 
-        state
-            .oauth_code_store
-            .insert(authorization_code.clone(), code_state)
-            .await;
+        // Store authorization code in DB (5-minute TTL, single-use via consume)
+        oauth_transient_state::insert(
+            &state.db_pool,
+            &authorization_code,
+            &code_state,
+            StdDuration::from_secs(300),
+        )
+        .await
+        .map_err(|e| {
+            error!("Failed to store authorization code: {:?}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "OAuth callback failed".to_string(),
+            )
+        })?;
 
         // Build redirect URL with authorization code (RFC 6749)
         let mut redirect_url = Url::parse(&final_redirect_uri).map_err(|e| {
@@ -1366,16 +1393,22 @@ async fn handle_authorization_code_grant(
         )
     })?;
 
-    // SECURITY: Consume authorization code immediately (atomic get-and-remove)
+    // SECURITY: Consume authorization code atomically (DELETE … RETURNING).
     // This prevents race conditions where the same code could be used twice.
     // Validations happen after removal - if they fail, code is already consumed.
     // This is acceptable per RFC 6749: codes MUST be single-use.
-    let code_state = state.oauth_code_store.remove(&code).await.ok_or_else(|| {
-        oauth2_error(
-            "invalid_grant",
-            Some("Invalid or expired authorization code".to_string()),
-        )
-    })?;
+    let code_state: OAuthCodeState = oauth_transient_state::consume(&state.db_pool, &code)
+        .await
+        .map_err(|e| {
+            error!("Failed to consume authorization code: {:?}", e);
+            oauth2_error("server_error", Some("Internal server error".to_string()))
+        })?
+        .ok_or_else(|| {
+            oauth2_error(
+                "invalid_grant",
+                Some("Invalid or expired authorization code".to_string()),
+            )
+        })?;
 
     // Verify project and extension match
     if code_state.project_id != project.id || code_state.extension_name != extension_name {

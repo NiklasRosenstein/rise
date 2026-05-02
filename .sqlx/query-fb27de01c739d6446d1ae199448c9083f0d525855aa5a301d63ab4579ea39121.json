@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO leader_leases (name, holder_id, heartbeat_at, expires_at)\n         VALUES ($1, $2, NOW(), $3)\n         ON CONFLICT (name) DO UPDATE\n           SET holder_id = $2, heartbeat_at = NOW(), expires_at = $3\n           WHERE leader_leases.expires_at < NOW()\n              OR leader_leases.holder_id = $2",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Varchar",
+        "Uuid",
+        "Timestamptz"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "fb27de01c739d6446d1ae199448c9083f0d525855aa5a301d63ab4579ea39121"
+}

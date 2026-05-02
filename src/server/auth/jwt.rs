@@ -63,7 +63,7 @@ impl JwksCache {
         Self {
             keys,
             fetched_at: Instant::now(),
-            ttl: Duration::from_secs(3600), // 1 hour default TTL
+            ttl: Duration::from_secs(300), // 5 minute TTL — ensures key rotation propagates quickly
         }
     }
 

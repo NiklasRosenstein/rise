@@ -1138,7 +1138,17 @@ pub async fn oauth_signin_start(
         project_name: params.project.clone(), // For ingress auth flow
         custom_domain_base_url,
     };
-    state.token_store.save(state_token.clone(), oauth_state);
+    state
+        .token_store
+        .save(state_token.clone(), oauth_state)
+        .await
+        .map_err(|e| {
+            tracing::error!("Failed to store PKCE state: {:?}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to initiate login".to_string(),
+            )
+        })?;
 
     // Build OAuth2 authorization URL
     // IdP callback always uses the main Rise domain (pre-registered with IdP)
@@ -1188,13 +1198,24 @@ pub async fn oauth_callback(
     tracing::info!("OAuth callback received");
 
     // Retrieve PKCE state from token store
-    let oauth_state = state.token_store.get(&params.state).ok_or_else(|| {
-        tracing::warn!("Invalid or expired state token");
-        (
-            StatusCode::BAD_REQUEST,
-            "Invalid or expired state token".to_string(),
-        )
-    })?;
+    let oauth_state = state
+        .token_store
+        .get(&params.state)
+        .await
+        .map_err(|e| {
+            tracing::error!("Failed to retrieve PKCE state: {:?}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Login failed".to_string(),
+            )
+        })?
+        .ok_or_else(|| {
+            tracing::warn!("Invalid or expired state token");
+            (
+                StatusCode::BAD_REQUEST,
+                "Invalid or expired state token".to_string(),
+            )
+        })?;
 
     // Build callback URL (must match the one used in signin)
     // IdP callback always uses the main Rise domain (pre-registered with IdP)
@@ -1328,7 +1349,15 @@ pub async fn oauth_callback(
             };
             state
                 .token_store
-                .save_completed_session(completion_token.clone(), completed_session);
+                .save_completed_session(completion_token.clone(), completed_session)
+                .await
+                .map_err(|e| {
+                    tracing::error!("Failed to store completed session: {:?}", e);
+                    (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        "Failed to complete authentication".to_string(),
+                    )
+                })?;
 
             // Construct the complete URL by appending the path to the base URL
             let complete_url = format!(
@@ -1590,6 +1619,14 @@ pub async fn oauth_complete(
     let session = state
         .token_store
         .get_completed_session(&params.token)
+        .await
+        .map_err(|e| {
+            tracing::error!("Failed to retrieve completed session: {:?}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Login failed".to_string(),
+            )
+        })?
         .ok_or_else(|| {
             tracing::warn!("Invalid or expired completion token");
             (
