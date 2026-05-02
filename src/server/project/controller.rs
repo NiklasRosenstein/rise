@@ -1,7 +1,9 @@
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::time::interval;
-use tracing::{debug, error, info};
+use tracing::{debug, error, info, warn};
+use uuid::Uuid;
 
 use crate::db::models::DeploymentStatus;
 use crate::db::{
@@ -17,6 +19,7 @@ use crate::server::state::ControllerState;
 pub struct ProjectController {
     state: Arc<ControllerState>,
     deletion_interval: Duration,
+    cleanup_tick: AtomicU64,
 }
 
 impl ProjectController {
@@ -25,13 +28,15 @@ impl ProjectController {
         Self {
             state,
             deletion_interval: Duration::from_secs(5),
+            cleanup_tick: AtomicU64::new(1),
         }
     }
 
     /// Start deletion loop
     pub fn start(self: Arc<Self>) {
+        let holder_id = Uuid::new_v4();
         tokio::spawn(async move {
-            self.deletion_loop().await;
+            self.deletion_loop(holder_id).await;
         });
     }
 
@@ -43,16 +48,53 @@ impl ProjectController {
     /// 3. Cancels pre-infrastructure deployments (Pending/Building/Pushing)
     /// 4. Terminates post-infrastructure deployments (Deploying/Healthy/Unhealthy)
     /// 5. Once all deployments are terminal, deletes the project
-    async fn deletion_loop(&self) {
+    async fn deletion_loop(&self, holder_id: Uuid) {
         info!("Project deletion loop started");
         let mut ticker = interval(self.deletion_interval);
 
         loop {
             ticker.tick().await;
+
+            match crate::db::leader_leases::try_acquire(
+                &self.state.db_pool,
+                "rise-project-controller",
+                holder_id,
+                Duration::from_secs(60),
+            )
+            .await
+            {
+                Ok(true) => {}
+                Ok(false) => {
+                    tokio::time::sleep(std::time::Duration::from_secs(30)).await;
+                    continue;
+                }
+                Err(e) => {
+                    warn!("Leader election error in project controller: {:?}", e);
+                    continue;
+                }
+            }
+
             if let Err(e) = self.process_deleting_projects().await {
                 error!("Error in deletion loop: {}", e);
             }
+
+            if let Err(e) = self.cleanup_expired_transient_state().await {
+                warn!("Error cleaning up expired transient state: {:?}", e);
+            }
         }
+    }
+
+    /// Periodically clean up expired OAuth transient state rows (runs on leader only)
+    async fn cleanup_expired_transient_state(&self) -> anyhow::Result<()> {
+        // Run cleanup roughly once per hour (every 720 ticks × 5s = 3600s)
+        let tick = self.cleanup_tick.fetch_add(1, Ordering::Relaxed);
+        if tick.is_multiple_of(720) {
+            let n = crate::db::oauth_transient_state::delete_expired(&self.state.db_pool).await?;
+            if n > 0 {
+                debug!("Cleaned up {} expired OAuth transient state rows", n);
+            }
+        }
+        Ok(())
     }
 
     /// Process all projects in Deleting status

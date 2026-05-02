@@ -1,12 +1,14 @@
-use base64::Engine;
-use moka::sync::Cache;
-use rand::Rng;
-use sha2::{Digest, Sha256};
-use std::sync::Arc;
 use std::time::Duration;
 
+use anyhow::Result;
+use async_trait::async_trait;
+use base64::Engine;
+use rand::Rng;
+use sha2::{Digest, Sha256};
+use sqlx::PgPool;
+
 /// OAuth2 state data stored temporarily during the PKCE flow
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct OAuth2State {
     pub code_verifier: String,
     pub redirect_url: Option<String>,
@@ -21,7 +23,7 @@ pub struct OAuth2State {
 /// Completed auth session data for custom domain token exchange
 /// After IdP callback on main domain, this data is stored temporarily
 /// and retrieved by the custom domain to set cookies
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct CompletedAuthSession {
     /// The signed Rise JWT to set as cookie
     pub rise_jwt: String,
@@ -34,63 +36,63 @@ pub struct CompletedAuthSession {
 }
 
 /// Trait for storing and retrieving OAuth2 state tokens
+#[async_trait]
 pub trait TokenStore: Send + Sync {
     /// Save OAuth2 state with the given state token as the key
-    fn save(&self, state: String, data: OAuth2State);
+    async fn save(&self, state: String, data: OAuth2State) -> Result<()>;
 
-    /// Retrieve OAuth2 state by state token
-    fn get(&self, state: &str) -> Option<OAuth2State>;
+    /// Retrieve and consume OAuth2 state by state token (single-use)
+    async fn get(&self, state: &str) -> Result<Option<OAuth2State>>;
 
     /// Save completed auth session for custom domain token exchange
-    fn save_completed_session(&self, token: String, session: CompletedAuthSession);
+    async fn save_completed_session(
+        &self,
+        token: String,
+        session: CompletedAuthSession,
+    ) -> Result<()>;
 
     /// Retrieve and consume completed auth session by token
-    fn get_completed_session(&self, token: &str) -> Option<CompletedAuthSession>;
+    async fn get_completed_session(&self, token: &str) -> Result<Option<CompletedAuthSession>>;
 }
 
-/// In-memory implementation of TokenStore using Moka cache
-pub struct InMemoryTokenStore {
-    cache: Arc<Cache<String, OAuth2State>>,
-    completed_sessions: Arc<Cache<String, CompletedAuthSession>>,
+/// Database-backed implementation of TokenStore — safe to use in multi-replica deployments
+pub struct DbTokenStore {
+    pool: PgPool,
+    pkce_ttl: Duration,
+    session_ttl: Duration,
 }
 
-impl InMemoryTokenStore {
-    /// Create a new InMemoryTokenStore with the specified TTL
-    pub fn new(ttl: Duration) -> Self {
-        let cache = Cache::builder()
-            .time_to_live(ttl)
-            .max_capacity(10_000) // Prevent memory exhaustion from attacks
-            .build();
-
-        // Completed sessions have a shorter TTL (5 minutes) since they should be used immediately
-        let completed_sessions = Cache::builder()
-            .time_to_live(Duration::from_secs(300))
-            .max_capacity(10_000)
-            .build();
-
+impl DbTokenStore {
+    pub fn new(pool: PgPool) -> Self {
         Self {
-            cache: Arc::new(cache),
-            completed_sessions: Arc::new(completed_sessions),
+            pool,
+            pkce_ttl: Duration::from_secs(600),
+            session_ttl: Duration::from_secs(300),
         }
     }
 }
 
-impl TokenStore for InMemoryTokenStore {
-    fn save(&self, state: String, data: OAuth2State) {
-        self.cache.insert(state, data);
+#[async_trait]
+impl TokenStore for DbTokenStore {
+    async fn save(&self, state: String, data: OAuth2State) -> Result<()> {
+        crate::db::oauth_transient_state::insert(&self.pool, &state, &data, self.pkce_ttl).await
     }
 
-    fn get(&self, state: &str) -> Option<OAuth2State> {
-        self.cache.get(state)
+    async fn get(&self, state: &str) -> Result<Option<OAuth2State>> {
+        crate::db::oauth_transient_state::consume(&self.pool, state).await
     }
 
-    fn save_completed_session(&self, token: String, session: CompletedAuthSession) {
-        self.completed_sessions.insert(token, session);
+    async fn save_completed_session(
+        &self,
+        token: String,
+        session: CompletedAuthSession,
+    ) -> Result<()> {
+        crate::db::oauth_transient_state::insert(&self.pool, &token, &session, self.session_ttl)
+            .await
     }
 
-    fn get_completed_session(&self, token: &str) -> Option<CompletedAuthSession> {
-        // Remove and return (one-time use)
-        self.completed_sessions.remove(token)
+    async fn get_completed_session(&self, token: &str) -> Result<Option<CompletedAuthSession>> {
+        crate::db::oauth_transient_state::consume(&self.pool, token).await
     }
 }
 
@@ -169,55 +171,5 @@ mod tests {
         let state1 = generate_state_token();
         let state2 = generate_state_token();
         assert_ne!(state1, state2);
-    }
-
-    #[test]
-    fn test_token_store_save_and_get() {
-        let store = InMemoryTokenStore::new(Duration::from_secs(60));
-        let state = "test_state";
-        let data = OAuth2State {
-            code_verifier: "test_verifier".to_string(),
-            redirect_url: Some("https://example.com".to_string()),
-            project_name: None,
-            custom_domain_base_url: None,
-        };
-
-        store.save(state.to_string(), data.clone());
-        let retrieved = store.get(state);
-
-        assert!(retrieved.is_some());
-        let retrieved = retrieved.unwrap();
-        assert_eq!(retrieved.code_verifier, data.code_verifier);
-        assert_eq!(retrieved.redirect_url, data.redirect_url);
-    }
-
-    #[test]
-    fn test_token_store_get_nonexistent() {
-        let store = InMemoryTokenStore::new(Duration::from_secs(60));
-        let retrieved = store.get("nonexistent");
-        assert!(retrieved.is_none());
-    }
-
-    #[test]
-    fn test_token_store_ttl() {
-        let store = InMemoryTokenStore::new(Duration::from_millis(100));
-        let state = "test_state";
-        let data = OAuth2State {
-            code_verifier: "test_verifier".to_string(),
-            redirect_url: None,
-            project_name: None,
-            custom_domain_base_url: None,
-        };
-
-        store.save(state.to_string(), data);
-
-        // Should exist immediately
-        assert!(store.get(state).is_some());
-
-        // Wait for TTL to expire
-        std::thread::sleep(Duration::from_millis(150));
-
-        // Should be gone after TTL
-        assert!(store.get(state).is_none());
     }
 }

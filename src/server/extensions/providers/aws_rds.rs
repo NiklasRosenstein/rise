@@ -1335,6 +1335,8 @@ impl Extension for AwsRdsProvisioner {
             maintenance_window: self.maintenance_window.clone(),
         };
 
+        let holder_id = uuid::Uuid::new_v4();
+
         tokio::spawn(async move {
             info!(
                 "Starting AWS RDS extension reconciliation loop for type '{}'",
@@ -1345,6 +1347,26 @@ impl Extension for AwsRdsProvisioner {
             let mut error_state: HashMap<Uuid, (usize, DateTime<Utc>)> = HashMap::new();
 
             loop {
+                match crate::db::leader_leases::try_acquire(
+                    &provisioner.db_pool,
+                    "rise-ext-rds",
+                    holder_id,
+                    std::time::Duration::from_secs(60),
+                )
+                .await
+                {
+                    Ok(true) => {}
+                    Ok(false) => {
+                        tokio::time::sleep(std::time::Duration::from_secs(30)).await;
+                        continue;
+                    }
+                    Err(e) => {
+                        error!("Leader election error in RDS extension: {:?}", e);
+                        tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+                        continue;
+                    }
+                }
+
                 // List ALL project extensions of this type (across all projects)
                 match db_extensions::list_by_extension_type(
                     &provisioner.db_pool,

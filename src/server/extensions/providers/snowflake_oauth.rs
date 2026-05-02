@@ -1351,6 +1351,7 @@ Deletion removes all resources: Snowflake integration and OAuth extension.
 
     fn start(&self) {
         let provisioner = self.clone();
+        let holder_id = uuid::Uuid::new_v4();
 
         tokio::spawn(async move {
             info!("Starting Snowflake OAuth provisioner reconciliation loop");
@@ -1358,6 +1359,26 @@ Deletion removes all resources: Snowflake integration and OAuth extension.
             let mut error_state: HashMap<Uuid, (usize, DateTime<Utc>)> = HashMap::new();
 
             loop {
+                match crate::db::leader_leases::try_acquire(
+                    &provisioner.db_pool,
+                    "rise-ext-snowflake",
+                    holder_id,
+                    std::time::Duration::from_secs(60),
+                )
+                .await
+                {
+                    Ok(true) => {}
+                    Ok(false) => {
+                        sleep(std::time::Duration::from_secs(30)).await;
+                        continue;
+                    }
+                    Err(e) => {
+                        error!("Leader election error in Snowflake extension: {:?}", e);
+                        sleep(std::time::Duration::from_secs(5)).await;
+                        continue;
+                    }
+                }
+
                 match db_extensions::list_by_extension_type(
                     &provisioner.db_pool,
                     "snowflake-oauth-provisioner",
