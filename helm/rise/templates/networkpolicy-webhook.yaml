@@ -13,6 +13,15 @@ spec:
   policyTypes:
   - Ingress
   ingress:
+  # Allow traffic to the main HTTP port (e.g. from the Ingress controller)
+  - ports:
+    - port: {{ .Values.service.targetPort }}
+      protocol: TCP
+    {{- with .Values.networkPolicy.httpIngressFrom }}
+    from:
+      {{- toYaml . | nindent 4 }}
+    {{- end }}
+  # Allow metacontroller to reach the webhook port
   - ports:
     - port: {{ .Values.metacontroller.webhookPort | default 3001 }}
       protocol: TCP
