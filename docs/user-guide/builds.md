@@ -2,7 +2,7 @@
 
 Rise supports multiple build backends for creating container images from your application code. Building happens automatically as part of `rise deploy`, or you can build standalone with `rise build`.
 
-> **Note:** Rise currently targets `linux/amd64` exclusively. The `--platform linux/amd64` flag is added to build commands where supported.
+> **Note:** Rise defaults to `linux/amd64` for server compatibility. Override with `--platform`, `RISE_PLATFORM`, or `[build] platform` in `rise.toml`.
 
 ## Build Backends
 
@@ -58,8 +58,8 @@ rise deploy --backend docker:buildx
 
 ### How It Works
 
-- **`docker:build`**: Runs `docker build` with `--build-arg` for environment variables and `--platform linux/amd64`. Does not support SSL certificate injection.
-- **`docker:buildx`**: Runs `docker buildx build` via a managed BuildKit daemon. Adds `--platform linux/amd64` and uses `--load` (local) or `--push` (deploy). SSL certificates are injected by preprocessing the Dockerfile to add BuildKit bind mounts to each `RUN` step.
+- **`docker:build`**: Runs `docker build` with `--build-arg` for environment variables and `--platform` set to the configured target platform. Does not support SSL certificate injection.
+- **`docker:buildx`**: Runs `docker buildx build` via a managed BuildKit daemon. Adds `--platform` and uses `--load` (local) or `--push` (deploy). SSL certificates are injected by preprocessing the Dockerfile to add BuildKit bind mounts to each `RUN` step.
 
 ### Custom Dockerfile Path
 
@@ -188,6 +188,29 @@ Or in `rise.toml`:
 [build]
 no_cache = true
 ```
+
+## Target Platform
+
+By default, Rise builds for `linux/amd64` (the server architecture). Override this for local development on other architectures (e.g., ARM Macs):
+
+```bash
+rise build myapp:latest --platform linux/arm64
+```
+
+Or in `rise.toml`:
+
+```toml
+[build]
+platform = "linux/arm64"
+```
+
+Or via environment variable:
+
+```bash
+RISE_PLATFORM=linux/arm64 rise build myapp:latest
+```
+
+Precedence: `--platform` flag > `RISE_PLATFORM` env var > `rise.toml` > default (`linux/amd64`).
 
 ## SSL and Proxy
 

@@ -15,6 +15,7 @@ pub(crate) fn build_image_with_buildpacks(
     buildpacks: &[String],
     env: &[String],
     no_cache: bool,
+    platform: &str,
 ) -> Result<()> {
     // Check if pack CLI is available
     let pack_check = Command::new("pack").arg("version").output();
@@ -42,7 +43,7 @@ pub(crate) fn build_image_with_buildpacks(
         .arg("--builder")
         .arg(builder_image)
         .arg("--platform")
-        .arg("linux/amd64");
+        .arg(platform);
 
     // Add clear-cache flag if requested
     if no_cache {

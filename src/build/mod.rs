@@ -15,6 +15,11 @@ mod railpack;
 mod registry;
 mod ssl;
 
+/// Default target platform for container image builds.
+/// Rise server nodes run linux/amd64, so this is the default for compatibility.
+/// Users can override with `--platform`, `RISE_PLATFORM`, or `[build] platform` in rise.toml.
+pub const DEFAULT_PLATFORM: &str = "linux/amd64";
+
 pub use method::BuildArgs;
 pub(crate) use method::{BuildMethod, BuildOptions};
 pub(crate) use railpack::{build_with_buildctl, BuildctlFrontend, RailpackBuildOptions};
@@ -187,6 +192,7 @@ pub(crate) fn build_image(options: BuildOptions) -> Result<()> {
                 build_context: resolved_build_context.as_deref(),
                 build_contexts: &resolved_build_contexts,
                 no_cache: options.no_cache,
+                platform: &options.platform,
             })?;
         }
         BuildMethod::Pack => {
@@ -203,6 +209,7 @@ pub(crate) fn build_image(options: BuildOptions) -> Result<()> {
                 &options.buildpacks,
                 &options.env,
                 options.no_cache,
+                &options.platform,
             )?;
 
             // Pack doesn't support push during build, so push separately if requested
@@ -231,6 +238,7 @@ pub(crate) fn build_image(options: BuildOptions) -> Result<()> {
                 buildkit_host: buildkit_host.as_deref(),
                 env: &options.env,
                 no_cache: options.no_cache,
+                platform: &options.platform,
             })?;
         }
         BuildMethod::Buildctl => {
@@ -302,6 +310,7 @@ pub(crate) fn build_image(options: BuildOptions) -> Result<()> {
                 BuildctlFrontend::Dockerfile,
                 options.no_cache,
                 container_cli.command(),
+                &options.platform,
             )?;
 
             // Note: SslCertContext cleanup is automatic via RAII when it goes out of scope

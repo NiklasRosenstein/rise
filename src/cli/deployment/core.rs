@@ -588,8 +588,13 @@ pub async fn create_deployment(
             )
             .await?;
 
-            // Pull the source image for linux/amd64
-            if let Err(e) = build::docker_pull(&container_cli, source_image, "linux/amd64") {
+            // Pull the source image for the configured platform
+            let platform = deploy_opts
+                .build_args
+                .platform
+                .as_deref()
+                .unwrap_or(build::DEFAULT_PLATFORM);
+            if let Err(e) = build::docker_pull(&container_cli, source_image, platform) {
                 update_deployment_status(
                     http_client,
                     backend_url,

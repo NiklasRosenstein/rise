@@ -32,6 +32,7 @@ pub(crate) struct RailpackBuildOptions<'a> {
     pub buildkit_host: Option<&'a str>,
     pub env: &'a [String],
     pub no_cache: bool,
+    pub platform: &'a str,
 }
 
 /// RAII guard for cleaning up temp files and directories
@@ -201,6 +202,7 @@ pub(crate) fn build_image_with_railpacks(options: RailpackBuildOptions) -> Resul
             BuildctlFrontend::Railpack,
             options.no_cache,
             options.container_cli,
+            options.platform,
         )?;
     } else {
         build_with_buildx(
@@ -213,6 +215,7 @@ pub(crate) fn build_image_with_railpacks(options: RailpackBuildOptions) -> Resul
             options.buildkit_host,
             &all_secrets,
             options.no_cache,
+            options.platform,
         )?;
     }
 
@@ -231,6 +234,7 @@ fn build_with_buildx(
     buildkit_host: Option<&str>,
     secrets: &HashMap<String, String>,
     no_cache: bool,
+    platform: &str,
 ) -> Result<()> {
     // Check buildx availability
     if !super::docker::is_buildx_available(container_cli) {
@@ -262,7 +266,7 @@ fn build_with_buildx(
         .arg("-t")
         .arg(image_tag)
         .arg("--platform")
-        .arg("linux/amd64");
+        .arg(platform);
 
     // Use the managed builder if available
     if let Some(ref builder) = builder_name {
@@ -346,6 +350,7 @@ pub(crate) fn build_with_buildctl(
     frontend: BuildctlFrontend,
     no_cache: bool,
     container_cli: &str,
+    platform: &str,
 ) -> Result<()> {
     // Check buildctl availability
     let buildctl_check = Command::new("buildctl").arg("--version").output();
@@ -413,8 +418,8 @@ pub(crate) fn build_with_buildctl(
     // --output must be last: its value is the next positional arg
     if push {
         cmd.arg("--output").arg(format!(
-            "type=image,name={},push=true,platform=linux/amd64",
-            image_tag
+            "type=image,name={},push=true,platform={}",
+            image_tag, platform
         ));
 
         debug!("Executing command: {:?}", cmd);
@@ -427,8 +432,8 @@ pub(crate) fn build_with_buildctl(
         // Output as docker tar stream and pipe into `docker load` so the
         // image is available in the local Docker daemon.
         cmd.arg("--output").arg(format!(
-            "type=docker,name={},platform=linux/amd64",
-            image_tag
+            "type=docker,name={},platform={}",
+            image_tag, platform
         ));
         cmd.stdout(std::process::Stdio::piped());
 
