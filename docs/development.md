@@ -4,106 +4,102 @@
 
 - Docker and Docker Compose
 - Rust 1.91+
-- [mise](https://mise.jdx.dev/) - Task runner and tool version manager
-- [direnv](https://direnv.net/) (optional) - Auto-loads `.envrc`
+- [mise](https://mise.jdx.dev/) — task runner and tool version manager
+- [direnv](https://direnv.net/) (optional) — auto-loads `.envrc`
 
-## Development Stack
-
-### Docker Compose Services
-
-| Service | Port | Purpose |
-|---------|------|---------|
-| **postgres** | 5432 | PostgreSQL database |
-| **dex** | 5556 | OAuth2/OIDC provider |
-| **registry** | 5000 | Docker registry |
-| **registry-ui** | 5001 | Registry web UI |
-
-### Rise Backend
-
-Single process running HTTP API server + controllers (deployment, project, ECR) as concurrent tokio tasks. Controllers enabled automatically based on config.
-
-### Networking Setup
-
-For comprehensive networking setup including Docker registry configuration, BuildKit network connectivity, Minikube configuration, and troubleshooting, see the **[Local Development Networking Guide](local-development.md)**.
-
-Key topics covered:
-- Name resolution (/etc/hosts configuration)
-- Docker registry insecure access
-- BuildKit network connectivity (`RISE_MANAGED_BUILDKIT_NETWORK_NAME`)
-- Minikube host aliases and registry access
-- Common networking issues and solutions
-
-### Mise Tasks
-
-- `mise docs:serve` - Serve docs (port 3001)
-- `mise db:migrate` - Run migrations
-- `mise backend:deps` - Start docker-compose services
-- `mise backend:run` (alias: `mise br`) - Run backend
-- `mise setup:hosts` - Configure `/etc/hosts` entries (idempotent)
-- `mise setup:docker` - Configure Docker insecure registries (idempotent, skips if `/etc/docker` is unavailable)
-- `mise minikube:up` - Start Minikube with local registry
-- `mise minikube:down` - Stop and delete Minikube
-
-## Quick Start
+## First-Time Setup
 
 ```bash
+# Install mise-managed tools (minikube, helm, kubectl, etc.)
 mise install
-mise backend:run  # Starts services + backend
+
+# Configure /etc/hosts and Docker daemon (idempotent, requires sudo).
+# On WSL with Docker Desktop, setup:docker skips cleanly if /etc/docker is not present.
+mise setup:hosts
+mise setup:docker
+
+# Start a local Kubernetes cluster (pick one)
+mise minikube:up   # or: mise k3s:up
 ```
 
-Services: http://localhost:3000 (API, Web UI), localhost:5432 (PostgreSQL), http://localhost:5000 (Registry)
-
-### Registry Configuration for Local Development
-
-When using Docker Compose with Minikube, you may need different registry URLs for:
-- **Deployment controllers** (running in Minikube): `rise-registry:5000` (Docker internal network)
-- **CLI** (running on host): `localhost:5000` (host network)
-
-Configure this in `config/development.yaml`:
-
-```yaml
-registry:
-  type: "oci-client-auth"
-  registry_url: "rise-registry:5000"      # Internal URL for deployment controllers
-  namespace: "rise-apps/"
-  client_registry_url: "localhost:5000"   # Client-facing URL for CLI push operations
-```
-
-The `client_registry_url` is optional and defaults to `registry_url` if not specified. The API returns `client_registry_url` to CLI clients for push operations, while deployment controllers use `registry_url` for image references.
-
-### Build CLI
+## Day-to-Day
 
 ```bash
-cargo build --bin rise
+mise dev
 ```
 
-## Environment Variables
+This single command:
 
-`.envrc` (loaded by direnv): `DATABASE_URL`, `RISE_CONFIG_RUN_MODE`, `PATH`
+1. **Checks prerequisites** — verifies `/etc/hosts` entries, Docker daemon, and Kubernetes connectivity. If anything is missing it tells you exactly what to run.
+2. **Starts Docker Compose services** — PostgreSQL, Dex (OIDC), container registry.
+3. **Runs database migrations.**
+4. **Starts the Vite frontend dev server** (background).
+5. **Starts the backend server.**
 
-Server config in `config/development.yaml` (or `config/production.yaml` with `RISE_CONFIG_RUN_MODE=production`).
+Services are then available at:
+
+| Service | URL |
+|---------|-----|
+| Backend API + Web UI | <http://rise.local:3000> |
+| PostgreSQL | `localhost:5432` |
+| Container registry | `localhost:5000` |
+| Registry UI | <http://localhost:5001> |
+| Kubernetes ingress (HTTP) | `localhost:8080` |
+| Kubernetes ingress (HTTPS) | `localhost:8443` |
+
+### Running Components Individually
+
+```bash
+mise backend:run   # (alias: mise br) — starts deps + migrations + backend
+mise frontend:dev  # Vite dev server only
+```
+
+## Mise Tasks Reference
+
+### Checks (run automatically by `mise dev`)
+
+| Task | Purpose |
+|------|---------|
+| `check:hosts` | Verify `/etc/hosts` has `rise-registry` and `rise.local` |
+| `check:docker` | Verify Docker is running and insecure registries are configured |
+| `check:k8s` | Verify a Kubernetes cluster is reachable via `kubectl` |
+
+### Setup (one-time, idempotent)
+
+| Task | Purpose |
+|------|---------|
+| `setup:hosts` | Add `rise-registry` and `rise.local` to `/etc/hosts` |
+| `setup:docker` | Configure Docker daemon insecure registries |
+| `minikube:up` | Start Minikube with registry access and ingress port-forwarding |
+| `minikube:down` | Stop and delete Minikube |
+| `k3s:up` / `k3s:down` | Alternative: K3s instead of Minikube |
+
+### Development
+
+| Task | Purpose |
+|------|---------|
+| `dev` | Full dev stack (checks + services + frontend + backend) |
+| `backend:run` | Backend only (starts deps + migrates) |
+| `frontend:dev` | Vite frontend dev server |
+| `db:migrate` | Run database migrations |
+| `db:nuke` | Drop and recreate the database |
+| `docs:serve` | Serve mdbook docs (port 3001) |
+
+### CI / Quality
+
+| Task | Purpose |
+|------|---------|
+| `lint` | clippy + fmt check + sqlx check + helm lint |
+| `sqlx:prepare` | Regenerate SQLX offline query cache |
+| `sqlx:check` | Verify SQLX queries are valid |
+| `config:schema:generate` / `check` | Backend settings JSON schema |
+| `crd:generate` / `check` | CRD YAML from Rust definition |
 
 ## Development Workflow
 
-### Making Changes
+**Backend** — edit code, then restart with `mise backend:run`.
 
-**Backend:**
-```bash
-# Edit code
-mise backend:reload  # or: mise br
-```
-
-**Frontend (React + Vite):**
-```bash
-# Terminal 1
-mise backend:run
-
-# Terminal 2
-mise frontend:dev
-```
-
-Open the app at `http://rise.local:3000` during development. The backend proxies frontend routes to Vite (`http://localhost:5173`) when `server.frontend_dev_proxy_url` is configured.
-Run `mise setup:hosts` to add `rise.local` to `/etc/hosts` if needed.
+**Frontend** — Vite hot-reloads automatically. The backend proxies frontend routes to `http://localhost:5173` when `server.frontend_dev_proxy_url` is configured.
 
 **CLI:**
 ```bash
@@ -111,75 +107,93 @@ cargo build --bin rise
 rise <command>
 ```
 
-**Schema:**
+**Database schema:**
 ```bash
 sqlx migrate add <migration_name>
-# Edit migration in migrations/
+# Edit the new migration in migrations/
 sqlx migrate run
-cargo sqlx prepare  # Update query cache
+cargo sqlx prepare   # update offline query cache, commit the result
 ```
 
-## Local Kubernetes Development
+## Registry Configuration
 
-For testing the Kubernetes controller locally, use Minikube:
+The local setup uses two registry URLs:
 
-```bash
-mise minikube:up
+- **`rise-registry:5000`** — used by deployment controllers (inside Docker/Kubernetes networks)
+- **`localhost:5000`** — used by the CLI on the host for push operations
+
+This is configured in `config/development.yaml`:
+
+```yaml
+registry:
+  type: "oci-client-auth"
+  registry_url: "rise-registry:5000"
+  namespace: "rise-apps/"
+  client_registry_url: "localhost:5000"
 ```
 
-This starts a local Kubernetes cluster with an embedded container registry. The backend will automatically deploy applications to Minikube when configured for Kubernetes.
+## Environment Variables
 
-For installation and advanced usage, see the [Minikube documentation](https://minikube.sigs.k8s.io/docs/start/).
+`.envrc` (loaded by direnv) sets: `DATABASE_URL`, `RISE_CONFIG_RUN_MODE`, `RISE_MANAGED_BUILDKIT_*`, and `PATH`.
 
-### Accessing Database
+Server configuration lives in `config/development.yaml`.
 
-```bash
-# Using psql
-docker-compose exec postgres psql -U rise -d rise
+## Default Credentials
 
-# Or connection string
-psql postgres://rise:rise123@localhost:5432/rise
+| Service | Credentials |
+|---------|-------------|
+| PostgreSQL | `postgres://rise:rise123@localhost:5432/rise` |
+| Dex (OIDC) | `admin@example.com`, `dev@example.com`, `user@example.com` — password: `password` |
+
+## Networking Overview
+
+```
+Host Machine (127.0.0.1)
+├── rise.local:3000     → Rise Backend
+├── localhost:5173      → Vite dev server
+├── localhost:8080/8443 → K8s ingress (port-forward or hostPort)
+│
+├── Docker network: rise_default
+│   ├── rise-postgres       (5432)
+│   ├── rise-dex            (5556)
+│   ├── rise-registry       (5000)
+│   ├── rise-buildkit       (managed, joins this network)
+│   └── minikube node       (connected to this network)
+│
+└── Kubernetes cluster
+    └── Pods pull from rise-registry:5000 via network connectivity
 ```
 
-### Default Credentials
-
-**PostgreSQL:** `postgres://rise:rise123@localhost:5432/rise`
-
-**Dex:** `admin@example.com` / `dev@example.com` / `user@example.com` and `password`
-
-## Code Style
-
-- Avoid over-engineering; add abstractions only when needed
-- Use `anyhow::Result` for application code, typed errors only when callers need specific handling
-- Document non-obvious behavior and rationale
-- Update docs when adding features
-
-## Testing
-
-```bash
-cargo test
-```
-
-## Commit Messages
-
-Use conventional commits: `feat:`, `fix:`, `docs:`, `refactor:`
-
-## Deprecated API Endpoints
-
-Endpoints listed here are kept for backward compatibility with older CLI versions. They should be removed in a future major release once all clients have migrated.
-
-| Endpoint | Replacement | Deprecated in | Reason |
-|----------|-------------|---------------|--------|
-| `PATCH /api/v1/deployments/{deployment_id}/status` | `PATCH /api/v1/projects/{project_name}/deployments/{deployment_id}/status` | v0.18.0 | `deployment_id` is not globally unique — two projects can share the same timestamp-based ID, causing status updates to hit the wrong deployment |
+- BuildKit connects to the `rise_default` Docker network (via `RISE_MANAGED_BUILDKIT_NETWORK_NAME`) so it can push to `rise-registry:5000`.
+- Minikube joins the same network so pods can pull images.
+- Deployed apps reach the backend via `host.minikube.internal:3000` (Minikube) or the node IP (K3s).
 
 ## Troubleshooting
 
-See [Troubleshooting](user-guide/troubleshooting.md) for common issues.
+**`http: server gave HTTP response to HTTPS client`** — insecure registries not configured. Run `mise setup:docker`.
+
+**BuildKit can't push to registry** — verify `RISE_MANAGED_BUILDKIT_NETWORK_NAME=rise_default` is set in your environment (should be in `.envrc`).
+
+**OAuth redirects fail** — ensure `rise.local` is in `/etc/hosts` (`mise check:hosts` will tell you).
+
+**Minikube pods `ImagePullBackOff`** — verify registry access from inside Minikube:
+```bash
+minikube ssh -- curl http://rise-registry:5000/v2/
+# Should return: {}
+```
+If it fails, re-run `mise minikube:up`.
 
 **Reset everything:**
 ```bash
-docker-compose down -v
+docker compose down -v
 cargo clean
 mise install
-mise backend:run
+mise dev
+```
+
+## Accessing the Database
+
+```bash
+docker compose exec postgres psql -U rise -d rise
+# or: psql postgres://rise:rise123@localhost:5432/rise
 ```
