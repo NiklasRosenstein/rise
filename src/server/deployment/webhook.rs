@@ -103,6 +103,8 @@ const DEPLOYING_TIMEOUT_MINUTES: i64 = 5;
 const PRE_PUSHED_TIMEOUT_MINUTES: i64 = 10;
 /// Duration after which image pull secret is refreshed (6 hours)
 const SECRET_REFRESH_HOURS: i64 = 6;
+/// Maximum number of terminating/terminated pods to carry forward in controller_metadata
+const MAX_INACTIVE_PODS: usize = 5;
 
 #[derive(Debug, Default)]
 struct ResolvedDeploymentEnvVars {
@@ -753,6 +755,7 @@ async fn check_pod_errors_via_kube(
 
     // Carry forward pods that were terminating/terminated in the previous snapshot
     // but are no longer in the K8s pod list — mark them as fully terminated.
+    // Keep at most MAX_INACTIVE_PODS inactive (terminating + terminated) pods total.
     if let Some(prev_pods) = prev_controller_metadata
         .get("pod_status")
         .and_then(|ps| ps.get("pods"))
@@ -763,7 +766,20 @@ async fn check_pod_errors_via_kube(
             .filter_map(|p| p.get("name").and_then(|n| n.as_str()).map(String::from))
             .collect();
 
+        // Count live terminating pods already in the list
+        let mut inactive_count = pod_infos
+            .iter()
+            .filter(|p| {
+                p.get("terminating")
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(false)
+            })
+            .count();
+
         for prev_pod in prev_pods {
+            if inactive_count >= MAX_INACTIVE_PODS {
+                break;
+            }
             let was_terminating = prev_pod
                 .get("terminating")
                 .and_then(|v| v.as_bool())
@@ -785,6 +801,7 @@ async fn check_pod_errors_via_kube(
                     obj.insert("terminated".to_string(), serde_json::Value::Bool(true));
                 }
                 pod_infos.push(carried);
+                inactive_count += 1;
             }
         }
     }

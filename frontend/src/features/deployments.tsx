@@ -1298,7 +1298,7 @@ function PodStatusSection({ podStatus }: { podStatus: PodStatus }) {
                 <div className="flex items-center justify-between">
                     <span>Pods: {podStatus.ready_replicas}/{podStatus.desired_replicas} ready</span>
                     <span className="text-xs" style={{ color: 'var(--mono-muted)' }}>
-                        {podStatus.current_replicas} total{inactivePods.length > 0 && ` (+${inactivePods.length} shutting down)`}
+                        {activePods.length} active{inactivePods.length > 0 && ` (+${inactivePods.length} previous)`}
                     </span>
                 </div>
             </div>
@@ -1308,7 +1308,7 @@ function PodStatusSection({ podStatus }: { podStatus: PodStatus }) {
                 <div className="border border-solid" style={{ borderColor: borderColors[tone], background: tone === 'ok' ? '#0a1210' : '#1a1212' }}>
                     <div className="p-3" style={{ borderBottom: `1px solid ${borderColors[tone]}` }}>
                         <h5 className="text-xs font-semibold" style={{ color: headerColors[tone] }}>
-                            Pods ({activePods.length})
+                            Active ({activePods.length})
                         </h5>
                     </div>
                     <div>
