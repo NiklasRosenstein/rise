@@ -23,6 +23,22 @@ mod server;
 #[cfg(feature = "cli")]
 use cli::*;
 
+/// Resolve environment from explicit flag or the `default = true` environment in rise.toml.
+#[cfg(feature = "cli")]
+fn resolve_environment(
+    explicit: Option<String>,
+    config: Option<&build::config::ProjectBuildConfig>,
+) -> Option<String> {
+    explicit.or_else(|| {
+        config.and_then(|cfg| {
+            cfg.environments
+                .iter()
+                .find(|(_, env)| env.default)
+                .map(|(name, _)| name.clone())
+        })
+    })
+}
+
 /// Resolve project name from explicit argument or rise.toml fallback.
 #[cfg(feature = "cli")]
 fn resolve_project_name(explicit_project: Option<String>, path: &str) -> Result<String> {
@@ -208,6 +224,9 @@ enum Commands {
         /// Path to the directory containing the application
         #[arg(default_value = ".")]
         path: String,
+        /// Target environment (e.g., 'staging'). Resolved from rise.toml if not specified.
+        #[arg(long, short = 'E')]
+        environment: Option<String>,
         /// HTTP port the application listens on (also sets PORT env var)
         #[arg(long, default_value = "8080")]
         http_port: u16,
@@ -613,6 +632,19 @@ enum EnvCommands {
         /// Lines starting with # are comments
         file: std::path::PathBuf,
         /// Scope imported variables to a specific environment
+        #[arg(long, short = 'E')]
+        environment: Option<String>,
+    },
+    /// Export resolved environment variables in dotfile format (KEY=value)
+    #[command(visible_alias = "x")]
+    Export {
+        /// Project name (optional if rise.toml contains [project] section)
+        #[arg(long, short = 'p')]
+        project: Option<String>,
+        /// Path to rise.toml (defaults to current directory)
+        #[arg(long, default_value = ".")]
+        path: String,
+        /// Target environment (e.g., 'staging'). Resolved from rise.toml if not specified.
         #[arg(long, short = 'E')]
         environment: Option<String>,
     },
@@ -1177,14 +1209,8 @@ async fn main() -> Result<()> {
 
                 // Resolve environment: explicit --environment flag takes precedence,
                 // otherwise fall back to the `default = true` environment from rise.toml.
-                let resolved_environment = args.environment.clone().or_else(|| {
-                    toml_config.as_ref().and_then(|cfg| {
-                        cfg.environments
-                            .iter()
-                            .find(|(_, env)| env.default)
-                            .map(|(name, _)| name.clone())
-                    })
-                });
+                let resolved_environment =
+                    resolve_environment(args.environment.clone(), toml_config.as_ref());
 
                 // Collect runtime env overrides with source tracking.
                 // All toml vars are sent tagged with for_environment; the server
@@ -1566,6 +1592,28 @@ async fn main() -> Result<()> {
                     )
                     .await?;
                 }
+                EnvCommands::Export {
+                    project,
+                    path,
+                    environment,
+                } => {
+                    let toml_config = build::config::load_full_project_config(path)?;
+                    let project_name = resolve_project_name_with_config(
+                        project.clone(),
+                        path,
+                        toml_config.as_ref(),
+                    )?;
+                    let resolved_env =
+                        resolve_environment(environment.clone(), toml_config.as_ref());
+                    env::export_env(
+                        &http_client,
+                        &backend_url,
+                        &token,
+                        &project_name,
+                        resolved_env.as_deref(),
+                    )
+                    .await?;
+                }
                 EnvCommands::ShowDeployment {
                     project,
                     path,
@@ -1695,12 +1743,17 @@ async fn main() -> Result<()> {
             project,
             use_project_env,
             path,
+            environment,
             http_port,
             expose,
             run_env,
             build_args,
         } => {
             let expose_port = expose.unwrap_or(*http_port);
+
+            // Resolve environment from --environment flag or rise.toml default
+            let toml_config = build::config::load_full_project_config(path)?;
+            let resolved_env = resolve_environment(environment.clone(), toml_config.as_ref());
 
             cli::run::run_locally(
                 &http_client,
@@ -1709,6 +1762,7 @@ async fn main() -> Result<()> {
                     project_name: project.as_deref(),
                     use_project_env: *use_project_env,
                     path,
+                    environment: resolved_env.as_deref(),
                     http_port: *http_port,
                     expose: expose_port,
                     run_env,

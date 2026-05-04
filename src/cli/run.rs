@@ -14,6 +14,7 @@ pub struct RunOptions<'a> {
     pub project_name: Option<&'a str>,
     pub use_project_env: bool,
     pub path: &'a str,
+    pub environment: Option<&'a str>,
     pub http_port: u16,
     pub expose: u16,
     pub run_env: &'a [(String, String)],
@@ -107,6 +108,7 @@ pub async fn run_locally(
                     &token,
                     project_name,
                     "default",
+                    options.environment,
                 )
                 .await
                 {
