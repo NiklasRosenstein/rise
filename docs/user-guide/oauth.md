@@ -348,7 +348,7 @@ GET /oidc/{project}/{extension}/authorize?redirect_uri=http://localhost:3000/cal
 
 **Query Parameters:**
 - `code_challenge` (optional): PKCE code challenge (base64url-encoded SHA-256 hash of code_verifier)
-- `code_challenge_method` (optional): `S256` (default) or `plain`
+- `code_challenge_method` (optional): Only `S256` is supported (and is the default)
 - `redirect_uri` (optional): Where to redirect after OAuth (localhost or project domain)
 - `state` (optional): Application state passed through OAuth flow
 

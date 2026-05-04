@@ -120,7 +120,7 @@ pub struct OAuthCodeState {
     /// PKCE code challenge from client (if PKCE flow)
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub code_challenge: Option<String>,
-    /// PKCE code challenge method ("S256" or "plain")
+    /// PKCE code challenge method (only "S256" is supported)
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub code_challenge_method: Option<String>,
     /// Raw encrypted token response body from upstream provider (cached as-is, no parsing)
@@ -140,7 +140,7 @@ pub struct AuthorizeFlowQuery {
     pub state: Option<String>,
     /// PKCE code challenge (for public clients/SPAs)
     pub code_challenge: Option<String>,
-    /// PKCE code challenge method ("S256" or "plain", defaults to "S256")
+    /// PKCE code challenge method (only "S256" is supported, defaults to "S256")
     pub code_challenge_method: Option<String>,
 }
 
