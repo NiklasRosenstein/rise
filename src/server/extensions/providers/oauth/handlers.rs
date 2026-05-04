@@ -627,7 +627,7 @@ pub async fn callback(
         &state.db_pool,
         &req.state,
         Uuid::new_v4(),
-        StdDuration::from_secs(60),
+        oauth_transient_state::CLAIM_GRACE_TTL,
     )
     .await
     .map_err(|e| {
@@ -850,13 +850,12 @@ pub async fn callback(
                 .query_pairs_mut()
                 .append_pair("error", "oauth_token_exchange_failed");
 
-            claimed_state.finalize().await.map_err(|e| {
-                error!("Failed to finalize OAuth callback state: {:?}", e);
-                (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    "OAuth callback failed".to_string(),
-                )
-            })?;
+            if let Err(e) = claimed_state.finalize().await {
+                warn!(
+                    "Failed to finalize OAuth callback state (response already built, row will expire via TTL): {:?}",
+                    e
+                );
+            }
             return Ok(Redirect::to(redirect_url.as_str()).into_response());
         }
 
@@ -896,13 +895,12 @@ pub async fn callback(
             )
         })?;
 
-        claimed_state.finalize().await.map_err(|e| {
-            error!("Failed to finalize OAuth callback state: {:?}", e);
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "OAuth callback failed".to_string(),
-            )
-        })?;
+        if let Err(e) = claimed_state.finalize().await {
+            warn!(
+                "Failed to finalize OAuth callback state (response already built, row will expire via TTL): {:?}",
+                e
+            );
+        }
         Ok(Redirect::to(redirect_url.as_str()).into_response())
     } else {
         // ===== REAL FLOW: Cache raw token response (no parsing) =====
@@ -1039,13 +1037,12 @@ pub async fn callback(
             redirect_url.as_str()
         );
 
-        claimed_state.finalize().await.map_err(|e| {
-            error!("Failed to finalize OAuth callback state: {:?}", e);
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "OAuth callback failed".to_string(),
-            )
-        })?;
+        if let Err(e) = claimed_state.finalize().await {
+            warn!(
+                "Failed to finalize OAuth callback state (response already built, row will expire via TTL): {:?}",
+                e
+            );
+        }
         Ok(Redirect::to(redirect_url.as_str()).into_response())
     }
 }
@@ -1426,7 +1423,7 @@ async fn handle_authorization_code_grant(
         &state.db_pool,
         &code,
         Uuid::new_v4(),
-        StdDuration::from_secs(60),
+        oauth_transient_state::CLAIM_GRACE_TTL,
     )
     .await
     .map_err(|e| {

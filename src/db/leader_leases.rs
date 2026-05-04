@@ -9,11 +9,15 @@ use uuid::Uuid;
 
 const MIN_HEARTBEAT_INTERVAL: Duration = Duration::from_millis(100);
 
-struct TaskGuard(JoinHandle<()>);
+struct TaskGuard {
+    task: JoinHandle<()>,
+    is_leader: Arc<AtomicBool>,
+}
 
 impl Drop for TaskGuard {
     fn drop(&mut self) {
-        self.0.abort();
+        self.task.abort();
+        self.is_leader.store(false, Ordering::Release);
     }
 }
 
@@ -41,6 +45,8 @@ impl LeaderElection {
         let pool_bg = pool.clone();
         let name_bg = name.to_string();
 
+        let is_leader_guard = Arc::clone(&is_leader);
+
         let task = tokio::spawn(async move {
             run_election_loop(pool_bg, name_bg, holder_id, lease_duration, is_leader_bg).await;
         });
@@ -50,7 +56,10 @@ impl LeaderElection {
             pool,
             name: name.to_string(),
             holder_id,
-            _task: Arc::new(TaskGuard(task)),
+            _task: Arc::new(TaskGuard {
+                task,
+                is_leader: is_leader_guard,
+            }),
         }
     }
 

@@ -1373,13 +1373,12 @@ pub async fn oauth_callback(
                 complete_url
             );
 
-            claimed_state.finalize().await.map_err(|e| {
-                tracing::error!("Failed to finalize PKCE state: {:?}", e);
-                (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    "Failed to complete authentication".to_string(),
-                )
-            })?;
+            if let Err(e) = claimed_state.finalize().await {
+                tracing::warn!(
+                    "Failed to finalize PKCE state (response already built, row will expire via TTL): {:?}",
+                    e
+                );
+            }
             return Ok(Redirect::to(&complete_url).into_response());
         }
 
@@ -1391,13 +1390,12 @@ pub async fn oauth_callback(
         );
 
         let response = render_success_page(&state, project, &redirect_url, &cookie).await?;
-        claimed_state.finalize().await.map_err(|e| {
-            tracing::error!("Failed to finalize PKCE state: {:?}", e);
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "Failed to complete authentication".to_string(),
-            )
-        })?;
+        if let Err(e) = claimed_state.finalize().await {
+            tracing::warn!(
+                "Failed to finalize PKCE state (response already built, row will expire via TTL): {:?}",
+                e
+            );
+        }
         return Ok(response);
     }
 
@@ -1472,13 +1470,12 @@ pub async fn oauth_callback(
 
     // Use success page with delayed redirect to ensure cookie is properly persisted
     let response = render_ui_login_success_page(&state, &redirect_url, &cookie).await?;
-    claimed_state.finalize().await.map_err(|e| {
-        tracing::error!("Failed to finalize PKCE state: {:?}", e);
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            "Failed to complete authentication".to_string(),
-        )
-    })?;
+    if let Err(e) = claimed_state.finalize().await {
+        tracing::warn!(
+            "Failed to finalize PKCE state (response already built, row will expire via TTL): {:?}",
+            e
+        );
+    }
     Ok(response)
 }
 
@@ -1677,13 +1674,12 @@ pub async fn oauth_complete(
         &cookie,
     )
     .await?;
-    claimed_session.finalize().await.map_err(|e| {
-        tracing::error!("Failed to finalize completed session: {:?}", e);
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            "Failed to complete authentication".to_string(),
-        )
-    })?;
+    if let Err(e) = claimed_session.finalize().await {
+        tracing::warn!(
+            "Failed to finalize completed session (response already built, row will expire via TTL): {:?}",
+            e
+        );
+    }
     Ok(response)
 }
 

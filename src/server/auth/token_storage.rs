@@ -88,7 +88,7 @@ impl TokenStore for DbTokenStore {
             &self.pool,
             state,
             uuid::Uuid::new_v4(),
-            Duration::from_secs(60),
+            crate::db::oauth_transient_state::CLAIM_GRACE_TTL,
         )
         .await
     }
@@ -110,7 +110,7 @@ impl TokenStore for DbTokenStore {
             &self.pool,
             token,
             uuid::Uuid::new_v4(),
-            Duration::from_secs(60),
+            crate::db::oauth_transient_state::CLAIM_GRACE_TTL,
         )
         .await
     }

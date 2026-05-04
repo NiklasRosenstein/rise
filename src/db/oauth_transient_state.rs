@@ -1,5 +1,9 @@
 use std::time::Duration;
 
+/// Grace period given to a claimant to finalize or release claimed state.
+/// After this duration the claim expires and the row becomes claimable again.
+pub const CLAIM_GRACE_TTL: Duration = Duration::from_secs(60);
+
 use anyhow::Result;
 use serde::{de::DeserializeOwned, Serialize};
 use sqlx::PgPool;
