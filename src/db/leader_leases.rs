@@ -201,6 +201,10 @@ async fn is_held_db(pool: &PgPool, name: &str, holder_id: Uuid) -> Result<bool> 
 mod tests {
     use super::*;
 
+    /// Generous wait for the background task to complete its first DB round-trip.
+    /// 100ms was too tight under CI load (all 300+ tests share the DB).
+    const ACQUIRE_WAIT: Duration = Duration::from_millis(500);
+
     #[sqlx::test]
     async fn is_leader_starts_false_then_becomes_true(pool: PgPool) -> Result<()> {
         let election = LeaderElection::spawn(
@@ -213,7 +217,7 @@ mod tests {
             !election.is_leader(),
             "should be false before first acquisition"
         );
-        tokio::time::sleep(Duration::from_millis(100)).await;
+        tokio::time::sleep(ACQUIRE_WAIT).await;
         assert!(
             election.is_leader(),
             "should be true after background task acquires"
@@ -229,7 +233,7 @@ mod tests {
             Uuid::new_v4(),
             Duration::from_millis(1500),
         );
-        tokio::time::sleep(Duration::from_millis(100)).await;
+        tokio::time::sleep(ACQUIRE_WAIT).await;
         assert!(first.is_leader());
 
         let second = LeaderElection::spawn(
@@ -238,7 +242,7 @@ mod tests {
             Uuid::new_v4(),
             Duration::from_millis(1500),
         );
-        tokio::time::sleep(Duration::from_millis(100)).await;
+        tokio::time::sleep(ACQUIRE_WAIT).await;
         assert!(
             !second.is_leader(),
             "second should not acquire while first holds"
@@ -252,22 +256,22 @@ mod tests {
             pool.clone(),
             "rise-test-lease",
             Uuid::new_v4(),
-            Duration::from_millis(800),
+            Duration::from_millis(1500),
         );
-        tokio::time::sleep(Duration::from_millis(100)).await;
+        tokio::time::sleep(ACQUIRE_WAIT).await;
         assert!(first.is_leader());
 
-        drop(first); // aborts heartbeat; lease expires within 800ms
+        drop(first); // aborts heartbeat; lease expires within 1500ms
 
-        tokio::time::sleep(Duration::from_millis(900)).await;
+        tokio::time::sleep(Duration::from_millis(1600)).await;
 
         let second = LeaderElection::spawn(
             pool.clone(),
             "rise-test-lease",
             Uuid::new_v4(),
-            Duration::from_millis(800),
+            Duration::from_millis(1500),
         );
-        tokio::time::sleep(Duration::from_millis(100)).await;
+        tokio::time::sleep(ACQUIRE_WAIT).await;
         assert!(
             second.is_leader(),
             "second should acquire after first's lease expires"
@@ -289,7 +293,7 @@ mod tests {
             Uuid::new_v4(),
             Duration::from_millis(1500),
         );
-        tokio::time::sleep(Duration::from_millis(100)).await;
+        tokio::time::sleep(ACQUIRE_WAIT).await;
 
         assert!(holder.is_leader());
         assert!(!non_holder.is_leader());
@@ -308,13 +312,13 @@ mod tests {
             pool.clone(),
             "rise-test-lease",
             Uuid::new_v4(),
-            Duration::from_millis(600),
+            Duration::from_millis(1500),
         );
-        tokio::time::sleep(Duration::from_millis(100)).await;
+        tokio::time::sleep(ACQUIRE_WAIT).await;
         assert!(election.is_leader());
 
         // Wait longer than the lease TTL — heartbeat should keep it alive
-        tokio::time::sleep(Duration::from_millis(900)).await;
+        tokio::time::sleep(Duration::from_millis(2000)).await;
         assert!(
             election.is_leader(),
             "heartbeat should have renewed the lease"
