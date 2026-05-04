@@ -103,8 +103,20 @@ fi
 
 # Determine commit range
 if [ -z "$COMMIT_RANGE" ]; then
-    # Get the previous tag
-    PREV_TAG=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")
+    # Check if this is a full release (no prerelease suffix like -rc1, -beta.2, etc.)
+    IS_FULL_RELEASE=false
+    if ! [[ "$VERSION" =~ - ]]; then
+        IS_FULL_RELEASE=true
+    fi
+
+    if [ "$IS_FULL_RELEASE" = true ]; then
+        # For full releases, find the previous full version tag (skip prereleases)
+        # so the changelog covers everything since the last stable release.
+        PREV_TAG=$(git tag -l 'v*' --sort=-version:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | head -n 1)
+    else
+        # For prereleases, use the most recent tag of any kind
+        PREV_TAG=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")
+    fi
 
     if [ -z "$PREV_TAG" ]; then
         echo "No previous tag found, using all commits"
