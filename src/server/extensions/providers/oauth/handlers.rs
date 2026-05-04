@@ -1775,6 +1775,13 @@ pub async fn oidc_discovery(
                                 discovery_obj.insert(key.clone(), value.clone());
                             }
                         }
+
+                        // Override code_challenge_methods_supported to only advertise S256,
+                        // regardless of what the upstream provider supports.
+                        discovery_obj.insert(
+                            "code_challenge_methods_supported".to_string(),
+                            serde_json::json!(["S256"]),
+                        );
                     }
                 }
             }
