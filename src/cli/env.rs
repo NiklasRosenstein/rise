@@ -88,11 +88,15 @@ pub async fn fetch_preview_env_vars(
     token: &str,
     project: &str,
     deployment_group: &str,
+    environment: Option<&str>,
 ) -> Result<(Vec<(String, String)>, Vec<String>)> {
-    let url = format!(
+    let mut url = format!(
         "{}/api/v1/projects/{}/env/preview?deployment_group={}",
         backend_url, project, deployment_group
     );
+    if let Some(env_name) = environment {
+        url.push_str(&format!("&environment={}", urlencoding::encode(env_name)));
+    }
 
     let response = http_client
         .get(&url)
@@ -609,6 +613,45 @@ pub async fn list_deployment_env(
     println!("Deployment: {}", deployment_id);
     println!("Note: Secret values are always masked for security");
     println!("Note: Deployment environment variables are read-only snapshots");
+
+    Ok(())
+}
+
+/// Export environment variables in dotfile format (KEY=value per line).
+///
+/// Output goes to stdout for clean piping (`rise env export > .env` or
+/// `eval $(rise env export)`). Warnings about protected secrets go to stderr.
+pub async fn export_env(
+    http_client: &Client,
+    backend_url: &str,
+    token: &str,
+    project: &str,
+    environment: Option<&str>,
+) -> Result<()> {
+    let (loadable_vars, protected_keys) = fetch_preview_env_vars(
+        http_client,
+        backend_url,
+        token,
+        project,
+        "default",
+        environment,
+    )
+    .await?;
+
+    if !protected_keys.is_empty() {
+        eprintln!(
+            "warning: {} protected secret{} excluded (cannot be exported):",
+            protected_keys.len(),
+            if protected_keys.len() == 1 { "" } else { "s" }
+        );
+        for key in &protected_keys {
+            eprintln!("  - {}", key);
+        }
+    }
+
+    for (key, value) in &loadable_vars {
+        println!("{}={}", key, value);
+    }
 
     Ok(())
 }
