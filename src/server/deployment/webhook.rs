@@ -625,7 +625,10 @@ async fn check_pod_errors_via_kube(
     let mut current_replicas: i32 = 0;
 
     for pod in &pods.items {
-        current_replicas += 1;
+        let is_terminating = pod.metadata.deletion_timestamp.is_some();
+        if !is_terminating {
+            current_replicas += 1;
+        }
         let pod_name = pod
             .metadata
             .name
@@ -670,8 +673,11 @@ async fn check_pod_errors_via_kube(
                 let state_info = if let Some(state) = &cs.state {
                     if let Some(waiting) = &state.waiting {
                         let reason = waiting.reason.as_deref().unwrap_or("");
-                        // Check for irrecoverable errors
-                        if !has_error && IRRECOVERABLE_CONTAINER_REASONS.contains(&reason) {
+                        // Check for irrecoverable errors (skip for terminating pods)
+                        if !is_terminating
+                            && !has_error
+                            && IRRECOVERABLE_CONTAINER_REASONS.contains(&reason)
+                        {
                             has_error = true;
                             let message = waiting.message.as_deref().unwrap_or(reason);
                             error_message = Some(format!("{}: {}", reason, message));
@@ -687,8 +693,12 @@ async fn check_pod_errors_via_kube(
                             "reason": running.started_at.as_ref().map(|t| t.0.to_string()),
                         }))
                     } else if let Some(terminated) = &state.terminated {
-                        // Check terminated with too many restarts
-                        if !has_error && terminated.exit_code != 0 && cs.restart_count >= 3 {
+                        // Check terminated with too many restarts (skip for terminating pods)
+                        if !is_terminating
+                            && !has_error
+                            && terminated.exit_code != 0
+                            && cs.restart_count >= 3
+                        {
                             has_error = true;
                             let reason = terminated.reason.as_deref().unwrap_or("ContainerFailed");
                             let default_msg = format!("Exit code: {}", terminated.exit_code);
@@ -723,6 +733,7 @@ async fn check_pod_errors_via_kube(
         pod_infos.push(serde_json::json!({
             "name": pod_name,
             "phase": pod_phase,
+            "terminating": is_terminating,
             "conditions": conditions,
             "containers": container_infos,
         }));
