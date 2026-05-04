@@ -471,9 +471,15 @@ async fn check_deployment_health_from_observed(
 
     // Check for pod-level errors and collect full pod status via kube-rs
     // (Metacontroller only gives us the Deployment, not individual pods)
-    let pod_check =
-        check_pod_errors_via_kube(state, project, deployment, desired_replicas, ready_replicas)
-            .await;
+    let pod_check = check_pod_errors_via_kube(
+        state,
+        project,
+        deployment,
+        desired_replicas,
+        ready_replicas,
+        &deployment.controller_metadata,
+    )
+    .await;
 
     // Update controller_metadata with pod status
     if let Some(ref pod_status) = pod_check.pod_status {
@@ -567,12 +573,18 @@ struct PodCheckResult {
 }
 
 /// Check pods for errors via direct kube-rs API call and collect full pod status.
+///
+/// Compares the live pod list against the previous `controller_metadata` snapshot:
+/// pods that were `terminating` or `terminated` in the previous snapshot but no longer
+/// exist in K8s are carried forward as `terminated: true` so the frontend can show
+/// their last-known state instead of silently dropping them.
 async fn check_pod_errors_via_kube(
     state: &AppState,
     project: &Project,
     deployment: &Deployment,
     desired_replicas: i32,
     ready_replicas: i32,
+    prev_controller_metadata: &serde_json::Value,
 ) -> PodCheckResult {
     let kube_client = match &state.kube_client {
         Some(client) => client,
@@ -737,6 +749,44 @@ async fn check_pod_errors_via_kube(
             "conditions": conditions,
             "containers": container_infos,
         }));
+    }
+
+    // Carry forward pods that were terminating/terminated in the previous snapshot
+    // but are no longer in the K8s pod list — mark them as fully terminated.
+    if let Some(prev_pods) = prev_controller_metadata
+        .get("pod_status")
+        .and_then(|ps| ps.get("pods"))
+        .and_then(|p| p.as_array())
+    {
+        let live_pod_names: std::collections::HashSet<String> = pod_infos
+            .iter()
+            .filter_map(|p| p.get("name").and_then(|n| n.as_str()).map(String::from))
+            .collect();
+
+        for prev_pod in prev_pods {
+            let was_terminating = prev_pod
+                .get("terminating")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
+            let was_terminated = prev_pod
+                .get("terminated")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
+            let name = prev_pod.get("name").and_then(|n| n.as_str()).unwrap_or("");
+
+            if (was_terminating || was_terminated)
+                && !name.is_empty()
+                && !live_pod_names.contains(name)
+            {
+                // Pod is gone from K8s — carry forward with terminated: true
+                let mut carried = prev_pod.clone();
+                if let Some(obj) = carried.as_object_mut() {
+                    obj.insert("terminating".to_string(), serde_json::Value::Bool(false));
+                    obj.insert("terminated".to_string(), serde_json::Value::Bool(true));
+                }
+                pod_infos.push(carried);
+            }
+        }
     }
 
     let pod_status = serde_json::json!({

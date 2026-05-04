@@ -1070,6 +1070,7 @@ interface PodInfo {
     name: string;
     phase: 'Pending' | 'Running' | 'Succeeded' | 'Failed' | 'Unknown';
     terminating?: boolean;
+    terminated?: boolean;
     conditions?: PodCondition[];
     containers?: ContainerStatusInfo[];
     events?: PodEvent[];
@@ -1087,8 +1088,10 @@ function PodInfoRow({ pod }: { pod: PodInfo }) {
     const [expanded, setExpanded] = useState(false);
     const detailsId = `pod-details-${pod.name.replace(/[^a-zA-Z0-9_-]/g, '-')}`;
 
-    // Terminating pods: suppress issue indicators (not-ready is expected)
-    const hasIssues = !pod.terminating && (
+    const isGone = pod.terminating || pod.terminated;
+
+    // Terminating/terminated pods: suppress issue indicators (not-ready is expected)
+    const hasIssues = !isGone && (
                       pod.events?.length > 0 ||
                       pod.containers?.some(c => !c.ready || c.restart_count > 0) ||
                       pod.conditions?.some(c => c.status === 'False'));
@@ -1101,14 +1104,14 @@ function PodInfoRow({ pod }: { pod: PodInfo }) {
         Unknown: '#888',
     };
 
-    const displayPhase = pod.terminating ? 'Terminating' : pod.phase;
-    const displayColor = pod.terminating ? '#888' : (phaseTone[pod.phase] || '#888');
+    const displayPhase = pod.terminated ? 'Terminated' : pod.terminating ? 'Terminating' : pod.phase;
+    const displayColor = isGone ? '#888' : (phaseTone[pod.phase] || '#888');
 
     // Use appropriate border color based on issues
     const borderColor = hasIssues ? '#7d4b4b' : 'var(--mono-line)';
 
     return (
-        <div className="border-b" style={{ borderColor, opacity: pod.terminating ? 0.5 : 1 }}>
+        <div className="border-b" style={{ borderColor, opacity: isGone ? 0.5 : 1 }}>
             <button
                 type="button"
                 className="w-full p-3 text-left cursor-pointer"
@@ -1245,8 +1248,8 @@ function PodInfoRow({ pod }: { pod: PodInfo }) {
 }
 
 function PodStatusSection({ podStatus }: { podStatus: PodStatus }) {
-    const activePods = podStatus.pods?.filter(p => !p.terminating) || [];
-    const terminatingPods = podStatus.pods?.filter(p => p.terminating) || [];
+    const activePods = podStatus.pods?.filter(p => !p.terminating && !p.terminated) || [];
+    const inactivePods = podStatus.pods?.filter(p => p.terminating || p.terminated) || [];
 
     const replicasMismatch = podStatus.ready_replicas < podStatus.desired_replicas;
     const hasPodIssues =
@@ -1295,7 +1298,7 @@ function PodStatusSection({ podStatus }: { podStatus: PodStatus }) {
                 <div className="flex items-center justify-between">
                     <span>Pods: {podStatus.ready_replicas}/{podStatus.desired_replicas} ready</span>
                     <span className="text-xs" style={{ color: 'var(--mono-muted)' }}>
-                        {podStatus.current_replicas} total{terminatingPods.length > 0 && ` (+${terminatingPods.length} terminating)`}
+                        {podStatus.current_replicas} total{inactivePods.length > 0 && ` (+${inactivePods.length} shutting down)`}
                     </span>
                 </div>
             </div>
@@ -1316,17 +1319,17 @@ function PodStatusSection({ podStatus }: { podStatus: PodStatus }) {
                 </div>
             )}
 
-            {/* Terminating pods */}
-            {terminatingPods.length > 0 && (
+            {/* Terminating / terminated pods */}
+            {inactivePods.length > 0 && (
                 <div className="border border-solid mt-3" style={{ borderColor: 'var(--mono-line)', background: '#0f0f0f' }}>
                     <div className="p-3" style={{ borderBottom: '1px solid var(--mono-line)' }}>
                         <h5 className="text-xs font-semibold" style={{ color: 'var(--mono-muted)' }}>
-                            Terminating ({terminatingPods.length})
+                            Previous ({inactivePods.length})
                         </h5>
                     </div>
                     <div>
-                        {terminatingPods.map((pod, idx) => (
-                            <PodInfoRow key={pod.name || `term-${idx}`} pod={pod} />
+                        {inactivePods.map((pod, idx) => (
+                            <PodInfoRow key={pod.name || `prev-${idx}`} pod={pod} />
                         ))}
                     </div>
                 </div>
