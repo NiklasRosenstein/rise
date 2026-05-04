@@ -690,13 +690,6 @@ pub enum DeploymentControllerSettings {
         /// Defaults to "app.kubernetes.io/name=metacontroller-operator".
         #[serde(default)]
         metacontroller_pod_label_selector: Option<String>,
-
-        /// Adopt existing Kubernetes resources during Metacontroller migration.
-        /// Patches pre-existing resources with Metacontroller's ownership label
-        /// so they are adopted rather than rejected. No-op once all resources
-        /// are labeled. Defaults to true.
-        #[serde(default = "default_true")]
-        legacy_adopt_existing_resources_to_metacontroller: bool,
     },
 }
 

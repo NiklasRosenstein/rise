@@ -1,15 +1,11 @@
 use std::collections::HashSet;
-use std::fmt::Debug;
 
-use k8s_openapi::api::apps::v1::Deployment as K8sDeployment;
-use k8s_openapi::api::core::v1::{Endpoints, Namespace, Secret, Service, ServiceAccount};
-use k8s_openapi::api::networking::v1::{Ingress, NetworkPolicy};
 use kube::api::{Api, ListParams, Patch, PatchParams};
 use kube::Client;
 use kube::CustomResource;
 use kube::ResourceExt;
 use schemars::JsonSchema;
-use serde::{de::DeserializeOwned, Deserialize, Serialize};
+use serde::{Deserialize, Serialize};
 use sqlx::PgPool;
 use tracing::{debug, info, warn};
 
@@ -42,11 +38,6 @@ pub struct RiseProjectStatus {
 /// Updating this annotation causes the CRD's `metadata.resourceVersion` to change,
 /// which Metacontroller detects and triggers a sync webhook call.
 const TRIGGER_ANNOTATION: &str = "rise.dev/trigger";
-
-/// Annotation key set on a RiseProject CRD after adoption of pre-existing child
-/// resources has completed. Prevents re-adoption from being skipped if the backend
-/// restarts mid-adoption (CRD exists but children not fully labeled).
-const ADOPTED_ANNOTATION: &str = "rise.dev/adopted";
 
 /// Create or update a `RiseProject` CRD for the given project.
 /// Called when a project is created.
@@ -136,47 +127,22 @@ pub async fn trigger_resync(client: &Client, project_name: &str) -> anyhow::Resu
 /// 1. **Upgrade**: When migrating to Metacontroller, no RiseProject CRDs exist yet.
 /// 2. **Recovery**: If a RiseProject CRD is accidentally deleted, it gets recreated.
 ///
-/// When `adopt_existing` is true, newly-created CRDs will also have their
-/// pre-existing child resources (Namespace, Deployment, Service, etc.) patched
-/// with Metacontroller's `controller-uid` label so Metacontroller adopts them.
-///
 /// Runs once at server startup. Failures for individual projects are logged as
 /// warnings but do not block startup or affect other projects.
-pub async fn backfill_rise_projects(
-    client: &Client,
-    db_pool: &PgPool,
-    adopt_existing: bool,
-    namespace_format: &str,
-) -> anyhow::Result<()> {
+pub async fn backfill_rise_projects(client: &Client, db_pool: &PgPool) -> anyhow::Result<()> {
     // 1. List all RiseProject CRDs currently in the cluster
     let api: Api<RiseProject> = Api::all(client.clone());
     let existing_crds = api.list(&ListParams::default()).await?;
     let existing_names: HashSet<String> =
         existing_crds.items.iter().map(|r| r.name_any()).collect();
 
-    // Build a set of CRDs that already have the adoption-completed annotation
-    let adopted_names: HashSet<String> = existing_crds
-        .items
-        .iter()
-        .filter(|r| {
-            r.metadata
-                .annotations
-                .as_ref()
-                .is_some_and(|a| a.contains_key(ADOPTED_ANNOTATION))
-        })
-        .map(|r| r.name_any())
-        .collect();
-
     // 2. List all active (non-Deleting, non-Terminated) projects from the database
     let active_projects = crate::db::projects::list_active(db_pool).await?;
 
-    // 3. Create missing CRDs and adopt existing children
+    // 3. Create missing CRDs
     let mut created = 0u32;
-    let mut adopted = 0u32;
     for project in &active_projects {
-        let crd_existed = existing_names.contains(&project.name);
-
-        if !crd_existed {
+        if !existing_names.contains(&project.name) {
             if let Err(e) = ensure_rise_project(client, &project.name).await {
                 warn!(
                     project = %project.name,
@@ -186,38 +152,12 @@ pub async fn backfill_rise_projects(
             }
             created += 1;
         }
-
-        // Adopt pre-existing child resources if adoption was not completed previously.
-        // This handles restarts mid-adoption: the CRD exists but children may not be
-        // fully labeled with the controller-uid.
-        if adopt_existing && !adopted_names.contains(&project.name) {
-            if let Err(e) =
-                adopt_children_for_project(client, &project.name, namespace_format).await
-            {
-                warn!(
-                    project = %project.name,
-                    "Failed to adopt existing resources: {:?}", e
-                );
-                continue;
-            }
-
-            // Mark adoption as completed so we skip it on future restarts
-            if let Err(e) = mark_adoption_completed(&api, &project.name).await {
-                warn!(
-                    project = %project.name,
-                    "Failed to mark adoption as completed: {:?}", e
-                );
-            }
-            adopted += 1;
-        }
     }
 
-    if created > 0 || adopted > 0 {
+    if created > 0 {
         info!(
-            "Backfilled {} RiseProject CRD(s), adopted resources for {} project(s) \
-             ({} active projects, {} already existed)",
+            "Backfilled {} RiseProject CRD(s) ({} active projects, {} already existed)",
             created,
-            adopted,
             active_projects.len(),
             existing_names.len()
         );
@@ -229,212 +169,5 @@ pub async fn backfill_rise_projects(
         );
     }
 
-    Ok(())
-}
-
-/// Mark a RiseProject CRD as having completed adoption of pre-existing resources.
-async fn mark_adoption_completed(api: &Api<RiseProject>, project_name: &str) -> anyhow::Result<()> {
-    let patch = serde_json::json!({
-        "metadata": {
-            "annotations": {
-                ADOPTED_ANNOTATION: chrono::Utc::now().to_rfc3339(),
-            },
-        },
-    });
-    api.patch(project_name, &PatchParams::default(), &Patch::Merge(patch))
-        .await?;
-    Ok(())
-}
-
-/// Label key used by Metacontroller (with `generateSelector: true`) to track
-/// ownership of child resources.
-const CONTROLLER_UID_LABEL: &str = "controller-uid";
-
-/// Patch a single resource's labels with the `controller-uid` label via JSON merge patch.
-async fn patch_resource_label<T>(
-    api: &Api<T>,
-    name: &str,
-    uid: &str,
-    type_name: &str,
-) -> Result<(), kube::Error>
-where
-    T: kube::Resource<DynamicType = ()> + DeserializeOwned + Serialize + Clone + Debug,
-{
-    let patch = serde_json::json!({
-        "metadata": {
-            "labels": {
-                CONTROLLER_UID_LABEL: uid,
-            },
-        },
-    });
-    api.patch(name, &PatchParams::default(), &Patch::Merge(patch))
-        .await?;
-    debug!(
-        "Patched {} '{}' with controller-uid={}",
-        type_name, name, uid
-    );
-    Ok(())
-}
-
-/// List resources matching `lp` and patch each with the `controller-uid` label,
-/// skipping any that already have it. Best-effort: errors are logged, not propagated.
-async fn patch_all_matching<T>(api: &Api<T>, lp: &ListParams, uid: &str, type_name: &str)
-where
-    T: kube::Resource<DynamicType = ()> + DeserializeOwned + Serialize + Clone + Debug,
-{
-    let items = match api.list(lp).await {
-        Ok(list) => list.items,
-        Err(e) => {
-            warn!("Failed to list {} for adoption: {:?}", type_name, e);
-            return;
-        }
-    };
-
-    for item in &items {
-        let name = item.name_any();
-        // Skip resources already labeled
-        if item
-            .labels()
-            .get(CONTROLLER_UID_LABEL)
-            .is_some_and(|v| !v.is_empty())
-        {
-            debug!(
-                "{} '{}' already has controller-uid, skipping",
-                type_name, name
-            );
-            continue;
-        }
-        match patch_resource_label(api, &name, uid, type_name).await {
-            Ok(()) => {}
-            Err(kube::Error::Api(err)) if err.code == 404 => {
-                debug!("{} '{}' not found (deleted?), skipping", type_name, name);
-            }
-            Err(e) => {
-                warn!(
-                    "Failed to patch {} '{}' with controller-uid: {:?}",
-                    type_name, name, e
-                );
-            }
-        }
-    }
-}
-
-/// Adopt pre-existing child resources for a project by patching them with the
-/// Metacontroller `controller-uid` label derived from the RiseProject CRD's UID.
-///
-/// This is best-effort: individual failures are warned but do not block startup.
-async fn adopt_children_for_project(
-    client: &Client,
-    project_name: &str,
-    namespace_format: &str,
-) -> anyhow::Result<()> {
-    // Read back the CRD to get its UID
-    let crd_api: Api<RiseProject> = Api::all(client.clone());
-    let crd = crd_api.get(project_name).await?;
-    let uid = crd
-        .metadata
-        .uid
-        .as_deref()
-        .ok_or_else(|| anyhow::anyhow!("RiseProject '{}' has no UID", project_name))?;
-
-    let ns_name = super::resource_builder::format_namespace_name(namespace_format, project_name);
-
-    // 1. Patch the namespace (cluster-scoped)
-    let ns_api: Api<Namespace> = Api::all(client.clone());
-    match patch_resource_label(&ns_api, &ns_name, uid, "Namespace").await {
-        Ok(()) => {}
-        Err(kube::Error::Api(err)) if err.code == 404 => {
-            debug!("Namespace '{}' not found, skipping adoption", ns_name);
-        }
-        Err(e) => {
-            warn!(
-                "Failed to patch Namespace '{}' with controller-uid: {:?}",
-                ns_name, e
-            );
-        }
-    }
-
-    // 2. Patch namespaced children: list by managed-by label, skip already-labeled.
-    //    Support both the current label (app.kubernetes.io/managed-by=rise) and the
-    //    legacy label (rise.dev/managed-by=rise) used by older controller versions.
-    let label_selectors = [
-        ListParams::default().labels("app.kubernetes.io/managed-by=rise"),
-        ListParams::default().labels("rise.dev/managed-by=rise"),
-    ];
-
-    // Secret (by managed-by label)
-    let secret_api: Api<Secret> = Api::namespaced(client.clone(), &ns_name);
-    for lp in &label_selectors {
-        patch_all_matching(&secret_api, lp, uid, "Secret").await;
-    }
-
-    // Image pull secret — the old controller created this without any labels,
-    // so it won't be found by label selectors. Adopt it by name directly.
-    match patch_resource_label(
-        &secret_api,
-        super::resource_builder::IMAGE_PULL_SECRET_NAME,
-        uid,
-        "Secret",
-    )
-    .await
-    {
-        Ok(()) => {}
-        Err(kube::Error::Api(err)) if err.code == 404 => {
-            debug!(
-                "Image pull secret '{}' not found in '{}', skipping",
-                super::resource_builder::IMAGE_PULL_SECRET_NAME,
-                ns_name
-            );
-        }
-        Err(e) => {
-            warn!(
-                "Failed to patch image pull secret '{}' in '{}' with controller-uid: {:?}",
-                super::resource_builder::IMAGE_PULL_SECRET_NAME,
-                ns_name,
-                e
-            );
-        }
-    }
-
-    // ServiceAccount
-    let sa_api: Api<ServiceAccount> = Api::namespaced(client.clone(), &ns_name);
-    for lp in &label_selectors {
-        patch_all_matching(&sa_api, lp, uid, "ServiceAccount").await;
-    }
-
-    // Deployment
-    let deploy_api: Api<K8sDeployment> = Api::namespaced(client.clone(), &ns_name);
-    for lp in &label_selectors {
-        patch_all_matching(&deploy_api, lp, uid, "Deployment").await;
-    }
-
-    // Service
-    let svc_api: Api<Service> = Api::namespaced(client.clone(), &ns_name);
-    for lp in &label_selectors {
-        patch_all_matching(&svc_api, lp, uid, "Service").await;
-    }
-
-    // Endpoints
-    let ep_api: Api<Endpoints> = Api::namespaced(client.clone(), &ns_name);
-    for lp in &label_selectors {
-        patch_all_matching(&ep_api, lp, uid, "Endpoints").await;
-    }
-
-    // Ingress
-    let ing_api: Api<Ingress> = Api::namespaced(client.clone(), &ns_name);
-    for lp in &label_selectors {
-        patch_all_matching(&ing_api, lp, uid, "Ingress").await;
-    }
-
-    // NetworkPolicy
-    let np_api: Api<NetworkPolicy> = Api::namespaced(client.clone(), &ns_name);
-    for lp in &label_selectors {
-        patch_all_matching(&np_api, lp, uid, "NetworkPolicy").await;
-    }
-
-    info!(
-        "Adopted existing resources for project '{}' (uid={})",
-        project_name, uid
-    );
     Ok(())
 }
