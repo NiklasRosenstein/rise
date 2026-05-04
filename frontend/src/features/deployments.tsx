@@ -1069,6 +1069,8 @@ interface PodCondition {
 interface PodInfo {
     name: string;
     phase: 'Pending' | 'Running' | 'Succeeded' | 'Failed' | 'Unknown';
+    terminating?: boolean;
+    terminated?: boolean;
     conditions?: PodCondition[];
     containers?: ContainerStatusInfo[];
     events?: PodEvent[];
@@ -1086,10 +1088,13 @@ function PodInfoRow({ pod }: { pod: PodInfo }) {
     const [expanded, setExpanded] = useState(false);
     const detailsId = `pod-details-${pod.name.replace(/[^a-zA-Z0-9_-]/g, '-')}`;
 
-    // Check if pod has issues
-    const hasIssues = pod.events?.length > 0 ||
+    const isGone = pod.terminating || pod.terminated;
+
+    // Terminating/terminated pods: suppress issue indicators (not-ready is expected)
+    const hasIssues = !isGone && (
+                      pod.events?.length > 0 ||
                       pod.containers?.some(c => !c.ready || c.restart_count > 0) ||
-                      pod.conditions?.some(c => c.status === 'False');
+                      pod.conditions?.some(c => c.status === 'False'));
 
     const phaseTone = {
         Running: '#b7ffce',
@@ -1099,11 +1104,14 @@ function PodInfoRow({ pod }: { pod: PodInfo }) {
         Unknown: '#888',
     };
 
+    const displayPhase = pod.terminated ? 'Terminated' : pod.terminating ? 'Terminating' : pod.phase;
+    const displayColor = isGone ? '#888' : (phaseTone[pod.phase] || '#888');
+
     // Use appropriate border color based on issues
     const borderColor = hasIssues ? '#7d4b4b' : 'var(--mono-line)';
 
     return (
-        <div className="border-b" style={{ borderColor }}>
+        <div className="border-b" style={{ borderColor, opacity: isGone ? 0.5 : 1 }}>
             <button
                 type="button"
                 className="w-full p-3 text-left cursor-pointer"
@@ -1118,11 +1126,11 @@ function PodInfoRow({ pod }: { pod: PodInfo }) {
                                 {pod.name}
                             </span>
                             <span className="text-xs px-1.5 py-0.5" style={{
-                                color: phaseTone[pod.phase] || '#888',
-                                border: `1px solid ${phaseTone[pod.phase] || '#888'}`,
+                                color: displayColor,
+                                border: `1px solid ${displayColor}`,
                                 background: 'rgba(0, 0, 0, 0.3)'
                             }}>
-                                {pod.phase}
+                                {displayPhase}
                             </span>
                             {hasIssues && (
                                 <span className="text-xs" style={{ color: '#ffc0c0' }}>
@@ -1240,10 +1248,12 @@ function PodInfoRow({ pod }: { pod: PodInfo }) {
 }
 
 function PodStatusSection({ podStatus }: { podStatus: PodStatus }) {
+    const activePods = podStatus.pods?.filter(p => !p.terminating && !p.terminated) || [];
+    const inactivePods = podStatus.pods?.filter(p => p.terminating || p.terminated) || [];
+
     const replicasMismatch = podStatus.ready_replicas < podStatus.desired_replicas;
     const hasPodIssues =
-        podStatus.pods &&
-        podStatus.pods.some(
+        activePods.some(
             (p) =>
                 (p.containers && p.containers.some(c => c.restart_count > 0)) ||
                 (p.events && p.events.length > 0)
@@ -1288,22 +1298,38 @@ function PodStatusSection({ podStatus }: { podStatus: PodStatus }) {
                 <div className="flex items-center justify-between">
                     <span>Pods: {podStatus.ready_replicas}/{podStatus.desired_replicas} ready</span>
                     <span className="text-xs" style={{ color: 'var(--mono-muted)' }}>
-                        {podStatus.current_replicas} total
+                        {activePods.length} active{inactivePods.length > 0 && ` (+${inactivePods.length} previous)`}
                     </span>
                 </div>
             </div>
 
-            {/* Per-pod details */}
-            {podStatus.pods && podStatus.pods.length > 0 && (
+            {/* Active pods */}
+            {activePods.length > 0 && (
                 <div className="border border-solid" style={{ borderColor: borderColors[tone], background: tone === 'ok' ? '#0a1210' : '#1a1212' }}>
                     <div className="p-3" style={{ borderBottom: `1px solid ${borderColors[tone]}` }}>
                         <h5 className="text-xs font-semibold" style={{ color: headerColors[tone] }}>
-                            Pods ({podStatus.pods.length})
+                            Active ({activePods.length})
                         </h5>
                     </div>
                     <div>
-                        {podStatus.pods.map((pod, idx) => (
+                        {activePods.map((pod, idx) => (
                             <PodInfoRow key={pod.name || `pod-${idx}`} pod={pod} />
+                        ))}
+                    </div>
+                </div>
+            )}
+
+            {/* Terminating / terminated pods */}
+            {inactivePods.length > 0 && (
+                <div className="border border-solid mt-3" style={{ borderColor: 'var(--mono-line)', background: '#0f0f0f' }}>
+                    <div className="p-3" style={{ borderBottom: '1px solid var(--mono-line)' }}>
+                        <h5 className="text-xs font-semibold" style={{ color: 'var(--mono-muted)' }}>
+                            Previous ({inactivePods.length})
+                        </h5>
+                    </div>
+                    <div>
+                        {inactivePods.map((pod, idx) => (
+                            <PodInfoRow key={pod.name || `prev-${idx}`} pod={pod} />
                         ))}
                     </div>
                 </div>

@@ -103,6 +103,8 @@ const DEPLOYING_TIMEOUT_MINUTES: i64 = 5;
 const PRE_PUSHED_TIMEOUT_MINUTES: i64 = 10;
 /// Duration after which image pull secret is refreshed (6 hours)
 const SECRET_REFRESH_HOURS: i64 = 6;
+/// Maximum number of terminating/terminated pods to carry forward in controller_metadata
+const MAX_INACTIVE_PODS: usize = 5;
 
 #[derive(Debug, Default)]
 struct ResolvedDeploymentEnvVars {
@@ -471,9 +473,15 @@ async fn check_deployment_health_from_observed(
 
     // Check for pod-level errors and collect full pod status via kube-rs
     // (Metacontroller only gives us the Deployment, not individual pods)
-    let pod_check =
-        check_pod_errors_via_kube(state, project, deployment, desired_replicas, ready_replicas)
-            .await;
+    let pod_check = check_pod_errors_via_kube(
+        state,
+        project,
+        deployment,
+        desired_replicas,
+        ready_replicas,
+        &deployment.controller_metadata,
+    )
+    .await;
 
     // Update controller_metadata with pod status
     if let Some(ref pod_status) = pod_check.pod_status {
@@ -567,12 +575,18 @@ struct PodCheckResult {
 }
 
 /// Check pods for errors via direct kube-rs API call and collect full pod status.
+///
+/// Compares the live pod list against the previous `controller_metadata` snapshot:
+/// pods that were `terminating` or `terminated` in the previous snapshot but no longer
+/// exist in K8s are carried forward as `terminated: true` so the frontend can show
+/// their last-known state instead of silently dropping them.
 async fn check_pod_errors_via_kube(
     state: &AppState,
     project: &Project,
     deployment: &Deployment,
     desired_replicas: i32,
     ready_replicas: i32,
+    prev_controller_metadata: &serde_json::Value,
 ) -> PodCheckResult {
     let kube_client = match &state.kube_client {
         Some(client) => client,
@@ -625,7 +639,10 @@ async fn check_pod_errors_via_kube(
     let mut current_replicas: i32 = 0;
 
     for pod in &pods.items {
-        current_replicas += 1;
+        let is_terminating = pod.metadata.deletion_timestamp.is_some();
+        if !is_terminating {
+            current_replicas += 1;
+        }
         let pod_name = pod
             .metadata
             .name
@@ -670,8 +687,11 @@ async fn check_pod_errors_via_kube(
                 let state_info = if let Some(state) = &cs.state {
                     if let Some(waiting) = &state.waiting {
                         let reason = waiting.reason.as_deref().unwrap_or("");
-                        // Check for irrecoverable errors
-                        if !has_error && IRRECOVERABLE_CONTAINER_REASONS.contains(&reason) {
+                        // Check for irrecoverable errors (skip for terminating pods)
+                        if !is_terminating
+                            && !has_error
+                            && IRRECOVERABLE_CONTAINER_REASONS.contains(&reason)
+                        {
                             has_error = true;
                             let message = waiting.message.as_deref().unwrap_or(reason);
                             error_message = Some(format!("{}: {}", reason, message));
@@ -687,8 +707,12 @@ async fn check_pod_errors_via_kube(
                             "reason": running.started_at.as_ref().map(|t| t.0.to_string()),
                         }))
                     } else if let Some(terminated) = &state.terminated {
-                        // Check terminated with too many restarts
-                        if !has_error && terminated.exit_code != 0 && cs.restart_count >= 3 {
+                        // Check terminated with too many restarts (skip for terminating pods)
+                        if !is_terminating
+                            && !has_error
+                            && terminated.exit_code != 0
+                            && cs.restart_count >= 3
+                        {
                             has_error = true;
                             let reason = terminated.reason.as_deref().unwrap_or("ContainerFailed");
                             let default_msg = format!("Exit code: {}", terminated.exit_code);
@@ -723,9 +747,63 @@ async fn check_pod_errors_via_kube(
         pod_infos.push(serde_json::json!({
             "name": pod_name,
             "phase": pod_phase,
+            "terminating": is_terminating,
             "conditions": conditions,
             "containers": container_infos,
         }));
+    }
+
+    // Carry forward pods that were terminating/terminated in the previous snapshot
+    // but are no longer in the K8s pod list — mark them as fully terminated.
+    // Keep at most MAX_INACTIVE_PODS inactive (terminating + terminated) pods total.
+    if let Some(prev_pods) = prev_controller_metadata
+        .get("pod_status")
+        .and_then(|ps| ps.get("pods"))
+        .and_then(|p| p.as_array())
+    {
+        let live_pod_names: std::collections::HashSet<String> = pod_infos
+            .iter()
+            .filter_map(|p| p.get("name").and_then(|n| n.as_str()).map(String::from))
+            .collect();
+
+        // Count live terminating pods already in the list
+        let mut inactive_count = pod_infos
+            .iter()
+            .filter(|p| {
+                p.get("terminating")
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(false)
+            })
+            .count();
+
+        for prev_pod in prev_pods {
+            if inactive_count >= MAX_INACTIVE_PODS {
+                break;
+            }
+            let was_terminating = prev_pod
+                .get("terminating")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
+            let was_terminated = prev_pod
+                .get("terminated")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
+            let name = prev_pod.get("name").and_then(|n| n.as_str()).unwrap_or("");
+
+            if (was_terminating || was_terminated)
+                && !name.is_empty()
+                && !live_pod_names.contains(name)
+            {
+                // Pod is gone from K8s — carry forward with terminated: true
+                let mut carried = prev_pod.clone();
+                if let Some(obj) = carried.as_object_mut() {
+                    obj.insert("terminating".to_string(), serde_json::Value::Bool(false));
+                    obj.insert("terminated".to_string(), serde_json::Value::Bool(true));
+                }
+                pod_infos.push(carried);
+                inactive_count += 1;
+            }
+        }
     }
 
     let pod_status = serde_json::json!({
