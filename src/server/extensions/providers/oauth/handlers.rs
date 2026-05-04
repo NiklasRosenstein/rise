@@ -795,15 +795,15 @@ pub async fn callback(
     };
 
     // SSRF-validate the token endpoint before exchanging credentials
-    crate::server::ssrf::validate_url(&endpoints.token_endpoint, ssrf_config)
-        .await
-        .map_err(|e| {
-            error!("Token endpoint failed SSRF validation: {}", e);
-            (
-                StatusCode::BAD_REQUEST,
-                format!("Token endpoint failed SSRF validation: {}", e),
-            )
-        })?;
+    if let Err(e) = crate::server::ssrf::validate_url(&endpoints.token_endpoint, ssrf_config).await
+    {
+        error!("Token endpoint failed SSRF validation: {}", e);
+        release_oauth_claim(claimed_state).await?;
+        return Err((
+            StatusCode::BAD_REQUEST,
+            format!("Token endpoint failed SSRF validation: {}", e),
+        ));
+    }
 
     // Exchange authorization code for tokens (with PKCE code verifier)
     let http_client = crate::server::ssrf::safe_client(ssrf_config);
@@ -879,17 +879,21 @@ pub async fn callback(
                 )
             });
             if let Err(err) = update_status_result {
-                release_oauth_claim(claimed_state).await?;
+                finalize_oauth_claim(claimed_state).await?;
                 return Err(err);
             }
 
             // Redirect to UI with error
-            let mut redirect_url = Url::parse(&final_redirect_uri).map_err(|e| {
-                (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    format!("Invalid redirect URI: {}", e),
-                )
-            })?;
+            let mut redirect_url = match Url::parse(&final_redirect_uri) {
+                Ok(url) => url,
+                Err(e) => {
+                    finalize_oauth_claim(claimed_state).await?;
+                    return Err((
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        format!("Invalid redirect URI: {}", e),
+                    ));
+                }
+            };
             redirect_url
                 .query_pairs_mut()
                 .append_pair("error", "oauth_token_exchange_failed");
@@ -927,7 +931,7 @@ pub async fn callback(
             )
         });
         if let Err(err) = update_status_result {
-            release_oauth_claim(claimed_state).await?;
+            finalize_oauth_claim(claimed_state).await?;
             return Err(err);
         }
 
@@ -940,7 +944,7 @@ pub async fn callback(
         let redirect_url = match Url::parse(&final_redirect_uri) {
             Ok(url) => url,
             Err(e) => {
-                release_oauth_claim(claimed_state).await?;
+                finalize_oauth_claim(claimed_state).await?;
                 return Err((
                     StatusCode::INTERNAL_SERVER_ERROR,
                     format!("Invalid redirect URI: {}", e),
@@ -983,14 +987,14 @@ pub async fn callback(
         let response_body = match response_body {
             Ok(response_body) => response_body,
             Err(err) => {
-                release_oauth_claim(claimed_state).await?;
+                finalize_oauth_claim(claimed_state).await?;
                 return Err(err);
             }
         };
 
         // Encrypt raw response body
         let Some(encryption_provider) = state.encryption_provider.as_ref() else {
-            release_oauth_claim(claimed_state).await?;
+            finalize_oauth_claim(claimed_state).await?;
             return Err((
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "Encryption provider not configured".to_string(),
@@ -1010,7 +1014,7 @@ pub async fn callback(
         let token_response_encrypted = match token_response_encrypted {
             Ok(token_response_encrypted) => token_response_encrypted,
             Err(err) => {
-                release_oauth_claim(claimed_state).await?;
+                finalize_oauth_claim(claimed_state).await?;
                 return Err(err);
             }
         };
@@ -1044,7 +1048,7 @@ pub async fn callback(
             )
         });
         if let Err(err) = update_status_result {
-            release_oauth_claim(claimed_state).await?;
+            finalize_oauth_claim(claimed_state).await?;
             return Err(err);
         }
 
@@ -1080,7 +1084,7 @@ pub async fn callback(
             )
         });
         if let Err(err) = insert_code_result {
-            release_oauth_claim(claimed_state).await?;
+            finalize_oauth_claim(claimed_state).await?;
             return Err(err);
         }
 
@@ -1088,7 +1092,7 @@ pub async fn callback(
         let mut redirect_url = match Url::parse(&final_redirect_uri) {
             Ok(url) => url,
             Err(e) => {
-                release_oauth_claim(claimed_state).await?;
+                finalize_oauth_claim(claimed_state).await?;
                 return Err((
                     StatusCode::INTERNAL_SERVER_ERROR,
                     format!("Invalid redirect URI: {}", e),
@@ -1189,6 +1193,18 @@ async fn release_oauth_claim<T>(
 ) -> Result<(), (StatusCode, String)> {
     claim.release().await.map_err(|e| {
         error!("Failed to release OAuth transient state: {:?}", e);
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "OAuth callback failed".to_string(),
+        )
+    })
+}
+
+async fn finalize_oauth_claim<T>(
+    claim: oauth_transient_state::ClaimedState<T>,
+) -> Result<(), (StatusCode, String)> {
+    claim.finalize().await.map_err(|e| {
+        error!("Failed to finalize OAuth transient state: {:?}", e);
         (
             StatusCode::INTERNAL_SERVER_ERROR,
             "OAuth callback failed".to_string(),

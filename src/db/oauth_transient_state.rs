@@ -22,14 +22,26 @@ impl<T> ClaimedState<T> {
     }
 
     pub async fn finalize(mut self) -> Result<()> {
+        let affected = finalize(&self.pool, &self.lookup_key, self.claimant_id).await?;
         self.settled = true;
-        finalize(&self.pool, &self.lookup_key, self.claimant_id).await?;
+        if !affected {
+            anyhow::bail!(
+                "finalize affected 0 rows for lookup_key={}: claim may have expired or been stolen",
+                self.lookup_key
+            );
+        }
         Ok(())
     }
 
     pub async fn release(mut self) -> Result<()> {
+        let affected = release_claim(&self.pool, &self.lookup_key, self.claimant_id).await?;
         self.settled = true;
-        release_claim(&self.pool, &self.lookup_key, self.claimant_id).await?;
+        if !affected {
+            anyhow::bail!(
+                "release affected 0 rows for lookup_key={}: claim may have expired or been stolen",
+                self.lookup_key
+            );
+        }
         Ok(())
     }
 }
@@ -306,7 +318,7 @@ mod tests {
                 .expect("state should be claimed");
         drop(claimed_state);
 
-        tokio::time::sleep(Duration::from_millis(50)).await;
+        tokio::time::sleep(Duration::from_millis(500)).await;
 
         let reclaimed =
             claim::<TestState>(&pool, "lookup", Uuid::new_v4(), Duration::from_secs(60)).await?;

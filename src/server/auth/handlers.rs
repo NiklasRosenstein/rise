@@ -1333,7 +1333,7 @@ pub async fn oauth_callback(
         let user = match user {
             Ok(user) => user,
             Err(err) => {
-                release_browser_claim(claimed_state).await?;
+                finalize_browser_claim(claimed_state).await?;
                 return Err(err);
             }
         };
@@ -1356,7 +1356,7 @@ pub async fn oauth_callback(
         let rise_jwt = match rise_jwt {
             Ok(rise_jwt) => rise_jwt,
             Err(err) => {
-                release_browser_claim(claimed_state).await?;
+                finalize_browser_claim(claimed_state).await?;
                 return Err(err);
             }
         };
@@ -1385,7 +1385,7 @@ pub async fn oauth_callback(
                     )
                 });
             if let Err(err) = completed_session_saved {
-                release_browser_claim(claimed_state).await?;
+                finalize_browser_claim(claimed_state).await?;
                 return Err(err);
             }
 
@@ -1421,7 +1421,7 @@ pub async fn oauth_callback(
         let response = match render_success_page(&state, project, &redirect_url, &cookie).await {
             Ok(response) => response,
             Err(err) => {
-                release_browser_claim(claimed_state).await?;
+                finalize_browser_claim(claimed_state).await?;
                 return Err(err);
             }
         };
@@ -1482,14 +1482,14 @@ pub async fn oauth_callback(
     let user = match user {
         Ok(user) => user,
         Err(err) => {
-            release_browser_claim(claimed_state).await?;
+            finalize_browser_claim(claimed_state).await?;
             return Err(err);
         }
     };
 
     // Sync groups after login
     if let Err(error) = sync_groups_after_login(&state, &token_info.id_token).await {
-        release_browser_claim(claimed_state).await?;
+        finalize_browser_claim(claimed_state).await?;
         return Err(error);
     }
 
@@ -1508,7 +1508,7 @@ pub async fn oauth_callback(
     let rise_jwt = match rise_jwt {
         Ok(rise_jwt) => rise_jwt,
         Err(err) => {
-            release_browser_claim(claimed_state).await?;
+            finalize_browser_claim(claimed_state).await?;
             return Err(err);
         }
     };
@@ -1525,7 +1525,7 @@ pub async fn oauth_callback(
     let response = match render_ui_login_success_page(&state, &redirect_url, &cookie).await {
         Ok(response) => response,
         Err(err) => {
-            release_browser_claim(claimed_state).await?;
+            finalize_browser_claim(claimed_state).await?;
             return Err(err);
         }
     };
@@ -1695,6 +1695,18 @@ async fn release_browser_claim(
 ) -> Result<(), (StatusCode, String)> {
     claim.release().await.map_err(|e| {
         tracing::error!("Failed to release PKCE state: {:?}", e);
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Login failed".to_string(),
+        )
+    })
+}
+
+async fn finalize_browser_claim(
+    claim: ClaimedToken<OAuth2State>,
+) -> Result<(), (StatusCode, String)> {
+    claim.finalize().await.map_err(|e| {
+        tracing::error!("Failed to finalize PKCE state: {:?}", e);
         (
             StatusCode::INTERNAL_SERVER_ERROR,
             "Login failed".to_string(),
