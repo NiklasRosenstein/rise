@@ -337,7 +337,7 @@ async fn validate_redirect_uri(
 /// - redirect_uri (optional): Where to redirect after auth (for local dev/custom domains)
 /// - state (optional): Application's CSRF state parameter (passed through to final redirect)
 /// - code_challenge (optional): PKCE code challenge for public clients (SPAs)
-/// - code_challenge_method (optional): PKCE method ("S256" or "plain", defaults to "S256")
+/// - code_challenge_method (optional): PKCE method (only "S256" is supported, and is the default)
 pub async fn authorize(
     State(state): State<AppState>,
     Path((project_name, extension_name)): Path<(String, String)>,
@@ -421,11 +421,11 @@ pub async fn authorize(
         }
 
         let method = req.code_challenge_method.as_deref().unwrap_or("S256");
-        if method != "S256" && method != "plain" {
+        if method != "S256" {
             return Err((
                 StatusCode::BAD_REQUEST,
                 format!(
-                    "Unsupported code_challenge_method '{}'. Only 'S256' and 'plain' are supported.",
+                    "Unsupported code_challenge_method '{}'. Only 'S256' is supported.",
                     method
                 ),
             ));
@@ -1030,13 +1030,6 @@ fn validate_pkce(code_verifier: &str, code_challenge: &str, code_challenge_metho
 
             // Constant-time comparison
             computed_challenge
-                .as_bytes()
-                .ct_eq(code_challenge.as_bytes())
-                .into()
-        }
-        "plain" => {
-            // Direct comparison
-            code_verifier
                 .as_bytes()
                 .ct_eq(code_challenge.as_bytes())
                 .into()
@@ -1732,7 +1725,7 @@ pub async fn oidc_discovery(
             "token_endpoint": format!("{}/token", rise_oidc_base),
             "response_types_supported": ["code"],
             "grant_types_supported": ["authorization_code", "refresh_token"],
-            "code_challenge_methods_supported": ["S256", "plain"],
+            "code_challenge_methods_supported": ["S256"],
             "token_endpoint_auth_methods_supported": ["client_secret_post", "none"]
         });
 
@@ -1782,6 +1775,13 @@ pub async fn oidc_discovery(
                                 discovery_obj.insert(key.clone(), value.clone());
                             }
                         }
+
+                        // Override code_challenge_methods_supported to only advertise S256,
+                        // regardless of what the upstream provider supports.
+                        discovery_obj.insert(
+                            "code_challenge_methods_supported".to_string(),
+                            serde_json::json!(["S256"]),
+                        );
                     }
                 }
             }
@@ -1817,7 +1817,7 @@ pub async fn oidc_discovery(
                     "token_endpoint": format!("{}/token", rise_oidc_base),
                     "response_types_supported": ["code"],
                     "grant_types_supported": ["authorization_code", "refresh_token"],
-                    "code_challenge_methods_supported": ["S256", "plain"],
+                    "code_challenge_methods_supported": ["S256"],
                     "token_endpoint_auth_methods_supported": ["client_secret_post", "none"]
                 });
 
