@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO oauth_transient_state (lookup_key, data, expires_at, claimed_at, claim_expires_at, claimed_by)\n         VALUES ($1, $2, NOW() + ($3 * INTERVAL '1 second'), NULL, NULL, NULL)\n         ON CONFLICT (lookup_key) DO UPDATE\n         SET data = $2,\n             expires_at = NOW() + ($3 * INTERVAL '1 second'),\n             claimed_at = NULL,\n             claim_expires_at = NULL,\n             claimed_by = NULL",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Varchar",
+        "Jsonb",
+        "Float8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "d75f9df4472c938615764e90a438dc2dc219754e5b9e5a07da95854d98c33860"
+}

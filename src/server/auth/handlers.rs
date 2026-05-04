@@ -2,7 +2,7 @@ use crate::db::{projects, users};
 use crate::server::auth::{
     cookie_helpers::{self, CookieSettings},
     token_storage::{
-        generate_code_challenge, generate_code_verifier, generate_state_token, ClaimedToken,
+        generate_code_challenge, generate_code_verifier, generate_state_token,
         CompletedAuthSession, OAuth2State,
     },
 };
@@ -1233,17 +1233,7 @@ pub async fn oauth_callback(
                 StatusCode::UNAUTHORIZED,
                 format!("Code exchange failed: {}", e),
             )
-        });
-
-    let token_info = match token_info {
-        Ok(token_info) => token_info,
-        Err(err) => {
-            if is_retryable_callback_error(&anyhow::anyhow!(err.1.clone())) {
-                release_browser_claim(claimed_state).await?;
-            }
-            return Err(err);
-        }
-    };
+        })?;
 
     tracing::info!("Successfully exchanged code for tokens");
 
@@ -1329,14 +1319,7 @@ pub async fn oauth_callback(
                     StatusCode::INTERNAL_SERVER_ERROR,
                     "Database error".to_string(),
                 )
-            });
-        let user = match user {
-            Ok(user) => user,
-            Err(err) => {
-                finalize_browser_claim(claimed_state).await?;
-                return Err(err);
-            }
-        };
+            })?;
 
         // Issue Rise JWT with user's team memberships
         // Extract project URL from redirect_url for the aud claim
@@ -1352,14 +1335,7 @@ pub async fn oauth_callback(
                     StatusCode::INTERNAL_SERVER_ERROR,
                     "Failed to create authentication token".to_string(),
                 )
-            });
-        let rise_jwt = match rise_jwt {
-            Ok(rise_jwt) => rise_jwt,
-            Err(err) => {
-                finalize_browser_claim(claimed_state).await?;
-                return Err(err);
-            }
-        };
+            })?;
 
         // Check if this is a custom domain auth flow that needs redirect
         if let Some(custom_domain_base_url) = claimed_state.data().custom_domain_base_url.clone() {
@@ -1373,7 +1349,7 @@ pub async fn oauth_callback(
                 redirect_url: redirect_url.clone(),
                 project_name: project.to_string(),
             };
-            let completed_session_saved = state
+            state
                 .token_store
                 .save_completed_session(completion_token.clone(), completed_session)
                 .await
@@ -1383,11 +1359,7 @@ pub async fn oauth_callback(
                         StatusCode::INTERNAL_SERVER_ERROR,
                         "Failed to complete authentication".to_string(),
                     )
-                });
-            if let Err(err) = completed_session_saved {
-                finalize_browser_claim(claimed_state).await?;
-                return Err(err);
-            }
+                })?;
 
             // Construct the complete URL by appending the path to the base URL
             let complete_url = format!(
@@ -1418,13 +1390,7 @@ pub async fn oauth_callback(
             max_age,
         );
 
-        let response = match render_success_page(&state, project, &redirect_url, &cookie).await {
-            Ok(response) => response,
-            Err(err) => {
-                finalize_browser_claim(claimed_state).await?;
-                return Err(err);
-            }
-        };
+        let response = render_success_page(&state, project, &redirect_url, &cookie).await?;
         claimed_state.finalize().await.map_err(|e| {
             tracing::error!("Failed to finalize PKCE state: {:?}", e);
             (
@@ -1478,20 +1444,10 @@ pub async fn oauth_callback(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "Failed to process user".to_string(),
             )
-        });
-    let user = match user {
-        Ok(user) => user,
-        Err(err) => {
-            finalize_browser_claim(claimed_state).await?;
-            return Err(err);
-        }
-    };
+        })?;
 
     // Sync groups after login
-    if let Err(error) = sync_groups_after_login(&state, &token_info.id_token).await {
-        finalize_browser_claim(claimed_state).await?;
-        return Err(error);
-    }
+    sync_groups_after_login(&state, &token_info.id_token).await?;
 
     // Issue Rise HS256 JWT for user authentication (consumed by the UI)
     let rise_jwt = state
@@ -1504,14 +1460,7 @@ pub async fn oauth_callback(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "Failed to create authentication token".to_string(),
             )
-        });
-    let rise_jwt = match rise_jwt {
-        Ok(rise_jwt) => rise_jwt,
-        Err(err) => {
-            finalize_browser_claim(claimed_state).await?;
-            return Err(err);
-        }
-    };
+        })?;
 
     let cookie =
         cookie_helpers::create_rise_jwt_cookie(&rise_jwt, &cookie_settings_for_response, max_age);
@@ -1522,13 +1471,7 @@ pub async fn oauth_callback(
     );
 
     // Use success page with delayed redirect to ensure cookie is properly persisted
-    let response = match render_ui_login_success_page(&state, &redirect_url, &cookie).await {
-        Ok(response) => response,
-        Err(err) => {
-            finalize_browser_claim(claimed_state).await?;
-            return Err(err);
-        }
-    };
+    let response = render_ui_login_success_page(&state, &redirect_url, &cookie).await?;
     claimed_state.finalize().await.map_err(|e| {
         tracing::error!("Failed to finalize PKCE state: {:?}", e);
         (
@@ -1680,52 +1623,6 @@ async fn render_ui_login_success_page(
     Ok(response)
 }
 
-fn is_retryable_callback_error(error: &anyhow::Error) -> bool {
-    let message = error.to_string().to_ascii_lowercase();
-    !(message.contains("status 400")
-        || message.contains("status 401")
-        || message.contains("status 403")
-        || message.contains("invalid_grant")
-        || message.contains("invalid_request")
-        || message.contains("access_denied"))
-}
-
-async fn release_browser_claim(
-    claim: ClaimedToken<OAuth2State>,
-) -> Result<(), (StatusCode, String)> {
-    claim.release().await.map_err(|e| {
-        tracing::error!("Failed to release PKCE state: {:?}", e);
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            "Login failed".to_string(),
-        )
-    })
-}
-
-async fn finalize_browser_claim(
-    claim: ClaimedToken<OAuth2State>,
-) -> Result<(), (StatusCode, String)> {
-    claim.finalize().await.map_err(|e| {
-        tracing::error!("Failed to finalize PKCE state: {:?}", e);
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            "Login failed".to_string(),
-        )
-    })
-}
-
-async fn release_completed_claim(
-    claim: ClaimedToken<CompletedAuthSession>,
-) -> Result<(), (StatusCode, String)> {
-    claim.release().await.map_err(|e| {
-        tracing::error!("Failed to release completed session: {:?}", e);
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            "Failed to complete authentication".to_string(),
-        )
-    })
-}
-
 #[derive(Debug, Deserialize)]
 pub struct CompleteQuery {
     pub token: String,
@@ -1773,20 +1670,13 @@ pub async fn oauth_complete(
         claimed_session.max_age,
     );
 
-    let response = match render_success_page(
+    let response = render_success_page(
         &state,
         &claimed_session.project_name,
         &claimed_session.redirect_url,
         &cookie,
     )
-    .await
-    {
-        Ok(response) => response,
-        Err(err) => {
-            release_completed_claim(claimed_session).await?;
-            return Err(err);
-        }
-    };
+    .await?;
     claimed_session.finalize().await.map_err(|e| {
         tracing::error!("Failed to finalize completed session: {:?}", e);
         (

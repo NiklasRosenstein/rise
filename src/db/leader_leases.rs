@@ -3,7 +3,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::{anyhow, Result};
-use sqlx::{PgPool, Row};
+use sqlx::PgPool;
 use tokio::task::JoinHandle;
 use uuid::Uuid;
 
@@ -165,26 +165,27 @@ async fn renew(
     lease_duration: Duration,
 ) -> Result<bool> {
     let lease_secs = lease_duration.as_secs_f64();
-    let result = sqlx::query(
+    let result = sqlx::query!(
         "UPDATE leader_leases
          SET heartbeat_at = NOW(), expires_at = NOW() + ($3 * INTERVAL '1 second')
          WHERE name = $1 AND holder_id = $2 AND expires_at > NOW()",
+        name,
+        holder_id,
+        lease_secs,
     )
-    .bind(name)
-    .bind(holder_id)
-    .bind(lease_secs)
     .execute(pool)
     .await?;
     Ok(result.rows_affected() == 1)
 }
 
 async fn is_held_db(pool: &PgPool, name: &str, holder_id: Uuid) -> Result<bool> {
-    let row =
-        sqlx::query("SELECT holder_id FROM leader_leases WHERE name = $1 AND expires_at > NOW()")
-            .bind(name)
-            .fetch_optional(pool)
-            .await?;
-    Ok(row.map(|r| r.try_get::<Uuid, _>("holder_id")).transpose()? == Some(holder_id))
+    let row = sqlx::query_scalar!(
+        "SELECT holder_id FROM leader_leases WHERE name = $1 AND expires_at > NOW()",
+        name,
+    )
+    .fetch_optional(pool)
+    .await?;
+    Ok(row == Some(holder_id))
 }
 
 #[cfg(test)]

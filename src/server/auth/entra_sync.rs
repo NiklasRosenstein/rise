@@ -407,8 +407,9 @@ async fn sync_once(
         .await
         .context("Failed to begin transaction for Entra sync")?;
 
+    election.assert_leader().await?;
+
     for group in &groups_to_sync {
-        election.assert_leader().await?;
         if let Err(e) = sync_group(&mut tx, group).await {
             tracing::error!(
                 "Failed to sync group '{}' (team '{}'): {:?}",
@@ -428,7 +429,6 @@ async fn sync_once(
 
     for team in all_idp_teams {
         if !synced_team_names.contains(&team.name) {
-            election.assert_leader().await?;
             // This IdP-managed team is no longer assigned in Entra — remove all members
             let removed = teams::remove_all_team_members(&mut *tx, team.id)
                 .await

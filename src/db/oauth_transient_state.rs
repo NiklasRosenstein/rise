@@ -3,11 +3,11 @@ use std::time::Duration;
 use anyhow::Result;
 use serde::{de::DeserializeOwned, Serialize};
 use sqlx::PgPool;
-use sqlx::Row;
 use std::ops::Deref;
 use uuid::Uuid;
 
 #[derive(Debug)]
+#[must_use = "claimed state must be explicitly finalized or released"]
 pub struct ClaimedState<T> {
     pool: PgPool,
     lookup_key: String,
@@ -33,6 +33,7 @@ impl<T> ClaimedState<T> {
         Ok(())
     }
 
+    #[allow(dead_code)]
     pub async fn release(mut self) -> Result<()> {
         let affected = release_claim(&self.pool, &self.lookup_key, self.claimant_id).await?;
         self.settled = true;
@@ -67,17 +68,17 @@ impl<T> Drop for ClaimedState<T> {
         tracing::warn!(
             lookup_key,
             claimant_id = %claimant_id,
-            "claimed oauth transient state dropped without explicit settlement; finalizing defensively"
+            "claimed oauth transient state dropped without explicit settlement; releasing defensively"
         );
 
         if let Ok(handle) = tokio::runtime::Handle::try_current() {
             handle.spawn(async move {
-                if let Err(error) = finalize(&pool, &lookup_key, claimant_id).await {
+                if let Err(error) = release_claim(&pool, &lookup_key, claimant_id).await {
                     tracing::warn!(
                         ?error,
                         lookup_key,
                         claimant_id = %claimant_id,
-                        "defensive finalize for dropped oauth transient state failed"
+                        "defensive release for dropped oauth transient state failed"
                     );
                 }
             });
@@ -85,7 +86,7 @@ impl<T> Drop for ClaimedState<T> {
             tracing::warn!(
                 lookup_key,
                 claimant_id = %claimant_id,
-                "no tokio runtime available for defensive finalize of dropped oauth transient state"
+                "no tokio runtime available for defensive release of dropped oauth transient state"
             );
         }
     }
@@ -100,7 +101,7 @@ pub async fn insert<T: Serialize>(
 ) -> Result<()> {
     let data = serde_json::to_value(data)?;
     let ttl_secs = ttl.as_secs_f64();
-    sqlx::query(
+    sqlx::query!(
         "INSERT INTO oauth_transient_state (lookup_key, data, expires_at, claimed_at, claim_expires_at, claimed_by)
          VALUES ($1, $2, NOW() + ($3 * INTERVAL '1 second'), NULL, NULL, NULL)
          ON CONFLICT (lookup_key) DO UPDATE
@@ -109,10 +110,10 @@ pub async fn insert<T: Serialize>(
              claimed_at = NULL,
              claim_expires_at = NULL,
              claimed_by = NULL",
+        lookup_key,
+        data,
+        ttl_secs,
     )
-    .bind(lookup_key)
-    .bind(data)
-    .bind(ttl_secs)
     .execute(pool)
     .await?;
     Ok(())
@@ -125,7 +126,7 @@ pub async fn claim<T: DeserializeOwned>(
     grace_ttl: Duration,
 ) -> Result<Option<ClaimedState<T>>> {
     let grace_secs = grace_ttl.as_secs_f64();
-    let row = sqlx::query(
+    let row = sqlx::query!(
         "UPDATE oauth_transient_state
          SET claimed_at = NOW(),
              claim_expires_at = NOW() + ($3 * INTERVAL '1 second'),
@@ -134,10 +135,10 @@ pub async fn claim<T: DeserializeOwned>(
            AND expires_at > NOW()
            AND (claimed_by IS NULL OR claim_expires_at < NOW())
          RETURNING data",
+        lookup_key,
+        claimant_id,
+        grace_secs,
     )
-    .bind(lookup_key)
-    .bind(claimant_id)
-    .bind(grace_secs)
     .fetch_optional(pool)
     .await?;
 
@@ -146,7 +147,7 @@ pub async fn claim<T: DeserializeOwned>(
             pool: pool.clone(),
             lookup_key: lookup_key.to_string(),
             claimant_id,
-            data: serde_json::from_value(row.try_get::<serde_json::Value, _>("data")?)?,
+            data: serde_json::from_value(row.data)?,
             settled: false,
         })),
         None => Ok(None),
@@ -154,12 +155,12 @@ pub async fn claim<T: DeserializeOwned>(
 }
 
 pub async fn finalize(pool: &PgPool, lookup_key: &str, claimant_id: Uuid) -> Result<bool> {
-    let result = sqlx::query(
+    let result = sqlx::query!(
         "DELETE FROM oauth_transient_state
          WHERE lookup_key = $1 AND claimed_by = $2",
+        lookup_key,
+        claimant_id,
     )
-    .bind(lookup_key)
-    .bind(claimant_id)
     .execute(pool)
     .await?;
 
@@ -167,15 +168,15 @@ pub async fn finalize(pool: &PgPool, lookup_key: &str, claimant_id: Uuid) -> Res
 }
 
 pub async fn release_claim(pool: &PgPool, lookup_key: &str, claimant_id: Uuid) -> Result<bool> {
-    let result = sqlx::query(
+    let result = sqlx::query!(
         "UPDATE oauth_transient_state
          SET claimed_at = NULL,
              claim_expires_at = NULL,
              claimed_by = NULL
          WHERE lookup_key = $1 AND claimed_by = $2",
+        lookup_key,
+        claimant_id,
     )
-    .bind(lookup_key)
-    .bind(claimant_id)
     .execute(pool)
     .await?;
 
@@ -301,7 +302,7 @@ mod tests {
     }
 
     #[sqlx::test]
-    async fn dropped_unsettled_claim_is_defensively_finalized(pool: PgPool) -> Result<()> {
+    async fn dropped_unsettled_claim_is_defensively_released(pool: PgPool) -> Result<()> {
         insert(
             &pool,
             "lookup",
@@ -322,7 +323,10 @@ mod tests {
 
         let reclaimed =
             claim::<TestState>(&pool, "lookup", Uuid::new_v4(), Duration::from_secs(60)).await?;
-        assert!(reclaimed.is_none());
+        assert!(
+            reclaimed.is_some(),
+            "row should be claimable again after defensive release"
+        );
         Ok(())
     }
 }

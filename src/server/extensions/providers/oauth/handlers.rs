@@ -667,48 +667,31 @@ pub async fn callback(
     );
 
     // Get project
-    let project = match db_projects::find_by_name(&state.db_pool, &project_name).await {
-        Ok(Some(project)) => project,
-        Ok(None) => return Err((StatusCode::NOT_FOUND, "Project not found".to_string())),
-        Err(e) => {
-            release_oauth_claim(claimed_state).await?;
-            return Err((StatusCode::INTERNAL_SERVER_ERROR, e.to_string()));
-        }
-    };
+    let project = db_projects::find_by_name(&state.db_pool, &project_name)
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
+        .ok_or((StatusCode::NOT_FOUND, "Project not found".to_string()))?;
 
     // Get OAuth extension
     let extension =
-        match db_extensions::find_by_project_and_name(&state.db_pool, project.id, &extension_name)
+        db_extensions::find_by_project_and_name(&state.db_pool, project.id, &extension_name)
             .await
-        {
-            Ok(Some(extension)) => extension,
-            Ok(None) => {
-                return Err((
-                    StatusCode::NOT_FOUND,
-                    "OAuth extension not configured".to_string(),
-                ));
-            }
-            Err(e) => {
-                release_oauth_claim(claimed_state).await?;
-                return Err((StatusCode::INTERNAL_SERVER_ERROR, e.to_string()));
-            }
-        };
+            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
+            .ok_or((
+                StatusCode::NOT_FOUND,
+                "OAuth extension not configured".to_string(),
+            ))?;
 
     // Parse spec
-    let spec: OAuthExtensionSpec = match serde_json::from_value(extension.spec.clone()) {
-        Ok(spec) => spec,
-        Err(e) => {
-            release_oauth_claim(claimed_state).await?;
-            return Err((
-                StatusCode::INTERNAL_SERVER_ERROR,
-                format!("Invalid spec: {}", e),
-            ));
-        }
-    };
+    let spec: OAuthExtensionSpec = serde_json::from_value(extension.spec.clone()).map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Invalid spec: {}", e),
+        )
+    })?;
 
     // Resolve OAuth provider's client secret (prefers encrypted in spec, falls back to env var ref)
     let Some(encryption_provider) = state.encryption_provider.as_ref() else {
-        release_oauth_claim(claimed_state).await?;
         return Err((
             StatusCode::INTERNAL_SERVER_ERROR,
             "Encryption provider not configured".to_string(),
@@ -734,34 +717,20 @@ pub async fn callback(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 format!("Failed to resolve OAuth client secret: {}", e),
             )
-        });
-    let client_secret = match client_secret {
-        Ok(client_secret) => client_secret,
-        Err(err) => {
-            release_oauth_claim(claimed_state).await?;
-            return Err(err);
-        }
-    };
+        })?;
 
     // Compute callback redirect URI - must match exactly what was sent in authorize request
-    let api_url = match Url::parse(&state.public_url) {
-        Ok(url) => url,
-        Err(e) => {
-            release_oauth_claim(claimed_state).await?;
-            return Err((
-                StatusCode::INTERNAL_SERVER_ERROR,
-                format!("Invalid API URL configuration: {}", e),
-            ));
-        }
-    };
-
-    let Some(api_host) = api_url.host_str() else {
-        release_oauth_claim(claimed_state).await?;
-        return Err((
+    let api_url = Url::parse(&state.public_url).map_err(|e| {
+        (
             StatusCode::INTERNAL_SERVER_ERROR,
-            "Missing host in API URL".to_string(),
-        ));
-    };
+            format!("Invalid API URL configuration: {}", e),
+        )
+    })?;
+
+    let api_host = api_url.host_str().ok_or((
+        StatusCode::INTERNAL_SERVER_ERROR,
+        "Missing host in API URL".to_string(),
+    ))?;
 
     let redirect_uri = if let Some(port) = api_url.port() {
         format!(
@@ -783,27 +752,25 @@ pub async fn callback(
     };
 
     // Resolve OAuth endpoints (from spec or OIDC discovery)
-    let endpoints = match resolve_oauth_endpoints(&spec, ssrf_config).await {
-        Ok(endpoints) => endpoints,
-        Err(e) => {
-            release_oauth_claim(claimed_state).await?;
-            return Err((
+    let endpoints = resolve_oauth_endpoints(&spec, ssrf_config)
+        .await
+        .map_err(|e| {
+            (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 format!("Failed to resolve OAuth endpoints: {}", e),
-            ));
-        }
-    };
+            )
+        })?;
 
     // SSRF-validate the token endpoint before exchanging credentials
-    if let Err(e) = crate::server::ssrf::validate_url(&endpoints.token_endpoint, ssrf_config).await
-    {
-        error!("Token endpoint failed SSRF validation: {}", e);
-        release_oauth_claim(claimed_state).await?;
-        return Err((
-            StatusCode::BAD_REQUEST,
-            format!("Token endpoint failed SSRF validation: {}", e),
-        ));
-    }
+    crate::server::ssrf::validate_url(&endpoints.token_endpoint, ssrf_config)
+        .await
+        .map_err(|e| {
+            error!("Token endpoint failed SSRF validation: {}", e);
+            (
+                StatusCode::BAD_REQUEST,
+                format!("Token endpoint failed SSRF validation: {}", e),
+            )
+        })?;
 
     // Exchange authorization code for tokens (with PKCE code verifier)
     let http_client = crate::server::ssrf::safe_client(ssrf_config);
@@ -826,14 +793,7 @@ pub async fn callback(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 format!("Token exchange request failed: {}", e),
             )
-        });
-    let response = match response {
-        Ok(response) => response,
-        Err(err) => {
-            release_oauth_claim(claimed_state).await?;
-            return Err(err);
-        }
-    };
+        })?;
 
     // Branch based on flow type: test flows skip token parsing/encryption
     if is_test_flow {
@@ -864,7 +824,7 @@ pub async fn callback(
             ));
             ext_status.auth_verified = false;
 
-            let update_status_result = db_extensions::update_status(
+            db_extensions::update_status(
                 &state.db_pool,
                 project.id,
                 &extension_name,
@@ -877,23 +837,15 @@ pub async fn callback(
                     StatusCode::INTERNAL_SERVER_ERROR,
                     format!("Failed to update status: {}", e),
                 )
-            });
-            if let Err(err) = update_status_result {
-                finalize_oauth_claim(claimed_state).await?;
-                return Err(err);
-            }
+            })?;
 
             // Redirect to UI with error
-            let mut redirect_url = match Url::parse(&final_redirect_uri) {
-                Ok(url) => url,
-                Err(e) => {
-                    finalize_oauth_claim(claimed_state).await?;
-                    return Err((
-                        StatusCode::INTERNAL_SERVER_ERROR,
-                        format!("Invalid redirect URI: {}", e),
-                    ));
-                }
-            };
+            let mut redirect_url = Url::parse(&final_redirect_uri).map_err(|e| {
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    format!("Invalid redirect URI: {}", e),
+                )
+            })?;
             redirect_url
                 .query_pairs_mut()
                 .append_pair("error", "oauth_token_exchange_failed");
@@ -916,7 +868,7 @@ pub async fn callback(
         ext_status.auth_verified = true;
         ext_status.error = None;
 
-        let update_status_result = db_extensions::update_status(
+        db_extensions::update_status(
             &state.db_pool,
             project.id,
             &extension_name,
@@ -929,11 +881,7 @@ pub async fn callback(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 format!("Failed to update status: {}", e),
             )
-        });
-        if let Err(err) = update_status_result {
-            finalize_oauth_claim(claimed_state).await?;
-            return Err(err);
-        }
+        })?;
 
         info!(
             "Completed test OAuth flow for project {} extension {}",
@@ -941,16 +889,12 @@ pub async fn callback(
         );
 
         // Redirect back to Rise UI
-        let redirect_url = match Url::parse(&final_redirect_uri) {
-            Ok(url) => url,
-            Err(e) => {
-                finalize_oauth_claim(claimed_state).await?;
-                return Err((
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    format!("Invalid redirect URI: {}", e),
-                ));
-            }
-        };
+        let redirect_url = Url::parse(&final_redirect_uri).map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Invalid redirect URI: {}", e),
+            )
+        })?;
 
         claimed_state.finalize().await.map_err(|e| {
             error!("Failed to finalize OAuth callback state: {:?}", e);
@@ -983,18 +927,10 @@ pub async fn callback(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "Failed to read token response".to_string(),
             )
-        });
-        let response_body = match response_body {
-            Ok(response_body) => response_body,
-            Err(err) => {
-                finalize_oauth_claim(claimed_state).await?;
-                return Err(err);
-            }
-        };
+        })?;
 
         // Encrypt raw response body
         let Some(encryption_provider) = state.encryption_provider.as_ref() else {
-            finalize_oauth_claim(claimed_state).await?;
             return Err((
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "Encryption provider not configured".to_string(),
@@ -1010,14 +946,7 @@ pub async fn callback(
                     StatusCode::INTERNAL_SERVER_ERROR,
                     "Failed to encrypt token response".to_string(),
                 )
-            });
-        let token_response_encrypted = match token_response_encrypted {
-            Ok(token_response_encrypted) => token_response_encrypted,
-            Err(err) => {
-                finalize_oauth_claim(claimed_state).await?;
-                return Err(err);
-            }
-        };
+            })?;
 
         debug!(
             "Cached token response: status={}, content_type={}",
@@ -1033,7 +962,7 @@ pub async fn callback(
         ext_status.auth_verified = true;
         ext_status.error = None;
 
-        let update_status_result = db_extensions::update_status(
+        db_extensions::update_status(
             &state.db_pool,
             project.id,
             &extension_name,
@@ -1046,11 +975,7 @@ pub async fn callback(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 format!("Failed to update status: {}", e),
             )
-        });
-        if let Err(err) = update_status_result {
-            finalize_oauth_claim(claimed_state).await?;
-            return Err(err);
-        }
+        })?;
 
         // Generate authorization code for token exchange
         let authorization_code = generate_state_token();
@@ -1069,7 +994,7 @@ pub async fn callback(
         };
 
         // Store authorization code in DB (5-minute TTL, single-use via consume)
-        let insert_code_result = oauth_transient_state::insert(
+        oauth_transient_state::insert(
             &state.db_pool,
             &authorization_code,
             &code_state,
@@ -1082,23 +1007,15 @@ pub async fn callback(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "OAuth callback failed".to_string(),
             )
-        });
-        if let Err(err) = insert_code_result {
-            finalize_oauth_claim(claimed_state).await?;
-            return Err(err);
-        }
+        })?;
 
         // Build redirect URL with authorization code (RFC 6749)
-        let mut redirect_url = match Url::parse(&final_redirect_uri) {
-            Ok(url) => url,
-            Err(e) => {
-                finalize_oauth_claim(claimed_state).await?;
-                return Err((
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    format!("Invalid redirect URI: {}", e),
-                ));
-            }
-        };
+        let mut redirect_url = Url::parse(&final_redirect_uri).map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Invalid redirect URI: {}", e),
+            )
+        })?;
 
         // Add authorization code as query parameter (RFC 6749)
         redirect_url
@@ -1186,30 +1103,6 @@ fn oauth2_error(
             error_description: description,
         }),
     )
-}
-
-async fn release_oauth_claim<T>(
-    claim: oauth_transient_state::ClaimedState<T>,
-) -> Result<(), (StatusCode, String)> {
-    claim.release().await.map_err(|e| {
-        error!("Failed to release OAuth transient state: {:?}", e);
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            "OAuth callback failed".to_string(),
-        )
-    })
-}
-
-async fn finalize_oauth_claim<T>(
-    claim: oauth_transient_state::ClaimedState<T>,
-) -> Result<(), (StatusCode, String)> {
-    claim.finalize().await.map_err(|e| {
-        error!("Failed to finalize OAuth transient state: {:?}", e);
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            "OAuth callback failed".to_string(),
-        )
-    })
 }
 
 /// RFC 6749-compliant token endpoint with per-project CORS support
@@ -1642,17 +1535,7 @@ async fn handle_authorization_code_grant(
     let encryption_provider = state.encryption_provider.as_ref().ok_or_else(|| {
         error!("Encryption provider not configured");
         oauth2_error("server_error", Some("Internal server error".to_string()))
-    });
-    let encryption_provider = match encryption_provider {
-        Ok(encryption_provider) => encryption_provider,
-        Err(err) => {
-            code_state.release().await.map_err(|e| {
-                error!("Failed to release authorization code: {:?}", e);
-                oauth2_error("server_error", Some("Internal server error".to_string()))
-            })?;
-            return Err(err);
-        }
-    };
+    })?;
 
     let token_response_body = encryption_provider
         .decrypt(&code_state.token_response_encrypted)
@@ -1660,17 +1543,7 @@ async fn handle_authorization_code_grant(
         .map_err(|e| {
             error!("Failed to decrypt token response: {:?}", e);
             oauth2_error("server_error", Some("Internal server error".to_string()))
-        });
-    let token_response_body = match token_response_body {
-        Ok(token_response_body) => token_response_body,
-        Err(err) => {
-            code_state.release().await.map_err(|e| {
-                error!("Failed to release authorization code: {:?}", e);
-                oauth2_error("server_error", Some("Internal server error".to_string()))
-            })?;
-            return Err(err);
-        }
-    };
+        })?;
 
     info!(
         "Authorization code grant successful for project {} extension {}",
@@ -1685,10 +1558,12 @@ async fn handle_authorization_code_grant(
         .body(Body::from(token_response_body))
         .unwrap();
 
-    code_state.finalize().await.map_err(|e| {
-        error!("Failed to finalize authorization code: {:?}", e);
-        oauth2_error("server_error", Some("Internal server error".to_string()))
-    })?;
+    if let Err(e) = code_state.finalize().await {
+        warn!(
+            "Failed to finalize authorization code (response already built, row will expire via TTL): {:?}",
+            e
+        );
+    }
     Ok(response)
 }
 
