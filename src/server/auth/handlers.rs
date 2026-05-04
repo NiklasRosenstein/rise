@@ -1197,13 +1197,12 @@ pub async fn oauth_callback(
 ) -> Result<Response, (StatusCode, String)> {
     tracing::info!("OAuth callback received");
 
-    // Retrieve PKCE state from token store
-    let oauth_state = state
+    let claimed_state = state
         .token_store
-        .get(&params.state)
+        .claim(&params.state)
         .await
         .map_err(|e| {
-            tracing::error!("Failed to retrieve PKCE state: {:?}", e);
+            tracing::error!("Failed to claim PKCE state: {:?}", e);
             (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "Login failed".to_string(),
@@ -1216,7 +1215,6 @@ pub async fn oauth_callback(
                 "Invalid or expired state token".to_string(),
             )
         })?;
-
     // Build callback URL (must match the one used in signin)
     // IdP callback always uses the main Rise domain (pre-registered with IdP)
     let callback_url = format!(
@@ -1227,7 +1225,7 @@ pub async fn oauth_callback(
     // Exchange authorization code for tokens
     let token_info = state
         .oauth_client
-        .exchange_code_pkce(&params.code, &oauth_state.code_verifier, &callback_url)
+        .exchange_code_pkce(&params.code, &claimed_state.code_verifier, &callback_url)
         .await
         .map_err(|e| {
             tracing::error!("Failed to exchange code: {:#}", e);
@@ -1267,7 +1265,11 @@ pub async fn oauth_callback(
     let max_age = state.jwt_signer.default_expiry_seconds;
 
     // Determine redirect URL
-    let redirect_url = oauth_state.redirect_url.unwrap_or_else(|| "/".to_string());
+    let redirect_url = claimed_state
+        .data()
+        .redirect_url
+        .clone()
+        .unwrap_or_else(|| "/".to_string());
 
     // Determine cookie domain based on request host
     // For Rise subdomains, use the configured cookie domain for subdomain sharing
@@ -1296,7 +1298,7 @@ pub async fn oauth_callback(
 
     // For ingress auth flow (with project), issue Rise JWT
     // For custom domain auth, we may need to redirect to the custom domain to set cookies there
-    if let Some(ref project) = oauth_state.project_name {
+    if let Some(project) = claimed_state.data().project_name.as_deref() {
         tracing::info!(
             "Issuing Rise JWT for ingress auth (project context: {})",
             project
@@ -1336,7 +1338,7 @@ pub async fn oauth_callback(
             })?;
 
         // Check if this is a custom domain auth flow that needs redirect
-        if let Some(custom_domain_base_url) = oauth_state.custom_domain_base_url {
+        if let Some(custom_domain_base_url) = claimed_state.data().custom_domain_base_url.clone() {
             // Generate a one-time token for the custom domain callback
             let completion_token = generate_state_token();
 
@@ -1345,7 +1347,7 @@ pub async fn oauth_callback(
                 rise_jwt,
                 max_age,
                 redirect_url: redirect_url.clone(),
-                project_name: project.clone(),
+                project_name: project.to_string(),
             };
             state
                 .token_store
@@ -1371,6 +1373,12 @@ pub async fn oauth_callback(
                 complete_url
             );
 
+            if let Err(e) = claimed_state.finalize().await {
+                tracing::warn!(
+                    "Failed to finalize PKCE state (response already built, row will expire via TTL): {:?}",
+                    e
+                );
+            }
             return Ok(Redirect::to(&complete_url).into_response());
         }
 
@@ -1381,7 +1389,14 @@ pub async fn oauth_callback(
             max_age,
         );
 
-        return render_success_page(&state, project, &redirect_url, &cookie).await;
+        let response = render_success_page(&state, project, &redirect_url, &cookie).await?;
+        if let Err(e) = claimed_state.finalize().await {
+            tracing::warn!(
+                "Failed to finalize PKCE state (response already built, row will expire via TTL): {:?}",
+                e
+            );
+        }
+        return Ok(response);
     }
 
     // Regular OAuth flow (not ingress auth) - UI login
@@ -1454,7 +1469,14 @@ pub async fn oauth_callback(
     );
 
     // Use success page with delayed redirect to ensure cookie is properly persisted
-    render_ui_login_success_page(&state, &redirect_url, &cookie).await
+    let response = render_ui_login_success_page(&state, &redirect_url, &cookie).await?;
+    if let Err(e) = claimed_state.finalize().await {
+        tracing::warn!(
+            "Failed to finalize PKCE state (response already built, row will expire via TTL): {:?}",
+            e
+        );
+    }
+    Ok(response)
 }
 
 /// Helper function to render the success page with cookie
@@ -1615,13 +1637,12 @@ pub async fn oauth_complete(
 ) -> Result<Response, (StatusCode, String)> {
     tracing::info!("Custom domain auth complete received");
 
-    // Retrieve and consume the completed session
-    let session = state
+    let claimed_session = state
         .token_store
-        .get_completed_session(&params.token)
+        .claim_completed_session(&params.token)
         .await
         .map_err(|e| {
-            tracing::error!("Failed to retrieve completed session: {:?}", e);
+            tracing::error!("Failed to claim completed session: {:?}", e);
             (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "Login failed".to_string(),
@@ -1634,7 +1655,6 @@ pub async fn oauth_complete(
                 "Invalid or expired completion token. Please try logging in again.".to_string(),
             )
         })?;
-
     // Create cookie for the custom domain (empty domain = current host only)
     let cookie_settings = CookieSettings {
         domain: String::new(),
@@ -1642,18 +1662,25 @@ pub async fn oauth_complete(
     };
 
     let cookie = cookie_helpers::create_rise_jwt_cookie(
-        &session.rise_jwt,
+        &claimed_session.rise_jwt,
         &cookie_settings,
-        session.max_age,
+        claimed_session.max_age,
     );
 
-    render_success_page(
+    let response = render_success_page(
         &state,
-        &session.project_name,
-        &session.redirect_url,
+        &claimed_session.project_name,
+        &claimed_session.redirect_url,
         &cookie,
     )
-    .await
+    .await?;
+    if let Err(e) = claimed_session.finalize().await {
+        tracing::warn!(
+            "Failed to finalize completed session (response already built, row will expire via TTL): {:?}",
+            e
+        );
+    }
+    Ok(response)
 }
 
 #[derive(Debug, Deserialize)]

@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE oauth_transient_state\n         SET claimed_at = NULL,\n             claim_expires_at = NULL,\n             claimed_by = NULL\n         WHERE lookup_key = $1 AND claimed_by = $2",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "b32005c2ae2e67536e4816d8fc7efa6f364e9ea412be10ea4351a6cc50be53fb"
+}

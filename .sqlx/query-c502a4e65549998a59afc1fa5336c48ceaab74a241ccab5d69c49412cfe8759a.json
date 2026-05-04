@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM oauth_transient_state\n         WHERE lookup_key = $1 AND claimed_by = $2",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "c502a4e65549998a59afc1fa5336c48ceaab74a241ccab5d69c49412cfe8759a"
+}

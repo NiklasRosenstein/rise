@@ -16,6 +16,7 @@ use std::sync::Arc;
 use std::time::Duration as StdDuration;
 use tracing::{debug, error, info, warn};
 use url::Url;
+use uuid::Uuid;
 
 /// OIDC Discovery document (partial)
 #[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
@@ -622,28 +623,40 @@ pub async fn callback(
         return Ok(crate::server::rate_limit::rate_limit_response(retry_after));
     }
 
-    // Retrieve and validate state
-    let oauth_state: OAuthState = oauth_transient_state::consume(&state.db_pool, &req.state)
-        .await
-        .map_err(|e| {
-            error!("Failed to retrieve OAuth state: {:?}", e);
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "OAuth callback failed".to_string(),
-            )
-        })?
-        .ok_or((StatusCode::BAD_REQUEST, "Invalid state token".to_string()))?;
+    let claimed_state = oauth_transient_state::claim(
+        &state.db_pool,
+        &req.state,
+        Uuid::new_v4(),
+        oauth_transient_state::CLAIM_GRACE_TTL,
+    )
+    .await
+    .map_err(|e| {
+        error!("Failed to retrieve OAuth state: {:?}", e);
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "OAuth callback failed".to_string(),
+        )
+    })?
+    .ok_or((StatusCode::BAD_REQUEST, "Invalid state token".to_string()))?;
+
+    let claimed_state: oauth_transient_state::ClaimedState<OAuthState> = claimed_state;
 
     // Verify project and extension match
-    if oauth_state.project_name != project_name || oauth_state.extension_name != extension_name {
+    if claimed_state.project_name != project_name || claimed_state.extension_name != extension_name
+    {
         return Err((StatusCode::BAD_REQUEST, "State mismatch".to_string()));
     }
 
     // Detect test vs real flow early (before expensive token parsing/encryption)
-    let final_redirect_uri = oauth_state.redirect_uri.clone().ok_or((
-        StatusCode::INTERNAL_SERVER_ERROR,
-        "Missing redirect URI in state".to_string(),
-    ))?;
+    let final_redirect_uri = match claimed_state.redirect_uri.clone() {
+        Some(uri) => uri,
+        None => {
+            return Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Missing redirect URI in state".to_string(),
+            ))
+        }
+    };
 
     let is_test_flow = final_redirect_uri.starts_with(&state.public_url);
 
@@ -678,10 +691,12 @@ pub async fn callback(
     })?;
 
     // Resolve OAuth provider's client secret (prefers encrypted in spec, falls back to env var ref)
-    let encryption_provider = state.encryption_provider.as_ref().ok_or((
-        StatusCode::INTERNAL_SERVER_ERROR,
-        "Encryption provider not configured".to_string(),
-    ))?;
+    let Some(encryption_provider) = state.encryption_provider.as_ref() else {
+        return Err((
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Encryption provider not configured".to_string(),
+        ));
+    };
 
     let ssrf_config = &state.server_settings.ssrf;
 
@@ -768,7 +783,7 @@ pub async fn callback(
             ("client_id", &spec.client_id),
             ("client_secret", &client_secret),
             ("redirect_uri", &redirect_uri),
-            ("code_verifier", &oauth_state.code_verifier),
+            ("code_verifier", &claimed_state.code_verifier),
         ])
         .send()
         .await
@@ -835,6 +850,12 @@ pub async fn callback(
                 .query_pairs_mut()
                 .append_pair("error", "oauth_token_exchange_failed");
 
+            if let Err(e) = claimed_state.finalize().await {
+                warn!(
+                    "Failed to finalize OAuth callback state (response already built, row will expire via TTL): {:?}",
+                    e
+                );
+            }
             return Ok(Redirect::to(redirect_url.as_str()).into_response());
         }
 
@@ -874,6 +895,12 @@ pub async fn callback(
             )
         })?;
 
+        if let Err(e) = claimed_state.finalize().await {
+            warn!(
+                "Failed to finalize OAuth callback state (response already built, row will expire via TTL): {:?}",
+                e
+            );
+        }
         Ok(Redirect::to(redirect_url.as_str()).into_response())
     } else {
         // ===== REAL FLOW: Cache raw token response (no parsing) =====
@@ -901,10 +928,12 @@ pub async fn callback(
         })?;
 
         // Encrypt raw response body
-        let encryption_provider = state.encryption_provider.as_ref().ok_or((
-            StatusCode::INTERNAL_SERVER_ERROR,
-            "Encryption provider not configured".to_string(),
-        ))?;
+        let Some(encryption_provider) = state.encryption_provider.as_ref() else {
+            return Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Encryption provider not configured".to_string(),
+            ));
+        };
 
         let token_response_encrypted = encryption_provider
             .encrypt(&String::from_utf8_lossy(&response_body))
@@ -954,9 +983,9 @@ pub async fn callback(
             project_id: project.id,
             extension_name: extension_name.clone(),
             created_at: Utc::now(),
-            redirect_uri: oauth_state.redirect_uri.clone(),
-            code_challenge: oauth_state.client_code_challenge.clone(),
-            code_challenge_method: oauth_state.client_code_challenge_method.clone(),
+            redirect_uri: claimed_state.redirect_uri.clone(),
+            code_challenge: claimed_state.client_code_challenge.clone(),
+            code_challenge_method: claimed_state.client_code_challenge_method.clone(),
             token_response_encrypted,
             content_type,
             status_code,
@@ -992,7 +1021,7 @@ pub async fn callback(
             .append_pair("code", &authorization_code);
 
         // Pass through application's CSRF state
-        if let Some(app_state) = oauth_state.application_state {
+        if let Some(app_state) = claimed_state.application_state.clone() {
             redirect_url
                 .query_pairs_mut()
                 .append_pair("state", &app_state);
@@ -1008,6 +1037,12 @@ pub async fn callback(
             redirect_url.as_str()
         );
 
+        if let Err(e) = claimed_state.finalize().await {
+            warn!(
+                "Failed to finalize OAuth callback state (response already built, row will expire via TTL): {:?}",
+                e
+            );
+        }
         Ok(Redirect::to(redirect_url.as_str()).into_response())
     }
 }
@@ -1377,22 +1412,25 @@ async fn handle_authorization_code_grant(
         )
     })?;
 
-    // SECURITY: Consume authorization code atomically (DELETE … RETURNING).
-    // This prevents race conditions where the same code could be used twice.
-    // Validations happen after removal - if they fail, code is already consumed.
-    // This is acceptable per RFC 6749: codes MUST be single-use.
-    let code_state: OAuthCodeState = oauth_transient_state::consume(&state.db_pool, &code)
-        .await
-        .map_err(|e| {
-            error!("Failed to consume authorization code: {:?}", e);
-            oauth2_error("server_error", Some("Internal server error".to_string()))
-        })?
-        .ok_or_else(|| {
-            oauth2_error(
-                "invalid_grant",
-                Some("Invalid or expired authorization code".to_string()),
-            )
-        })?;
+    let code_state = oauth_transient_state::claim(
+        &state.db_pool,
+        &code,
+        Uuid::new_v4(),
+        oauth_transient_state::CLAIM_GRACE_TTL,
+    )
+    .await
+    .map_err(|e| {
+        error!("Failed to claim authorization code: {:?}", e);
+        oauth2_error("server_error", Some("Internal server error".to_string()))
+    })?
+    .ok_or_else(|| {
+        oauth2_error(
+            "invalid_grant",
+            Some("Invalid or expired authorization code".to_string()),
+        )
+    })?;
+
+    let code_state: oauth_transient_state::ClaimedState<OAuthCodeState> = code_state;
 
     // Verify project and extension match
     if code_state.project_id != project.id || code_state.extension_name != extension_name {
@@ -1506,10 +1544,16 @@ async fn handle_authorization_code_grant(
     use axum::body::Body;
     let response = Response::builder()
         .status(StatusCode::from_u16(code_state.status_code).unwrap_or(StatusCode::OK))
-        .header(header::CONTENT_TYPE, code_state.content_type)
+        .header(header::CONTENT_TYPE, code_state.content_type.clone())
         .body(Body::from(token_response_body))
         .unwrap();
 
+    if let Err(e) = code_state.finalize().await {
+        warn!(
+            "Failed to finalize authorization code (response already built, row will expire via TTL): {:?}",
+            e
+        );
+    }
     Ok(response)
 }
 
