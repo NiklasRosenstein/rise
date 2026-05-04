@@ -90,6 +90,22 @@ tolerations: []
 
 affinity: {}
 
+# Network policy for the server pods.
+# Only created when metacontroller is enabled (the policy also covers the webhook port).
+networkPolicy:
+  # Restrict which pods can reach the main HTTP port.
+  # By default no "from" selector is set, allowing any pod in the cluster.
+  # Set this to a list of NetworkPolicy peer entries to restrict access.
+  httpIngressFrom: []
+  # Example: only allow the ingress-nginx controller
+  # httpIngressFrom:
+  #   - podSelector:
+  #       matchLabels:
+  #         app.kubernetes.io/name: ingress-nginx
+  #     namespaceSelector:
+  #       matchLabels:
+  #         kubernetes.io/metadata.name: ingress-nginx
+
 # Metacontroller integration
 # See: https://metacontroller.github.io/metacontroller/
 metacontroller:
