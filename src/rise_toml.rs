@@ -90,4 +90,8 @@ pub struct BuildConfig {
 
     /// Disable build cache
     pub no_cache: Option<bool>,
+
+    /// Target platform for the container image build (e.g., "linux/amd64", "linux/arm64").
+    /// Defaults to linux/amd64.
+    pub platform: Option<String>,
 }

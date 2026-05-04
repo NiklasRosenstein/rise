@@ -52,6 +52,7 @@ pub(crate) struct DockerBuildOptions<'a> {
     pub build_context: Option<&'a str>,
     pub build_contexts: &'a std::collections::HashMap<String, String>,
     pub no_cache: bool,
+    pub platform: &'a str,
 }
 
 /// Build image using Docker or Podman with a Dockerfile
@@ -143,7 +144,7 @@ pub(crate) fn build_image_with_dockerfile(options: DockerBuildOptions) -> Result
     }
 
     // Add platform flag for consistent architecture
-    cmd.arg("--platform").arg("linux/amd64");
+    cmd.arg("--platform").arg(options.platform);
 
     // Add SSL certificate using named build context (bind mount)
     // RAII cleanup via SslCertContext drop

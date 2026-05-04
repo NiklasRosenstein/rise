@@ -117,7 +117,7 @@ struct DeployArgs {
     #[arg(long)]
     http_port: Option<u16>,
     /// Push the --image to the Rise registry instead of deploying it directly.
-    /// Pulls the image locally (platform linux/amd64) and pushes to the internal registry.
+    /// Pulls the image locally and pushes to the internal registry.
     #[arg(long)]
     push_image: bool,
     /// Runtime environment variables (format: KEY=VALUE, can be specified multiple times).

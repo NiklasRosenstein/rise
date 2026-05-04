@@ -78,6 +78,11 @@ pub struct BuildArgs {
     /// Disable build cache (equivalent to docker build --no-cache, pack build --clear-cache)
     #[arg(long)]
     pub no_cache: bool,
+
+    /// Target platform for the container image build (e.g., linux/amd64, linux/arm64).
+    /// Defaults to linux/amd64 for Rise server compatibility.
+    #[arg(long)]
+    pub platform: Option<String>,
 }
 
 /// Options for building container images
@@ -109,6 +114,8 @@ pub(crate) struct BuildOptions {
     pub build_contexts: std::collections::HashMap<String, String>,
     /// Disable build cache
     pub no_cache: bool,
+    /// Target platform (e.g., "linux/amd64")
+    pub platform: String,
 }
 
 impl BuildOptions {
@@ -244,6 +251,13 @@ impl BuildOptions {
                     .as_ref()
                     .and_then(|c| c.no_cache)
                     .unwrap_or(false),
+
+            platform: build_args
+                .platform
+                .clone()
+                .or_else(|| crate::build::env_var_non_empty("RISE_PLATFORM"))
+                .or_else(|| project_config.as_ref().and_then(|c| c.platform.clone()))
+                .unwrap_or_else(|| crate::build::DEFAULT_PLATFORM.to_string()),
 
             push: false,
         }
