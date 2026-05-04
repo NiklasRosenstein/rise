@@ -15,6 +15,64 @@ rust = { version = "1.95.0", profile = "default" }
 kubectl = "latest"
 k9s = "latest"
 
+[tasks."check:hosts"]
+description = "Verify /etc/hosts has the required rise-registry and rise.local entries."
+run = """
+ok=true
+if ! grep -q '\\brise-registry\\b' /etc/hosts; then
+  echo "MISSING: /etc/hosts entry for 'rise-registry'"
+  ok=false
+fi
+if ! grep -q '\\brise\\.local\\b' /etc/hosts; then
+  echo "MISSING: /etc/hosts entry for 'rise.local'"
+  ok=false
+fi
+if [ "$ok" = false ]; then
+  echo ""
+  echo "Run 'mise setup:hosts' to fix this."
+  exit 1
+fi
+echo "OK: /etc/hosts has rise-registry and rise.local entries."
+"""
+
+[tasks."check:docker"]
+description = "Verify Docker is running and has insecure-registries configured."
+run = """
+if ! docker info > /dev/null 2>&1; then
+  echo "FAIL: Docker daemon is not running."
+  echo "Start Docker and try again."
+  exit 1
+fi
+if [ -f /etc/docker/daemon.json ] && ! grep -q 'rise-registry:5000' /etc/docker/daemon.json; then
+  echo "MISSING: 'rise-registry:5000' not in /etc/docker/daemon.json insecure-registries."
+  echo ""
+  echo "Run 'mise setup:docker' to fix this."
+  exit 1
+fi
+echo "OK: Docker is running and configured."
+"""
+
+[tasks."check:k8s"]
+description = "Verify a Kubernetes cluster (minikube or k3s) is reachable."
+run = """
+if ! kubectl cluster-info > /dev/null 2>&1; then
+  echo "FAIL: No Kubernetes cluster reachable via kubectl."
+  echo ""
+  echo "Run 'mise minikube:up' or 'mise k3s:up' to set one up."
+  exit 1
+fi
+echo "OK: Kubernetes cluster is reachable."
+"""
+
+[tasks.dev]
+depends = ["check:hosts", "check:docker", "check:k8s"]
+run = """
+docker compose up -d
+mise run db:migrate
+mise run frontend:dev &
+mise run backend:run
+"""
+
 [tasks."sqlx:prepare"]
 description = "Prepare the SQLX query cache that needs to be committed for building with SQLX_OFFLINE=true."
 run = "cargo sqlx prepare -- --features cli,backend --all-targets"
