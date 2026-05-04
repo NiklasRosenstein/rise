@@ -294,11 +294,6 @@
                 "null"
               ]
             },
-            "legacy_adopt_existing_resources_to_metacontroller": {
-              "default": true,
-              "description": "Adopt existing Kubernetes resources during Metacontroller migration.\nPatches pre-existing resources with Metacontroller's ownership label\nso they are adopted rather than rejected. No-op once all resources\nare labeled. Defaults to true.",
-              "type": "boolean"
-            },
             "metacontroller_pod_label_selector": {
               "default": null,
               "description": "Label selector used to find metacontroller pods.\nDefaults to \"app.kubernetes.io/name=metacontroller-operator\".",

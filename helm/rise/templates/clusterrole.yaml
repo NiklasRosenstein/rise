@@ -37,17 +37,3 @@ rules:
 - apiGroups: [""]
   resources: ["endpoints"]
   verbs: ["get", "patch"]
-
-{{- if .Values.metacontroller.adoptExistingResources }}
-# Patch existing resources with Metacontroller ownership label during migration.
-# Can be disabled after migration is complete.
-- apiGroups: [""]
-  resources: ["namespaces", "secrets", "serviceaccounts", "services", "endpoints"]
-  verbs: ["get", "list", "patch"]
-- apiGroups: ["apps"]
-  resources: ["deployments"]
-  verbs: ["get", "list", "patch"]
-- apiGroups: ["networking.k8s.io"]
-  resources: ["ingresses", "networkpolicies"]
-  verbs: ["get", "list", "patch"]
-{{- end }}

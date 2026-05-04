@@ -122,10 +122,6 @@ metacontroller:
   # Namespace where an external metacontroller operator runs (for NetworkPolicy).
   # Only used when install=false. When install=true, the release namespace is used.
   # namespace: "metacontroller"
-  # Patch existing resources with Metacontroller ownership labels during
-  # migration from the old controller. Adds RBAC permissions for get/list/patch
-  # on managed resource types. Disable after migration is complete.
-  adoptExistingResources: true
   # Install the Metacontroller operator itself as a subchart dependency.
   # Disable this if Metacontroller is already installed in the cluster.
   install: true
