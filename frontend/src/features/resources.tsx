@@ -149,17 +149,21 @@ function sortObjectKeys(obj) {
 }
 
 // Environments Component
-export function EnvironmentsList({ projectName }) {
+export function EnvironmentsList({ projectName, platformConstraints = null }) {
     const [environments, setEnvironments] = useState([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [editingEnv, setEditingEnv] = useState(null);
-    const [formData, setFormData] = useState({ name: '', primary_deployment_group: '', is_production: false, color: 'green' });
+    const [formData, setFormData] = useState({
+        name: '', primary_deployment_group: '', is_production: false, color: 'green',
+        min_replicas: '', max_replicas: '', min_cpu: '', max_cpu: '', min_memory: '', max_memory: '',
+    });
     const [confirmDialogOpen, setConfirmDialogOpen] = useState(false);
     const [envToDelete, setEnvToDelete] = useState(null);
     const [deleting, setDeleting] = useState(false);
     const [saving, setSaving] = useState(false);
+    const [currentUser, setCurrentUser] = useState(null);
     const { showToast } = useToast();
 
     const loadEnvironments = useCallback(async () => {
@@ -177,19 +181,35 @@ export function EnvironmentsList({ projectName }) {
         loadEnvironments();
     }, [loadEnvironments]);
 
+    useEffect(() => {
+        api.getMe().then(setCurrentUser).catch(() => {});
+    }, []);
+
+    const isAdmin = currentUser?.is_admin ?? false;
+
     const handleAddClick = () => {
         setEditingEnv(null);
-        setFormData({ name: '', primary_deployment_group: '', is_production: false, color: 'green' });
+        setFormData({
+            name: '', primary_deployment_group: '', is_production: false, color: 'green',
+            min_replicas: '', max_replicas: '', min_cpu: '', max_cpu: '', min_memory: '', max_memory: '',
+        });
         setIsModalOpen(true);
     };
 
     const handleEditClick = (env) => {
         setEditingEnv(env);
+        const c = env.deployment_constraints;
         setFormData({
             name: env.name,
             primary_deployment_group: env.primary_deployment_group || '',
             is_production: env.is_production,
             color: env.color || 'green',
+            min_replicas: c?.min_replicas?.toString() ?? '',
+            max_replicas: c?.max_replicas?.toString() ?? '',
+            min_cpu: c?.min_cpu ?? '',
+            max_cpu: c?.max_cpu ?? '',
+            min_memory: c?.min_memory ?? '',
+            max_memory: c?.max_memory ?? '',
         });
         setIsModalOpen(true);
     };
@@ -208,11 +228,28 @@ export function EnvironmentsList({ projectName }) {
         setSaving(true);
         try {
             if (editingEnv) {
-                await api.updateEnvironment(projectName, editingEnv.name, {
+                const updates: any = {
                     primary_deployment_group: formData.primary_deployment_group || null,
                     is_production: formData.is_production,
                     color: formData.color,
-                });
+                };
+                // Include deployment constraints if admin
+                if (isAdmin) {
+                    const hasAnyConstraint = formData.min_replicas || formData.max_replicas ||
+                        formData.min_cpu || formData.max_cpu || formData.min_memory || formData.max_memory;
+                    updates.deployment_constraints = hasAnyConstraint ? {
+                        min_replicas: formData.min_replicas ? parseInt(formData.min_replicas) : null,
+                        max_replicas: formData.max_replicas ? parseInt(formData.max_replicas) : null,
+                        min_cpu: formData.min_cpu || null,
+                        max_cpu: formData.max_cpu || null,
+                        min_memory: formData.min_memory || null,
+                        max_memory: formData.max_memory || null,
+                    } : {
+                        min_replicas: null, max_replicas: null,
+                        min_cpu: null, max_cpu: null, min_memory: null, max_memory: null,
+                    };
+                }
+                await api.updateEnvironment(projectName, editingEnv.name, updates);
                 showToast(`Environment ${editingEnv.name} updated`, 'success');
             } else {
                 await api.createEnvironment(projectName, {
@@ -265,13 +302,14 @@ export function EnvironmentsList({ projectName }) {
                         <tr>
                             <MonoTh className="px-6 py-3 text-left">Name</MonoTh>
                             <MonoTh className="px-6 py-3 text-left">Primary Group</MonoTh>
+                            <MonoTh className="px-6 py-3 text-left">Resources</MonoTh>
                             <MonoTh className="px-6 py-3 text-left">Created</MonoTh>
                             <MonoTh className="px-6 py-3 text-left">Actions</MonoTh>
                         </tr>
                     </MonoTableHead>
                     <MonoTableBody>
                         {environments.length === 0 ? (
-                            <MonoTableEmptyRow colSpan={4}>No environments configured.</MonoTableEmptyRow>
+                            <MonoTableEmptyRow colSpan={5}>No environments configured.</MonoTableEmptyRow>
                         ) : (
                             environments.map(env => (
                                 <MonoTableRow
@@ -289,6 +327,21 @@ export function EnvironmentsList({ projectName }) {
                                         </div>
                                     </MonoTd>
                                     <MonoTd className="px-6 py-4 text-sm text-gray-700 dark:text-gray-300">{env.primary_deployment_group || '-'}</MonoTd>
+                                    <MonoTd className="px-6 py-4 text-sm text-gray-700 dark:text-gray-300">
+                                        {env.deployment_constraints ? (
+                                            <span className="text-xs">
+                                                {env.deployment_constraints.min_replicas != null && env.deployment_constraints.max_replicas != null
+                                                    ? `${env.deployment_constraints.min_replicas}–${env.deployment_constraints.max_replicas} replicas`
+                                                    : null}
+                                                {env.deployment_constraints.min_cpu && env.deployment_constraints.max_cpu
+                                                    ? `${env.deployment_constraints.min_replicas != null ? ' · ' : ''}${env.deployment_constraints.min_cpu}–${env.deployment_constraints.max_cpu} cpu`
+                                                    : null}
+                                                {env.deployment_constraints.min_memory && env.deployment_constraints.max_memory
+                                                    ? `${(env.deployment_constraints.min_cpu || env.deployment_constraints.min_replicas != null) ? ' · ' : ''}${env.deployment_constraints.min_memory}–${env.deployment_constraints.max_memory} mem`
+                                                    : null}
+                                            </span>
+                                        ) : '-'}
+                                    </MonoTd>
                                     <MonoTd className="px-6 py-4 whitespace-nowrap text-sm text-gray-700 dark:text-gray-300">{formatDate(env.created_at)}</MonoTd>
                                     <MonoTd className="px-6 py-4 text-sm">
                                         <div className="flex gap-2">
@@ -359,6 +412,61 @@ export function EnvironmentsList({ projectName }) {
                             onChange={(c) => setFormData({ ...formData, color: c })}
                         />
                     </div>
+
+                    {isAdmin && editingEnv && (
+                        <div className="mt-4 pt-4 border-t border-gray-200 dark:border-gray-700">
+                            <span className="mono-label">Resource Constraints</span>
+                            <p className="text-xs text-gray-500 dark:text-gray-400 mb-3">
+                                Limit the resource range for deployments in this environment. Leave empty to use platform defaults.
+                            </p>
+                            <div className="grid grid-cols-2 gap-3">
+                                <FormField
+                                    label="Min Replicas"
+                                    id="env-min-replicas"
+                                    type="number"
+                                    value={formData.min_replicas}
+                                    onChange={(e) => setFormData({ ...formData, min_replicas: e.target.value })}
+                                    placeholder={platformConstraints?.min_replicas?.toString() ?? '1'}
+                                />
+                                <FormField
+                                    label="Max Replicas"
+                                    id="env-max-replicas"
+                                    type="number"
+                                    value={formData.max_replicas}
+                                    onChange={(e) => setFormData({ ...formData, max_replicas: e.target.value })}
+                                    placeholder={platformConstraints?.max_replicas?.toString() ?? '1'}
+                                />
+                                <FormField
+                                    label="Min CPU"
+                                    id="env-min-cpu"
+                                    value={formData.min_cpu}
+                                    onChange={(e) => setFormData({ ...formData, min_cpu: e.target.value })}
+                                    placeholder={platformConstraints?.min_cpu ?? '100m'}
+                                />
+                                <FormField
+                                    label="Max CPU"
+                                    id="env-max-cpu"
+                                    value={formData.max_cpu}
+                                    onChange={(e) => setFormData({ ...formData, max_cpu: e.target.value })}
+                                    placeholder={platformConstraints?.max_cpu ?? '2'}
+                                />
+                                <FormField
+                                    label="Min Memory"
+                                    id="env-min-memory"
+                                    value={formData.min_memory}
+                                    onChange={(e) => setFormData({ ...formData, min_memory: e.target.value })}
+                                    placeholder={platformConstraints?.min_memory ?? '64Mi'}
+                                />
+                                <FormField
+                                    label="Max Memory"
+                                    id="env-max-memory"
+                                    value={formData.max_memory}
+                                    onChange={(e) => setFormData({ ...formData, max_memory: e.target.value })}
+                                    placeholder={platformConstraints?.max_memory ?? '2Gi'}
+                                />
+                            </div>
+                        </div>
+                    )}
 
                     <ModalActions>
                         <Button

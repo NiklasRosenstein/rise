@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        SELECT\n            id, name,\n            status as \"status: ProjectStatus\",\n            access_class,\n            owner_user_id, owner_team_id,\n            finalizers, source_url,\n            min_replicas, max_replicas, min_cpu, max_cpu, min_memory, max_memory,\n            created_at, updated_at\n        FROM projects\n        WHERE name = $1\n        ",
+  "query": "\n        SELECT\n            id, name,\n            status as \"status: ProjectStatus\",\n            access_class,\n            owner_user_id, owner_team_id,\n            finalizers, source_url,\n            created_at, updated_at\n        FROM projects\n        WHERE name = $1\n        ",
   "describe": {
     "columns": [
       {
@@ -45,41 +45,11 @@
       },
       {
         "ordinal": 8,
-        "name": "min_replicas",
-        "type_info": "Int4"
-      },
-      {
-        "ordinal": 9,
-        "name": "max_replicas",
-        "type_info": "Int4"
-      },
-      {
-        "ordinal": 10,
-        "name": "min_cpu",
-        "type_info": "Text"
-      },
-      {
-        "ordinal": 11,
-        "name": "max_cpu",
-        "type_info": "Text"
-      },
-      {
-        "ordinal": 12,
-        "name": "min_memory",
-        "type_info": "Text"
-      },
-      {
-        "ordinal": 13,
-        "name": "max_memory",
-        "type_info": "Text"
-      },
-      {
-        "ordinal": 14,
         "name": "created_at",
         "type_info": "Timestamptz"
       },
       {
-        "ordinal": 15,
+        "ordinal": 9,
         "name": "updated_at",
         "type_info": "Timestamptz"
       }
@@ -98,15 +68,9 @@
       true,
       false,
       true,
-      true,
-      true,
-      true,
-      true,
-      true,
-      true,
       false,
       false
     ]
   },
-  "hash": "57854d3971d80c0e09ed27d37e232e091a901872fb998d1e704ea73394a84db2"
+  "hash": "5d53ecf198714136af76e5eaf6ac7b3c676519a411a309b7f967e37f4b3af899"
 }

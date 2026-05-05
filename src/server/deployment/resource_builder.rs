@@ -1439,12 +1439,6 @@ mod tests {
             owner_team_id: None,
             finalizers: vec![],
             source_url: None,
-            min_replicas: None,
-            max_replicas: None,
-            min_cpu: None,
-            max_cpu: None,
-            min_memory: None,
-            max_memory: None,
             created_at: chrono::Utc::now(),
             updated_at: chrono::Utc::now(),
         }

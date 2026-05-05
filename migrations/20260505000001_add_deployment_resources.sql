@@ -1,5 +1,5 @@
--- Per-project admin-controlled deployment constraints (all nullable = inherit platform defaults)
-ALTER TABLE projects
+-- Per-environment admin-controlled deployment constraints (all nullable = inherit platform defaults)
+ALTER TABLE environments
   ADD COLUMN min_replicas INTEGER,
   ADD COLUMN max_replicas INTEGER,
   ADD COLUMN min_cpu TEXT,

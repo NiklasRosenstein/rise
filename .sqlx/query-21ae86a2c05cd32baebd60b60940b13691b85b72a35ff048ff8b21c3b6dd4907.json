@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        SELECT\n            id, name,\n            status as \"status: ProjectStatus\",\n            access_class,\n            owner_user_id, owner_team_id,\n            finalizers, source_url,\n            min_replicas, max_replicas, min_cpu, max_cpu, min_memory, max_memory,\n            created_at, updated_at\n        FROM projects\n        WHERE status = 'Deleting' AND $1 = ANY(finalizers)\n        ORDER BY updated_at ASC\n        LIMIT $2\n        ",
+  "query": "\n        SELECT id, project_id, name, primary_deployment_group, is_production, color,\n               min_replicas, max_replicas, min_cpu, max_cpu, min_memory, max_memory,\n               created_at, updated_at\n        FROM environments\n        WHERE project_id = $1\n        ORDER BY\n            is_production DESC,\n            name ASC\n        ",
   "describe": {
     "columns": [
       {
@@ -10,95 +10,82 @@
       },
       {
         "ordinal": 1,
+        "name": "project_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
         "name": "name",
         "type_info": "Text"
       },
       {
-        "ordinal": 2,
-        "name": "status: ProjectStatus",
-        "type_info": "Text"
-      },
-      {
         "ordinal": 3,
-        "name": "access_class",
+        "name": "primary_deployment_group",
         "type_info": "Text"
       },
       {
         "ordinal": 4,
-        "name": "owner_user_id",
-        "type_info": "Uuid"
+        "name": "is_production",
+        "type_info": "Bool"
       },
       {
         "ordinal": 5,
-        "name": "owner_team_id",
-        "type_info": "Uuid"
-      },
-      {
-        "ordinal": 6,
-        "name": "finalizers",
-        "type_info": "TextArray"
-      },
-      {
-        "ordinal": 7,
-        "name": "source_url",
+        "name": "color",
         "type_info": "Text"
       },
       {
-        "ordinal": 8,
+        "ordinal": 6,
         "name": "min_replicas",
         "type_info": "Int4"
       },
       {
-        "ordinal": 9,
+        "ordinal": 7,
         "name": "max_replicas",
         "type_info": "Int4"
       },
       {
-        "ordinal": 10,
+        "ordinal": 8,
         "name": "min_cpu",
         "type_info": "Text"
       },
       {
-        "ordinal": 11,
+        "ordinal": 9,
         "name": "max_cpu",
         "type_info": "Text"
       },
       {
-        "ordinal": 12,
+        "ordinal": 10,
         "name": "min_memory",
         "type_info": "Text"
       },
       {
-        "ordinal": 13,
+        "ordinal": 11,
         "name": "max_memory",
         "type_info": "Text"
       },
       {
-        "ordinal": 14,
+        "ordinal": 12,
         "name": "created_at",
         "type_info": "Timestamptz"
       },
       {
-        "ordinal": 15,
+        "ordinal": 13,
         "name": "updated_at",
         "type_info": "Timestamptz"
       }
     ],
     "parameters": {
       "Left": [
-        "Text",
-        "Int8"
+        "Uuid"
       ]
     },
     "nullable": [
       false,
       false,
       false,
-      false,
-      true,
       true,
       false,
-      true,
+      false,
       true,
       true,
       true,
@@ -109,5 +96,5 @@
       false
     ]
   },
-  "hash": "2ee75c458c0282abe2dcbc0d06e42dc5c7cb306d9d92ce672bc52ecb0a8e47fd"
+  "hash": "21ae86a2c05cd32baebd60b60940b13691b85b72a35ff048ff8b21c3b6dd4907"
 }

@@ -27,13 +27,6 @@ pub struct Project {
     pub finalizers: Vec<String>,
     /// URL to where the project code lives (e.g. a GitHub/GitLab repository)
     pub source_url: Option<String>,
-    /// Per-project deployment constraints (NULL = inherit platform defaults)
-    pub min_replicas: Option<i32>,
-    pub max_replicas: Option<i32>,
-    pub min_cpu: Option<String>,
-    pub max_cpu: Option<String>,
-    pub min_memory: Option<String>,
-    pub max_memory: Option<String>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
@@ -128,6 +121,13 @@ pub struct Environment {
     pub primary_deployment_group: Option<String>,
     pub is_production: bool,
     pub color: String,
+    /// Per-environment deployment constraints (NULL = inherit platform defaults)
+    pub min_replicas: Option<i32>,
+    pub max_replicas: Option<i32>,
+    pub min_cpu: Option<String>,
+    pub max_cpu: Option<String>,
+    pub min_memory: Option<String>,
+    pub max_memory: Option<String>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }

@@ -376,36 +376,6 @@ pub async fn show_project(
                 defaults.replicas, defaults.cpu, defaults.memory
             );
         }
-        if let Some(ref constraints) = project.deployment_constraints {
-            println!("\nDeployment Constraints:");
-            if let Some(min) = constraints.min_replicas {
-                print!("  Min Replicas: {}", min);
-            }
-            if let Some(max) = constraints.max_replicas {
-                print!("  Max Replicas: {}", max);
-            }
-            if constraints.min_replicas.is_some() || constraints.max_replicas.is_some() {
-                println!();
-            }
-            if let Some(ref min) = constraints.min_cpu {
-                print!("  Min CPU: {}", min);
-            }
-            if let Some(ref max) = constraints.max_cpu {
-                print!("  Max CPU: {}", max);
-            }
-            if constraints.min_cpu.is_some() || constraints.max_cpu.is_some() {
-                println!();
-            }
-            if let Some(ref min) = constraints.min_memory {
-                print!("  Min Memory: {}", min);
-            }
-            if let Some(ref max) = constraints.max_memory {
-                print!("  Max Memory: {}", max);
-            }
-            if constraints.min_memory.is_some() || constraints.max_memory.is_some() {
-                println!();
-            }
-        }
     } else if response.status() == reqwest::StatusCode::NOT_FOUND {
         // Handle 404 with potential fuzzy match suggestions
         let error: ProjectErrorResponse = response

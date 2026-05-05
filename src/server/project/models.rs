@@ -88,12 +88,12 @@ pub struct Project {
     pub app_teams: Vec<TeamInfo>, // Teams whose members can access the deployed app
     #[serde(skip_serializing_if = "Option::is_none")]
     pub source_url: Option<String>, // URL to where the project code lives
-    /// Per-project deployment constraints (admin-settable)
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub deployment_constraints: Option<ProjectDeploymentConstraints>,
     /// Effective deployment defaults (platform defaults, shown to users)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub deployment_defaults: Option<DeploymentDefaultsInfo>,
+    /// Platform-level deployment constraints (min/max ranges)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub platform_constraints: Option<PlatformConstraintsInfo>,
     // Timestamps
     #[serde(default)]
     pub created: String,
@@ -128,9 +128,6 @@ pub struct UpdateProjectRequest {
     pub app_users: Option<Vec<String>>,     // User emails or IDs
     pub app_teams: Option<Vec<String>>,     // Team names or IDs
     pub source_url: Option<Option<String>>, // URL to where the project code lives (None = don't update, Some(None) = clear)
-    /// Per-project deployment constraints (admin-only)
-    #[serde(default)]
-    pub deployment_constraints: Option<ProjectDeploymentConstraints>,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
@@ -160,23 +157,23 @@ pub enum OwnerInfo {
     Team(TeamInfo),
 }
 
-/// Per-project deployment constraints (admin-settable)
-#[derive(Debug, Deserialize, Serialize, Clone, Default)]
-pub struct ProjectDeploymentConstraints {
-    pub min_replicas: Option<u32>,
-    pub max_replicas: Option<u32>,
-    pub min_cpu: Option<String>,
-    pub max_cpu: Option<String>,
-    pub min_memory: Option<String>,
-    pub max_memory: Option<String>,
-}
-
 /// Effective deployment defaults (from platform settings)
 #[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct DeploymentDefaultsInfo {
     pub replicas: u32,
     pub cpu: String,
     pub memory: String,
+}
+
+/// Platform-level deployment constraints (from platform settings)
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub struct PlatformConstraintsInfo {
+    pub min_replicas: u32,
+    pub max_replicas: u32,
+    pub min_cpu: String,
+    pub max_cpu: String,
+    pub min_memory: String,
+    pub max_memory: String,
 }
 
 // Query parameters for project lookup

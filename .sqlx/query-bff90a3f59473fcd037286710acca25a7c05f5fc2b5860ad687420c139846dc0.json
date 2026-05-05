@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        UPDATE projects\n        SET source_url = $2\n        WHERE id = $1\n        RETURNING\n            id, name,\n            status as \"status: ProjectStatus\",\n            access_class,\n            owner_user_id, owner_team_id,\n            finalizers, source_url,\n            min_replicas, max_replicas, min_cpu, max_cpu, min_memory, max_memory,\n            created_at, updated_at\n        ",
+  "query": "\n            SELECT\n                id, name,\n                status as \"status: ProjectStatus\",\n                access_class,\n                owner_user_id, owner_team_id,\n                finalizers, source_url,\n                created_at, updated_at\n            FROM projects\n            WHERE owner_user_id = $1\n            ORDER BY created_at DESC\n            ",
   "describe": {
     "columns": [
       {
@@ -45,49 +45,18 @@
       },
       {
         "ordinal": 8,
-        "name": "min_replicas",
-        "type_info": "Int4"
-      },
-      {
-        "ordinal": 9,
-        "name": "max_replicas",
-        "type_info": "Int4"
-      },
-      {
-        "ordinal": 10,
-        "name": "min_cpu",
-        "type_info": "Text"
-      },
-      {
-        "ordinal": 11,
-        "name": "max_cpu",
-        "type_info": "Text"
-      },
-      {
-        "ordinal": 12,
-        "name": "min_memory",
-        "type_info": "Text"
-      },
-      {
-        "ordinal": 13,
-        "name": "max_memory",
-        "type_info": "Text"
-      },
-      {
-        "ordinal": 14,
         "name": "created_at",
         "type_info": "Timestamptz"
       },
       {
-        "ordinal": 15,
+        "ordinal": 9,
         "name": "updated_at",
         "type_info": "Timestamptz"
       }
     ],
     "parameters": {
       "Left": [
-        "Uuid",
-        "Text"
+        "Uuid"
       ]
     },
     "nullable": [
@@ -99,15 +68,9 @@
       true,
       false,
       true,
-      true,
-      true,
-      true,
-      true,
-      true,
-      true,
       false,
       false
     ]
   },
-  "hash": "1125c7afea56d3848f07e629037422fd9ef0e26239dd07a58e8574a6f2c80689"
+  "hash": "bff90a3f59473fcd037286710acca25a7c05f5fc2b5860ad687420c139846dc0"
 }

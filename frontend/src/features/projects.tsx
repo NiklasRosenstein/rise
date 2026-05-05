@@ -703,7 +703,7 @@ export function ProjectDetail({ projectName, initialTab }) {
                 )}
                 {activeTab === 'environments' && (
                     <div>
-                        <EnvironmentsList projectName={projectName} />
+                        <EnvironmentsList projectName={projectName} platformConstraints={project?.platform_constraints} />
                     </div>
                 )}
                 {activeTab === 'service-accounts' && (

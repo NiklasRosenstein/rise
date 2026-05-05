@@ -787,7 +787,7 @@ pub async fn create_deployment(
 
     // Resolve effective deployment resources (replicas, cpu, memory)
     // Priority: request payload > platform defaults
-    // Then validate against effective constraints (project-specific if set, else platform defaults)
+    // Then validate against effective constraints (environment-specific if set, else platform defaults)
     let (effective_replicas, effective_cpu, effective_memory) = {
         #[cfg(feature = "backend")]
         {
@@ -810,30 +810,32 @@ pub async fn create_deployment(
                 .clone()
                 .unwrap_or_else(|| defaults.memory.clone());
 
-            // Build effective constraints: project-specific overrides > platform defaults
-            let eff_min_replicas = project
-                .min_replicas
+            // Build effective constraints: environment-specific overrides > platform defaults
+            let eff_min_replicas = resolved_environment
+                .as_ref()
+                .and_then(|e| e.min_replicas)
                 .map(|v| v as u32)
                 .unwrap_or(platform_constraints.min_replicas);
-            let eff_max_replicas = project
-                .max_replicas
+            let eff_max_replicas = resolved_environment
+                .as_ref()
+                .and_then(|e| e.max_replicas)
                 .map(|v| v as u32)
                 .unwrap_or(platform_constraints.max_replicas);
-            let eff_min_cpu = project
-                .min_cpu
-                .as_deref()
+            let eff_min_cpu = resolved_environment
+                .as_ref()
+                .and_then(|e| e.min_cpu.as_deref())
                 .unwrap_or(&platform_constraints.min_cpu);
-            let eff_max_cpu = project
-                .max_cpu
-                .as_deref()
+            let eff_max_cpu = resolved_environment
+                .as_ref()
+                .and_then(|e| e.max_cpu.as_deref())
                 .unwrap_or(&platform_constraints.max_cpu);
-            let eff_min_memory = project
-                .min_memory
-                .as_deref()
+            let eff_min_memory = resolved_environment
+                .as_ref()
+                .and_then(|e| e.min_memory.as_deref())
                 .unwrap_or(&platform_constraints.min_memory);
-            let eff_max_memory = project
-                .max_memory
-                .as_deref()
+            let eff_max_memory = resolved_environment
+                .as_ref()
+                .and_then(|e| e.max_memory.as_deref())
                 .unwrap_or(&platform_constraints.max_memory);
 
             // Validate replicas

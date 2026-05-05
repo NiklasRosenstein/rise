@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        INSERT INTO projects (name, status, access_class, owner_user_id, owner_team_id, source_url)\n        VALUES ($1, $2, $3, $4, $5, $6)\n        RETURNING\n            id, name,\n            status as \"status: ProjectStatus\",\n            access_class,\n            owner_user_id, owner_team_id,\n            finalizers, source_url,\n            min_replicas, max_replicas, min_cpu, max_cpu, min_memory, max_memory,\n            created_at, updated_at\n        ",
+  "query": "\n        INSERT INTO projects (name, status, access_class, owner_user_id, owner_team_id, source_url)\n        VALUES ($1, $2, $3, $4, $5, $6)\n        RETURNING\n            id, name,\n            status as \"status: ProjectStatus\",\n            access_class,\n            owner_user_id, owner_team_id,\n            finalizers, source_url,\n            created_at, updated_at\n        ",
   "describe": {
     "columns": [
       {
@@ -45,41 +45,11 @@
       },
       {
         "ordinal": 8,
-        "name": "min_replicas",
-        "type_info": "Int4"
-      },
-      {
-        "ordinal": 9,
-        "name": "max_replicas",
-        "type_info": "Int4"
-      },
-      {
-        "ordinal": 10,
-        "name": "min_cpu",
-        "type_info": "Text"
-      },
-      {
-        "ordinal": 11,
-        "name": "max_cpu",
-        "type_info": "Text"
-      },
-      {
-        "ordinal": 12,
-        "name": "min_memory",
-        "type_info": "Text"
-      },
-      {
-        "ordinal": 13,
-        "name": "max_memory",
-        "type_info": "Text"
-      },
-      {
-        "ordinal": 14,
         "name": "created_at",
         "type_info": "Timestamptz"
       },
       {
-        "ordinal": 15,
+        "ordinal": 9,
         "name": "updated_at",
         "type_info": "Timestamptz"
       }
@@ -103,15 +73,9 @@
       true,
       false,
       true,
-      true,
-      true,
-      true,
-      true,
-      true,
-      true,
       false,
       false
     ]
   },
-  "hash": "15ef0b0f50d7837f5da949b46eec199fd91ab26d9b590792f1e6d6b7727c38a5"
+  "hash": "ec31c09e11cb645ad614f6c32ab659e2531b14f29c30f3fbceaf89336060e70b"
 }

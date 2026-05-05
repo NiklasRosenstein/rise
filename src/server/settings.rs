@@ -399,7 +399,7 @@ impl Default for DeploymentDefaults {
 }
 
 /// Platform-level constraints for deployment resources.
-/// Per-project overrides (stored in the database) can narrow these ranges.
+/// Per-environment overrides (stored in the database) can narrow these ranges.
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
 pub struct DeploymentConstraints {
     /// Minimum replicas allowed (default: 1)
