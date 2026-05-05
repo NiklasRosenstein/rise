@@ -171,7 +171,7 @@
       "type": "object"
     },
     "DeploymentConstraints": {
-      "description": "Platform-level constraints for deployment resources.\nPer-project overrides (stored in the database) can narrow these ranges.",
+      "description": "Platform-level constraints for deployment resources.\nPer-environment overrides (stored in the database) can narrow these ranges.",
       "properties": {
         "max_cpu": {
           "default": "2",
