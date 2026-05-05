@@ -31,13 +31,6 @@ pub struct RegistryCredentials {
     pub auth_method: RegistryAuthMethod,
 }
 
-/// Registry credentials request
-#[derive(Debug, Deserialize)]
-pub struct GetRegistryCredsRequest {
-    /// Project ID or name
-    pub project: String,
-}
-
 /// Registry credentials response wrapper
 #[derive(Debug, Serialize)]
 pub struct GetRegistryCredsResponse {

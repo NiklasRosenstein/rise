@@ -98,8 +98,12 @@ Use environment variable substitution for secrets and environment-specific value
 Operator reference endpoint:
 
 ```text
-GET /api/v1/registry/credentials?project=<project-name>
+GET /api/v1/projects/<project-name>/deployments/<deployment-id>/registry-credentials
 ```
+
+Credentials are scoped to a specific deployment and are only available while the deployment
+is in a pre-push state (Pending, Building, or Pushing). The endpoint returns 409 Conflict
+if the deployment has already progressed past the Pushing state.
 
 Returned credentials are provider-specific and intended for authenticated clients.
 

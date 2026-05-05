@@ -4,7 +4,7 @@ use axum::{routing::get, Router};
 
 pub fn routes() -> Router<AppState> {
     Router::new().route(
-        "/registry/credentials",
-        get(handlers::get_registry_credentials),
+        "/projects/{project_name}/deployments/{deployment_id}/registry-credentials",
+        get(handlers::get_deployment_registry_credentials),
     )
 }

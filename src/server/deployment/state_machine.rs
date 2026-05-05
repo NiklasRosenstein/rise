@@ -21,6 +21,17 @@ pub fn is_active(status: &DeploymentStatus) -> bool {
     )
 }
 
+/// Check if a deployment still needs an image push.
+///
+/// Returns `true` for the pre-"Pushed" states (`Pending`, `Building`, `Pushing`)
+/// where the CLI may still need registry push credentials.
+pub fn needs_image_push(status: &DeploymentStatus) -> bool {
+    matches!(
+        status,
+        DeploymentStatus::Pending | DeploymentStatus::Building | DeploymentStatus::Pushing
+    )
+}
+
 /// Check if a deployment can be cancelled
 /// Only deployments in pre-infrastructure states can be cancelled
 #[cfg_attr(not(test), allow(dead_code))]
@@ -189,6 +200,19 @@ mod tests {
 
         assert!(!is_active(&Deploying));
         assert!(!is_active(&Failed));
+    }
+
+    #[test]
+    fn test_needs_image_push_states() {
+        assert!(needs_image_push(&Pending));
+        assert!(needs_image_push(&Building));
+        assert!(needs_image_push(&Pushing));
+
+        assert!(!needs_image_push(&Pushed));
+        assert!(!needs_image_push(&Deploying));
+        assert!(!needs_image_push(&Healthy));
+        assert!(!needs_image_push(&Failed));
+        assert!(!needs_image_push(&Cancelled));
     }
 
     #[test]
