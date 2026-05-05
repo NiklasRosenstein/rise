@@ -418,7 +418,58 @@ struct RegistryCredentials {
 struct CreateDeploymentResponse {
     deployment_id: String,
     image_tag: String,
+    /// Deprecated: credentials are now fetched from the deployment-scoped endpoint.
+    /// Kept for deserialization compatibility with older backends.
+    #[allow(dead_code)]
     credentials: RegistryCredentials,
+}
+
+#[derive(Debug, Deserialize)]
+struct GetRegistryCredsResponse {
+    credentials: RegistryCredentials,
+    #[allow(dead_code)]
+    repository: String,
+}
+
+/// Fetch registry push credentials scoped to a specific deployment.
+async fn fetch_deployment_registry_credentials(
+    http_client: &Client,
+    backend_url: &str,
+    token: &str,
+    project_name: &str,
+    deployment_id: &str,
+) -> Result<RegistryCredentials> {
+    let url = format!(
+        "{}/api/v1/projects/{}/deployments/{}/registry-credentials",
+        backend_url, project_name, deployment_id
+    );
+
+    let response = http_client
+        .get(&url)
+        .bearer_auth(token)
+        .send()
+        .await
+        .context("Failed to fetch registry credentials")?;
+
+    if !response.status().is_success() {
+        let status = response.status();
+        let error_text = response
+            .text()
+            .await
+            .unwrap_or_else(|_| "Unknown error".to_string());
+        bail!(
+            "Failed to fetch registry credentials ({}): {}",
+            status,
+            error_text
+        );
+    }
+
+    let resp: GetRegistryCredsResponse = response
+        .json()
+        .await
+        .context("Failed to parse registry credentials response")?;
+
+    Ok(resp.credentials)
 }
 
 /// A runtime environment variable override for a deployment
@@ -577,12 +628,22 @@ pub async fn create_deployment(
                 None => config.get_container_cli().command().to_string(),
             };
 
+            // Fetch deployment-scoped registry credentials
+            let credentials = fetch_deployment_registry_credentials(
+                http_client,
+                backend_url,
+                &token,
+                deploy_opts.project_name,
+                &deployment_info.deployment_id,
+            )
+            .await?;
+
             login_to_registry(
                 http_client,
                 backend_url,
                 &token,
                 &container_cli,
-                &deployment_info.credentials,
+                &credentials,
                 deploy_opts.project_name,
                 &deployment_info.deployment_id,
             )
@@ -693,13 +754,22 @@ pub async fn create_deployment(
             deploy_opts.toml_config,
         );
 
-        // Step 2: Login to registry if credentials provided
+        // Step 2: Fetch deployment-scoped registry credentials and login
+        let credentials = fetch_deployment_registry_credentials(
+            http_client,
+            backend_url,
+            &token,
+            deploy_opts.project_name,
+            &deployment_info.deployment_id,
+        )
+        .await?;
+
         login_to_registry(
             http_client,
             backend_url,
             &token,
             options.container_cli.command(),
-            &deployment_info.credentials,
+            &credentials,
             deploy_opts.project_name,
             &deployment_info.deployment_id,
         )

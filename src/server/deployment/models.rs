@@ -240,6 +240,9 @@ pub struct CreateDeploymentRequest {
 pub struct CreateDeploymentResponse {
     pub deployment_id: String,
     pub image_tag: String, // Full tag: registry_url/namespace/project:deployment_id
+    /// Deprecated: New clients should fetch credentials from the deployment-scoped
+    /// endpoint `GET /projects/{name}/deployments/{id}/registry-credentials` instead.
+    /// This field is kept for backward compatibility with older CLI versions.
     pub credentials: crate::server::registry::models::RegistryCredentials,
 }
 
