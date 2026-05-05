@@ -98,7 +98,8 @@ pub struct ResourceBuilder {
     pub use_default_service_account_for_production: bool,
     pub network_policy: crate::server::settings::NetworkPolicyConfig,
     pub pod_security_enabled: bool,
-    pub pod_resources: Option<crate::server::settings::PodResourceLimits>,
+    #[allow(dead_code)]
+    pub deployment_defaults: crate::server::settings::DeploymentDefaults,
     pub health_probes: Option<crate::server::settings::HealthProbeConfig>,
     pub namespace_format: String,
 }
@@ -793,22 +794,25 @@ impl ResourceBuilder {
         })
     }
 
-    fn create_resource_requirements(&self) -> Option<ResourceRequirements> {
+    fn create_resource_requirements(
+        &self,
+        cpu: &str,
+        memory: &str,
+    ) -> Option<ResourceRequirements> {
         use k8s_openapi::apimachinery::pkg::api::resource::Quantity;
 
-        let config = self.pod_resources.clone().unwrap_or_default();
-
+        // Single-knob: same value for both request and limit
         Some(ResourceRequirements {
             requests: Some({
                 let mut map = BTreeMap::new();
-                map.insert("cpu".to_string(), Quantity(config.cpu_request));
-                map.insert("memory".to_string(), Quantity(config.memory_request));
+                map.insert("cpu".to_string(), Quantity(cpu.to_string()));
+                map.insert("memory".to_string(), Quantity(memory.to_string()));
                 map
             }),
             limits: Some({
                 let mut map = BTreeMap::new();
-                map.insert("cpu".to_string(), Quantity(config.cpu_limit));
-                map.insert("memory".to_string(), Quantity(config.memory_limit));
+                map.insert("cpu".to_string(), Quantity(cpu.to_string()));
+                map.insert("memory".to_string(), Quantity(memory.to_string()));
                 map
             }),
             ..Default::default()
@@ -945,7 +949,7 @@ impl ResourceBuilder {
                 ..Default::default()
             },
             spec: Some(DeploymentSpec {
-                replicas: Some(1),
+                replicas: Some(deployment.replicas),
                 min_ready_seconds: None,
                 selector: LabelSelector {
                     match_labels: Some(Self::deployment_labels(
@@ -1016,7 +1020,8 @@ impl ResourceBuilder {
                                 }]
                             }),
                             security_context: self.create_container_security_context(),
-                            resources: self.create_resource_requirements(),
+                            resources: self
+                                .create_resource_requirements(&deployment.cpu, &deployment.memory),
                             liveness_probe: self
                                 .create_http_probe(http_port as i32, ProbeType::Liveness),
                             readiness_probe: self
@@ -1418,7 +1423,7 @@ mod tests {
                 egress: None,
             },
             pod_security_enabled: true,
-            pod_resources: None,
+            deployment_defaults: crate::server::settings::DeploymentDefaults::default(),
             health_probes: None,
             namespace_format: "{project_name}".to_string(),
         }
@@ -1434,6 +1439,12 @@ mod tests {
             owner_team_id: None,
             finalizers: vec![],
             source_url: None,
+            min_replicas: None,
+            max_replicas: None,
+            min_cpu: None,
+            max_cpu: None,
+            min_memory: None,
+            max_memory: None,
             created_at: chrono::Utc::now(),
             updated_at: chrono::Utc::now(),
         }
@@ -1464,6 +1475,9 @@ mod tests {
             first_healthy_at: None,
             job_url: None,
             pull_request_url: None,
+            replicas: 1,
+            cpu: "500m".to_string(),
+            memory: "256Mi".to_string(),
             created_at: chrono::Utc::now(),
             updated_at: chrono::Utc::now(),
         }

@@ -100,6 +100,12 @@ mod client_models {
         pub http_port: u16,
         #[serde(default)]
         pub can_rollback: bool,
+        #[serde(default = "default_replicas")]
+        pub replicas: u32,
+        #[serde(default = "default_cpu")]
+        pub cpu: String,
+        #[serde(default = "default_memory")]
+        pub memory: String,
         #[serde(skip_serializing_if = "Option::is_none")]
         pub job_url: Option<String>,
         #[serde(skip_serializing_if = "Option::is_none")]
@@ -112,6 +118,18 @@ mod client_models {
 
     fn default_group() -> String {
         DEFAULT_DEPLOYMENT_GROUP.to_string()
+    }
+
+    fn default_replicas() -> u32 {
+        1
+    }
+
+    fn default_cpu() -> String {
+        "500m".to_string()
+    }
+
+    fn default_memory() -> String {
+        "256Mi".to_string()
     }
 
     pub const DEFAULT_DEPLOYMENT_GROUP: &str = "default";

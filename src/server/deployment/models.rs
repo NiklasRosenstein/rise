@@ -90,6 +90,12 @@ pub struct Deployment {
     pub is_active: bool,
     #[serde(default)]
     pub can_rollback: bool,
+    #[serde(default = "default_replicas")]
+    pub replicas: u32,
+    #[serde(default = "default_cpu")]
+    pub cpu: String,
+    #[serde(default = "default_memory")]
+    pub memory: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub job_url: Option<String>, // URL to the CI pipeline/job that created this deployment
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -102,6 +108,18 @@ pub struct Deployment {
 
 fn default_group() -> String {
     DEFAULT_DEPLOYMENT_GROUP.to_string()
+}
+
+fn default_replicas() -> u32 {
+    1
+}
+
+fn default_cpu() -> String {
+    "500m".to_string()
+}
+
+fn default_memory() -> String {
+    "256Mi".to_string()
 }
 
 /// The default deployment group name
@@ -233,6 +251,15 @@ pub struct CreateDeploymentRequest {
     /// URL to the pull request/merge request associated with this deployment. Auto-detected from CI environment if not provided.
     #[serde(default)]
     pub pull_request_url: Option<String>,
+    /// Number of replicas (overrides rise.toml and platform defaults)
+    #[serde(default)]
+    pub replicas: Option<u32>,
+    /// CPU allocation (e.g., "500m", "1") — overrides rise.toml and platform defaults
+    #[serde(default)]
+    pub cpu: Option<String>,
+    /// Memory allocation (e.g., "256Mi", "1Gi") — overrides rise.toml and platform defaults
+    #[serde(default)]
+    pub memory: Option<String>,
 }
 
 // Response from creating a deployment

@@ -24,6 +24,12 @@ pub struct CreateDeploymentParams<'a> {
     pub job_url: Option<&'a str>,
     /// URL to the pull request/merge request associated with this deployment
     pub pull_request_url: Option<&'a str>,
+    /// Number of replicas
+    pub replicas: i32,
+    /// CPU allocation (e.g., "500m", "1")
+    pub cpu: &'a str,
+    /// Memory allocation (e.g., "256Mi", "1Gi")
+    pub memory: &'a str,
 }
 
 /// List deployments for a project
@@ -41,6 +47,7 @@ pub async fn list_for_project(pool: &PgPool, project_id: Uuid) -> Result<Vec<Dep
             http_port, needs_reconcile, is_active,
             deploying_started_at,
             first_healthy_at, job_url, pull_request_url,
+            replicas, cpu, memory,
             termination_reason as "termination_reason: _",
             created_at, updated_at
         FROM deployments
@@ -79,6 +86,7 @@ pub async fn list_non_terminal_for_project(
             http_port, needs_reconcile, is_active,
             deploying_started_at,
             first_healthy_at, job_url, pull_request_url,
+            replicas, cpu, memory,
             termination_reason as "termination_reason: _",
             created_at, updated_at
         FROM deployments
@@ -114,6 +122,7 @@ pub async fn get_deployments_batch(
             http_port, needs_reconcile, is_active,
             deploying_started_at,
             first_healthy_at, job_url, pull_request_url,
+            replicas, cpu, memory,
             termination_reason as "termination_reason: _",
             created_at, updated_at
         FROM deployments
@@ -148,6 +157,7 @@ pub async fn find_by_id(pool: &PgPool, id: Uuid) -> Result<Option<Deployment>> {
             http_port, needs_reconcile, is_active,
             deploying_started_at,
             first_healthy_at, job_url, pull_request_url,
+            replicas, cpu, memory,
             termination_reason as "termination_reason: _",
             created_at, updated_at
         FROM deployments
@@ -180,6 +190,7 @@ pub async fn find_by_deployment_id(
             http_port, needs_reconcile, is_active,
             deploying_started_at,
             first_healthy_at, job_url, pull_request_url,
+            replicas, cpu, memory,
             termination_reason as "termination_reason: _",
             created_at, updated_at
         FROM deployments
@@ -217,6 +228,7 @@ pub async fn find_by_deployment_id_unscoped(
             http_port, needs_reconcile, is_active,
             deploying_started_at,
             first_healthy_at, job_url, pull_request_url,
+            replicas, cpu, memory,
             termination_reason as "termination_reason: _",
             created_at, updated_at
         FROM deployments
@@ -241,8 +253,8 @@ pub async fn create(pool: &PgPool, params: CreateDeploymentParams<'_>) -> Result
     let deployment = sqlx::query_as!(
         Deployment,
         r#"
-        INSERT INTO deployments (deployment_id, project_id, created_by_id, status, image, image_digest, rolled_back_from_deployment_id, deployment_group, environment_id, expires_at, http_port, is_active, job_url, pull_request_url)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+        INSERT INTO deployments (deployment_id, project_id, created_by_id, status, image, image_digest, rolled_back_from_deployment_id, deployment_group, environment_id, expires_at, http_port, is_active, job_url, pull_request_url, replicas, cpu, memory)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
         RETURNING
             id, deployment_id, project_id, created_by_id,
             status as "status: DeploymentStatus",
@@ -254,6 +266,7 @@ pub async fn create(pool: &PgPool, params: CreateDeploymentParams<'_>) -> Result
             http_port, needs_reconcile, is_active,
             deploying_started_at,
             first_healthy_at, job_url, pull_request_url,
+            replicas, cpu, memory,
             created_at, updated_at
         "#,
         params.deployment_id,
@@ -269,7 +282,10 @@ pub async fn create(pool: &PgPool, params: CreateDeploymentParams<'_>) -> Result
         params.http_port,
         params.is_active,
         params.job_url,
-        params.pull_request_url
+        params.pull_request_url,
+        params.replicas,
+        params.cpu,
+        params.memory
     )
     .fetch_one(pool)
     .await
@@ -301,6 +317,7 @@ pub async fn update_status(
             http_port, needs_reconcile, is_active,
             deploying_started_at,
             first_healthy_at, job_url, pull_request_url,
+            replicas, cpu, memory,
             termination_reason as "termination_reason: _",
             created_at, updated_at
         FROM deployments
@@ -344,6 +361,7 @@ pub async fn update_status(
             http_port, needs_reconcile, is_active,
             deploying_started_at,
             first_healthy_at, job_url, pull_request_url,
+            replicas, cpu, memory,
             termination_reason as "termination_reason: _",
             created_at, updated_at
         "#,
@@ -386,6 +404,7 @@ pub async fn mark_failed(pool: &PgPool, id: Uuid, error_message: &str) -> Result
             http_port, needs_reconcile, is_active,
             deploying_started_at,
             first_healthy_at, job_url, pull_request_url,
+            replicas, cpu, memory,
             termination_reason as "termination_reason: _",
             created_at, updated_at
         "#,
@@ -423,6 +442,7 @@ pub async fn update_controller_metadata(
             http_port, needs_reconcile, is_active,
             deploying_started_at,
             first_healthy_at, job_url, pull_request_url,
+            replicas, cpu, memory,
             termination_reason as "termination_reason: _",
             created_at, updated_at
         "#,
@@ -470,6 +490,7 @@ pub async fn mark_cancelled(pool: &PgPool, id: Uuid) -> Result<Deployment> {
             http_port, needs_reconcile, is_active,
             deploying_started_at,
             first_healthy_at, job_url, pull_request_url,
+            replicas, cpu, memory,
             created_at, updated_at
         "#,
         id
@@ -505,6 +526,7 @@ pub async fn mark_stopped(pool: &PgPool, id: Uuid) -> Result<Deployment> {
             http_port, needs_reconcile, is_active,
             deploying_started_at,
             first_healthy_at, job_url, pull_request_url,
+            replicas, cpu, memory,
             created_at, updated_at
         "#,
         id
@@ -540,6 +562,7 @@ pub async fn mark_superseded(pool: &PgPool, id: Uuid) -> Result<Deployment> {
             http_port, needs_reconcile, is_active,
             deploying_started_at,
             first_healthy_at, job_url, pull_request_url,
+            replicas, cpu, memory,
             created_at, updated_at
         "#,
         id
@@ -575,6 +598,7 @@ pub async fn mark_expired(pool: &PgPool, id: Uuid) -> Result<Deployment> {
             http_port, needs_reconcile, is_active,
             deploying_started_at,
             first_healthy_at, job_url, pull_request_url,
+            replicas, cpu, memory,
             created_at, updated_at
         "#,
         id
@@ -610,6 +634,7 @@ pub async fn mark_healthy(pool: &PgPool, id: Uuid) -> Result<Deployment> {
             http_port, needs_reconcile, is_active,
             deploying_started_at,
             first_healthy_at, job_url, pull_request_url,
+            replicas, cpu, memory,
             created_at, updated_at
         "#,
         id
@@ -644,6 +669,7 @@ pub async fn mark_unhealthy(pool: &PgPool, id: Uuid, reason: String) -> Result<D
             http_port, needs_reconcile, is_active,
             deploying_started_at,
             first_healthy_at, job_url, pull_request_url,
+            replicas, cpu, memory,
             created_at, updated_at
         "#,
         id,
@@ -682,6 +708,7 @@ pub async fn mark_terminating(
             http_port, needs_reconcile, is_active,
             deploying_started_at,
             first_healthy_at, job_url, pull_request_url,
+            replicas, cpu, memory,
             created_at, updated_at
         "#,
         id,
@@ -716,6 +743,7 @@ pub async fn mark_cancelling(pool: &PgPool, id: Uuid) -> Result<Deployment> {
             http_port, needs_reconcile, is_active,
             deploying_started_at,
             first_healthy_at, job_url, pull_request_url,
+            replicas, cpu, memory,
             created_at, updated_at
         "#,
         id
@@ -780,6 +808,7 @@ pub async fn find_active_for_project_and_group(
             http_port, needs_reconcile, is_active,
             deploying_started_at,
             first_healthy_at, job_url, pull_request_url,
+            replicas, cpu, memory,
             created_at, updated_at
         FROM deployments
         WHERE project_id = $1
@@ -818,6 +847,7 @@ pub async fn find_non_terminal_for_project_and_group(
             http_port, needs_reconcile, is_active,
             deploying_started_at,
             first_healthy_at, job_url, pull_request_url,
+            replicas, cpu, memory,
             created_at, updated_at
         FROM deployments
         WHERE project_id = $1
@@ -856,6 +886,7 @@ pub async fn find_active_deployment_for_group(
             http_port, needs_reconcile, is_active,
             deploying_started_at,
             first_healthy_at, job_url, pull_request_url,
+            replicas, cpu, memory,
             created_at, updated_at
         FROM deployments
         WHERE project_id = $1
@@ -894,6 +925,7 @@ pub async fn find_last_for_project_and_group(
             http_port, needs_reconcile, is_active,
             deploying_started_at,
             first_healthy_at, job_url, pull_request_url,
+            replicas, cpu, memory,
             created_at, updated_at
         FROM deployments
         WHERE project_id = $1
@@ -937,6 +969,7 @@ pub async fn list_for_project_and_group(
                 http_port, needs_reconcile, is_active,
                 deploying_started_at,
                 first_healthy_at, job_url, pull_request_url,
+                replicas, cpu, memory,
                 created_at, updated_at
             FROM deployments
             WHERE project_id = $1 AND deployment_group = $2
@@ -966,6 +999,7 @@ pub async fn list_for_project_and_group(
                 http_port, needs_reconcile, is_active,
                 deploying_started_at,
                 first_healthy_at, job_url, pull_request_url,
+                replicas, cpu, memory,
                 created_at, updated_at
             FROM deployments
             WHERE project_id = $1
@@ -1105,6 +1139,7 @@ pub async fn get_active_deployments_for_project(
             http_port, needs_reconcile, is_active,
             deploying_started_at,
             first_healthy_at, job_url, pull_request_url,
+            replicas, cpu, memory,
             termination_reason as "termination_reason: _",
             created_at, updated_at
         FROM deployments
@@ -1365,6 +1400,9 @@ mod tests {
                 is_active: false,
                 job_url: None,
                 pull_request_url: None,
+                replicas: 1,
+                cpu: "500m",
+                memory: "256Mi",
             },
         )
         .await
@@ -1448,6 +1486,9 @@ mod tests {
                 is_active: false,
                 job_url: None,
                 pull_request_url: None,
+                replicas: 1,
+                cpu: "500m",
+                memory: "256Mi",
             },
         )
         .await

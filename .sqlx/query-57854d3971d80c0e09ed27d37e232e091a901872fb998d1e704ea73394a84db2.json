@@ -1,0 +1,112 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT\n            id, name,\n            status as \"status: ProjectStatus\",\n            access_class,\n            owner_user_id, owner_team_id,\n            finalizers, source_url,\n            min_replicas, max_replicas, min_cpu, max_cpu, min_memory, max_memory,\n            created_at, updated_at\n        FROM projects\n        WHERE name = $1\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "status: ProjectStatus",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "access_class",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "owner_user_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 5,
+        "name": "owner_team_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 6,
+        "name": "finalizers",
+        "type_info": "TextArray"
+      },
+      {
+        "ordinal": 7,
+        "name": "source_url",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 8,
+        "name": "min_replicas",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 9,
+        "name": "max_replicas",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 10,
+        "name": "min_cpu",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 11,
+        "name": "max_cpu",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 12,
+        "name": "min_memory",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 13,
+        "name": "max_memory",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 14,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 15,
+        "name": "updated_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      true,
+      true,
+      false,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      false,
+      false
+    ]
+  },
+  "hash": "57854d3971d80c0e09ed27d37e232e091a901872fb998d1e704ea73394a84db2"
+}

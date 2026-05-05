@@ -372,33 +372,70 @@ pub struct AccessClass {
     pub custom_annotations: std::collections::HashMap<String, String>,
 }
 
-/// Resource limits for pods
+/// Default resource values for new deployments when not specified by the user
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
-pub struct PodResourceLimits {
-    /// CPU request (e.g., "100m", "500m", "1")
-    #[serde(default = "default_cpu_request")]
-    pub cpu_request: String,
+pub struct DeploymentDefaults {
+    /// Default number of replicas (default: 1)
+    #[serde(default = "default_replicas")]
+    pub replicas: u32,
 
-    /// Memory request (e.g., "128Mi", "256Mi", "1Gi")
-    #[serde(default = "default_memory_request")]
-    pub memory_request: String,
+    /// Default CPU allocation (default: "500m") — sets both K8s request and limit
+    #[serde(default = "default_cpu")]
+    pub cpu: String,
 
-    /// CPU limit (e.g., "1", "2", "4")
-    #[serde(default = "default_cpu_limit")]
-    pub cpu_limit: String,
-
-    /// Memory limit (e.g., "512Mi", "1Gi", "2Gi")
-    #[serde(default = "default_memory_limit")]
-    pub memory_limit: String,
+    /// Default memory allocation (default: "256Mi") — sets both K8s request and limit
+    #[serde(default = "default_memory")]
+    pub memory: String,
 }
 
-impl Default for PodResourceLimits {
+impl Default for DeploymentDefaults {
     fn default() -> Self {
         Self {
-            cpu_request: default_cpu_request(),
-            memory_request: default_memory_request(),
-            cpu_limit: default_cpu_limit(),
-            memory_limit: default_memory_limit(),
+            replicas: default_replicas(),
+            cpu: default_cpu(),
+            memory: default_memory(),
+        }
+    }
+}
+
+/// Platform-level constraints for deployment resources.
+/// Per-project overrides (stored in the database) can narrow these ranges.
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+pub struct DeploymentConstraints {
+    /// Minimum replicas allowed (default: 1)
+    #[serde(default = "default_min_replicas")]
+    pub min_replicas: u32,
+
+    /// Maximum replicas allowed (default: 1)
+    #[serde(default = "default_max_replicas")]
+    pub max_replicas: u32,
+
+    /// Minimum CPU allowed (default: "100m")
+    #[serde(default = "default_min_cpu")]
+    pub min_cpu: String,
+
+    /// Maximum CPU allowed (default: "2")
+    #[serde(default = "default_max_cpu")]
+    pub max_cpu: String,
+
+    /// Minimum memory allowed (default: "64Mi")
+    #[serde(default = "default_min_memory")]
+    pub min_memory: String,
+
+    /// Maximum memory allowed (default: "2Gi")
+    #[serde(default = "default_max_memory")]
+    pub max_memory: String,
+}
+
+impl Default for DeploymentConstraints {
+    fn default() -> Self {
+        Self {
+            min_replicas: default_min_replicas(),
+            max_replicas: default_max_replicas(),
+            min_cpu: default_min_cpu(),
+            max_cpu: default_max_cpu(),
+            min_memory: default_min_memory(),
+            max_memory: default_max_memory(),
         }
     }
 }
@@ -462,19 +499,39 @@ fn default_true() -> bool {
     true
 }
 
-fn default_cpu_request() -> String {
+fn default_replicas() -> u32 {
+    1
+}
+
+fn default_cpu() -> String {
     "500m".to_string()
 }
 
-fn default_memory_request() -> String {
+fn default_memory() -> String {
     "256Mi".to_string()
 }
 
-fn default_cpu_limit() -> String {
+fn default_min_replicas() -> u32 {
+    1
+}
+
+fn default_max_replicas() -> u32 {
+    1
+}
+
+fn default_min_cpu() -> String {
+    "100m".to_string()
+}
+
+fn default_max_cpu() -> String {
     "2".to_string()
 }
 
-fn default_memory_limit() -> String {
+fn default_min_memory() -> String {
+    "64Mi".to_string()
+}
+
+fn default_max_memory() -> String {
     "2Gi".to_string()
 }
 
@@ -664,10 +721,13 @@ pub enum DeploymentControllerSettings {
         #[serde(default = "default_pod_security_enabled")]
         pod_security_enabled: bool,
 
-        /// Resource limits for deployed containers
-        /// If not set, uses defaults: 500m CPU request, 256Mi memory request, 2 CPU limit, 2Gi memory limit
+        /// Default resource values for new deployments when not specified by the user
         #[serde(default)]
-        pod_resources: Option<PodResourceLimits>,
+        deployment_defaults: DeploymentDefaults,
+
+        /// Platform-level constraints for deployment resources
+        #[serde(default)]
+        deployment_constraints: DeploymentConstraints,
 
         /// Health probe configuration
         /// If not set, uses defaults (HTTP probes on app port at "/" path)

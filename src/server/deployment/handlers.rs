@@ -479,6 +479,9 @@ async fn convert_deployment(
         http_port: deployment.http_port as u16,
         is_active: deployment.is_active,
         can_rollback,
+        replicas: deployment.replicas as u32,
+        cpu: deployment.cpu,
+        memory: deployment.memory,
         job_url: deployment.job_url,
         pull_request_url: deployment.pull_request_url,
         created: deployment.created_at.to_rfc3339(),
@@ -782,6 +785,91 @@ pub async fn create_deployment(
         effective_http_port, deployment_id
     );
 
+    // Resolve effective deployment resources (replicas, cpu, memory)
+    // Priority: request payload > platform defaults
+    // Then validate against effective constraints (project-specific if set, else platform defaults)
+    let (effective_replicas, effective_cpu, effective_memory) = {
+        #[cfg(feature = "backend")]
+        {
+            let defaults = state
+                .deployment_defaults
+                .as_ref()
+                .cloned()
+                .unwrap_or_default();
+            let platform_constraints = state
+                .deployment_constraints
+                .as_ref()
+                .cloned()
+                .unwrap_or_default();
+
+            // Resolve: request > platform defaults
+            let replicas = payload.replicas.unwrap_or(defaults.replicas);
+            let cpu = payload.cpu.clone().unwrap_or_else(|| defaults.cpu.clone());
+            let memory = payload
+                .memory
+                .clone()
+                .unwrap_or_else(|| defaults.memory.clone());
+
+            // Build effective constraints: project-specific overrides > platform defaults
+            let eff_min_replicas = project
+                .min_replicas
+                .map(|v| v as u32)
+                .unwrap_or(platform_constraints.min_replicas);
+            let eff_max_replicas = project
+                .max_replicas
+                .map(|v| v as u32)
+                .unwrap_or(platform_constraints.max_replicas);
+            let eff_min_cpu = project
+                .min_cpu
+                .as_deref()
+                .unwrap_or(&platform_constraints.min_cpu);
+            let eff_max_cpu = project
+                .max_cpu
+                .as_deref()
+                .unwrap_or(&platform_constraints.max_cpu);
+            let eff_min_memory = project
+                .min_memory
+                .as_deref()
+                .unwrap_or(&platform_constraints.min_memory);
+            let eff_max_memory = project
+                .max_memory
+                .as_deref()
+                .unwrap_or(&platform_constraints.max_memory);
+
+            // Validate replicas
+            if replicas < eff_min_replicas || replicas > eff_max_replicas {
+                return Err(ServerError::bad_request(format!(
+                    "Requested {} replicas but allowed range is [{}, {}]",
+                    replicas, eff_min_replicas, eff_max_replicas
+                )));
+            }
+
+            // Validate CPU
+            super::quantity::validate_cpu_range(&cpu, eff_min_cpu, eff_max_cpu).map_err(|e| {
+                ServerError::bad_request(format!("CPU constraint violation: {}", e))
+            })?;
+
+            // Validate memory
+            super::quantity::validate_memory_range(&memory, eff_min_memory, eff_max_memory)
+                .map_err(|e| {
+                    ServerError::bad_request(format!("Memory constraint violation: {}", e))
+                })?;
+
+            (replicas, cpu, memory)
+        }
+
+        #[cfg(not(feature = "backend"))]
+        {
+            let replicas = payload.replicas.unwrap_or(1);
+            let cpu = payload.cpu.clone().unwrap_or_else(|| "500m".to_string());
+            let memory = payload
+                .memory
+                .clone()
+                .unwrap_or_else(|| "256Mi".to_string());
+            (replicas, cpu, memory)
+        }
+    };
+
     // Handle deployment creation from an existing deployment (redeploy/rollback)
     if let Some(ref from_deployment_id) = payload.from_deployment {
         info!(
@@ -836,6 +924,23 @@ pub async fn create_deployment(
             source_deployment.http_port as u16
         };
 
+        // Inherit resources from source deployment unless explicitly overridden
+        let effective_replicas = if payload.replicas.is_some() {
+            effective_replicas
+        } else {
+            source_deployment.replicas as u32
+        };
+        let effective_cpu = if payload.cpu.is_some() {
+            effective_cpu.clone()
+        } else {
+            source_deployment.cpu.clone()
+        };
+        let effective_memory = if payload.memory.is_some() {
+            effective_memory.clone()
+        } else {
+            source_deployment.memory.clone()
+        };
+
         // Create new deployment with Pushed status and invoke extension hooks
         // Copy image and image_digest from source - the helper function will determine the tag
         // For pre-built images: image_digest is copied, helper returns it
@@ -857,6 +962,9 @@ pub async fn create_deployment(
                 is_active: false,                  // Deployments start as inactive
                 job_url: job_url.as_deref(),
                 pull_request_url: pull_request_url.as_deref(),
+                replicas: effective_replicas as i32,
+                cpu: &effective_cpu,
+                memory: &effective_memory,
             },
             &project,
         )
@@ -997,6 +1105,9 @@ pub async fn create_deployment(
                     is_active: false,
                     job_url: job_url.as_deref(),
                     pull_request_url: pull_request_url.as_deref(),
+                    replicas: effective_replicas as i32,
+                    cpu: &effective_cpu,
+                    memory: &effective_memory,
                 },
                 &project,
             )
@@ -1090,6 +1201,9 @@ pub async fn create_deployment(
                 is_active: false,
                 job_url: job_url.as_deref(),
                 pull_request_url: pull_request_url.as_deref(),
+                replicas: effective_replicas as i32,
+                cpu: &effective_cpu,
+                memory: &effective_memory,
             },
             &project,
         )
@@ -1197,6 +1311,9 @@ pub async fn create_deployment(
                 is_active: false,                      // Deployments start as inactive
                 job_url: job_url.as_deref(),
                 pull_request_url: pull_request_url.as_deref(),
+                replicas: effective_replicas as i32,
+                cpu: &effective_cpu,
+                memory: &effective_memory,
             },
             &project,
         )

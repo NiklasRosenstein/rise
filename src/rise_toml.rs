@@ -21,6 +21,10 @@ pub struct ProjectBuildConfig {
     #[serde(default)]
     pub build: Option<BuildConfig>,
 
+    /// Deployment resource configuration (optional)
+    #[serde(default)]
+    pub deploy: Option<DeployConfig>,
+
     /// Per-environment configuration (optional)
     #[serde(default)]
     pub environments: BTreeMap<String, EnvironmentConfig>,
@@ -37,6 +41,24 @@ pub struct EnvironmentConfig {
     /// Plain-text environment variables scoped to this environment
     #[serde(default)]
     pub env: BTreeMap<String, String>,
+
+    /// Environment-specific deployment resource overrides
+    #[serde(default)]
+    pub deploy: Option<DeployConfig>,
+}
+
+/// Deployment resource configuration
+#[derive(Debug, Deserialize, Serialize, Clone, Default)]
+#[cfg_attr(feature = "backend", derive(schemars::JsonSchema))]
+pub struct DeployConfig {
+    /// Number of replicas
+    pub replicas: Option<u32>,
+
+    /// CPU allocation (e.g., "500m", "1") — sets both K8s request and limit
+    pub cpu: Option<String>,
+
+    /// Memory allocation (e.g., "256Mi", "1Gi") — sets both K8s request and limit
+    pub memory: Option<String>,
 }
 
 /// Project metadata configuration

@@ -18,6 +18,7 @@ pub async fn list(pool: &PgPool, owner_user_id: Option<Uuid>) -> Result<Vec<Proj
                 access_class,
                 owner_user_id, owner_team_id,
                 finalizers, source_url,
+                min_replicas, max_replicas, min_cpu, max_cpu, min_memory, max_memory,
                 created_at, updated_at
             FROM projects
             WHERE owner_user_id = $1
@@ -37,6 +38,7 @@ pub async fn list(pool: &PgPool, owner_user_id: Option<Uuid>) -> Result<Vec<Proj
                 access_class,
                 owner_user_id, owner_team_id,
                 finalizers, source_url,
+                min_replicas, max_replicas, min_cpu, max_cpu, min_memory, max_memory,
                 created_at, updated_at
             FROM projects
             ORDER BY created_at DESC
@@ -60,6 +62,7 @@ pub async fn list_accessible_by_user(pool: &PgPool, user_id: Uuid) -> Result<Vec
             p.access_class,
             p.owner_user_id, p.owner_team_id,
             p.finalizers, p.source_url,
+            p.min_replicas, p.max_replicas, p.min_cpu, p.max_cpu, p.min_memory, p.max_memory,
             p.created_at, p.updated_at
         FROM projects p
         WHERE
@@ -97,6 +100,7 @@ pub async fn find_by_name(pool: &PgPool, name: &str) -> Result<Option<Project>> 
             access_class,
             owner_user_id, owner_team_id,
             finalizers, source_url,
+            min_replicas, max_replicas, min_cpu, max_cpu, min_memory, max_memory,
             created_at, updated_at
         FROM projects
         WHERE name = $1
@@ -121,6 +125,7 @@ pub async fn find_by_id(pool: &PgPool, id: Uuid) -> Result<Option<Project>> {
             access_class,
             owner_user_id, owner_team_id,
             finalizers, source_url,
+            min_replicas, max_replicas, min_cpu, max_cpu, min_memory, max_memory,
             created_at, updated_at
         FROM projects
         WHERE id = $1
@@ -146,6 +151,7 @@ pub async fn find_by_ids(pool: &PgPool, ids: &[Uuid]) -> Result<Vec<Project>> {
             access_class,
             owner_user_id, owner_team_id,
             finalizers, source_url,
+            min_replicas, max_replicas, min_cpu, max_cpu, min_memory, max_memory,
             created_at, updated_at
         FROM projects
         WHERE id = ANY($1)
@@ -185,6 +191,7 @@ where
             access_class,
             owner_user_id, owner_team_id,
             finalizers, source_url,
+            min_replicas, max_replicas, min_cpu, max_cpu, min_memory, max_memory,
             created_at, updated_at
         "#,
         name,
@@ -217,6 +224,7 @@ pub async fn update_status(pool: &PgPool, id: Uuid, status: ProjectStatus) -> Re
             access_class,
             owner_user_id, owner_team_id,
             finalizers, source_url,
+            min_replicas, max_replicas, min_cpu, max_cpu, min_memory, max_memory,
             created_at, updated_at
         "#,
         id,
@@ -243,6 +251,7 @@ pub async fn update_access_class(pool: &PgPool, id: Uuid, access_class: String) 
             access_class,
             owner_user_id, owner_team_id,
             finalizers, source_url,
+            min_replicas, max_replicas, min_cpu, max_cpu, min_memory, max_memory,
             created_at, updated_at
         "#,
         id,
@@ -274,6 +283,7 @@ pub async fn update_owner(
             access_class,
             owner_user_id, owner_team_id,
             finalizers, source_url,
+            min_replicas, max_replicas, min_cpu, max_cpu, min_memory, max_memory,
             created_at, updated_at
         "#,
         id,
@@ -305,6 +315,7 @@ pub async fn update_source_url(
             access_class,
             owner_user_id, owner_team_id,
             finalizers, source_url,
+            min_replicas, max_replicas, min_cpu, max_cpu, min_memory, max_memory,
             created_at, updated_at
         "#,
         id,
@@ -313,6 +324,49 @@ pub async fn update_source_url(
     .fetch_one(pool)
     .await
     .context("Failed to update project source URL")?;
+
+    Ok(project)
+}
+
+/// Update per-project deployment constraints (admin only)
+#[allow(clippy::too_many_arguments)]
+pub async fn update_deployment_constraints(
+    pool: &PgPool,
+    id: Uuid,
+    min_replicas: Option<i32>,
+    max_replicas: Option<i32>,
+    min_cpu: Option<String>,
+    max_cpu: Option<String>,
+    min_memory: Option<String>,
+    max_memory: Option<String>,
+) -> Result<Project> {
+    let project = sqlx::query_as!(
+        Project,
+        r#"
+        UPDATE projects
+        SET min_replicas = $2, max_replicas = $3, min_cpu = $4, max_cpu = $5,
+            min_memory = $6, max_memory = $7, updated_at = NOW()
+        WHERE id = $1
+        RETURNING
+            id, name,
+            status as "status: ProjectStatus",
+            access_class,
+            owner_user_id, owner_team_id,
+            finalizers, source_url,
+            min_replicas, max_replicas, min_cpu, max_cpu, min_memory, max_memory,
+            created_at, updated_at
+        "#,
+        id,
+        min_replicas,
+        max_replicas,
+        min_cpu,
+        max_cpu,
+        min_memory,
+        max_memory
+    )
+    .fetch_one(pool)
+    .await
+    .context("Failed to update deployment constraints")?;
 
     Ok(project)
 }
@@ -518,6 +572,7 @@ pub async fn mark_deleting(pool: &PgPool, id: Uuid) -> Result<Project> {
             access_class,
             owner_user_id, owner_team_id,
             finalizers, source_url,
+            min_replicas, max_replicas, min_cpu, max_cpu, min_memory, max_memory,
             created_at, updated_at
         "#,
         id
@@ -540,6 +595,7 @@ pub async fn find_deleting(pool: &PgPool, limit: i64) -> Result<Vec<Project>> {
             access_class,
             owner_user_id, owner_team_id,
             finalizers, source_url,
+            min_replicas, max_replicas, min_cpu, max_cpu, min_memory, max_memory,
             created_at, updated_at
         FROM projects
         WHERE status = 'Deleting'
@@ -614,6 +670,7 @@ pub async fn find_deleting_with_finalizer(
             access_class,
             owner_user_id, owner_team_id,
             finalizers, source_url,
+            min_replicas, max_replicas, min_cpu, max_cpu, min_memory, max_memory,
             created_at, updated_at
         FROM projects
         WHERE status = 'Deleting' AND $1 = ANY(finalizers)
@@ -659,6 +716,7 @@ pub async fn list_active(pool: &PgPool) -> Result<Vec<Project>> {
             access_class,
             owner_user_id, owner_team_id,
             finalizers, source_url,
+            min_replicas, max_replicas, min_cpu, max_cpu, min_memory, max_memory,
             created_at, updated_at
         FROM projects
         WHERE status NOT IN ('Deleting', 'Terminated')
@@ -718,6 +776,9 @@ mod tests {
                 is_active: false, // Initially not active
                 job_url: None,
                 pull_request_url: None,
+                replicas: 1,
+                cpu: "500m",
+                memory: "256Mi",
             },
         )
         .await
@@ -763,6 +824,9 @@ mod tests {
                 is_active: false, // This is NOT active
                 job_url: None,
                 pull_request_url: None,
+                replicas: 1,
+                cpu: "500m",
+                memory: "256Mi",
             },
         )
         .await
@@ -868,6 +932,9 @@ mod tests {
                 is_active: false,
                 job_url: None,
                 pull_request_url: None,
+                replicas: 1,
+                cpu: "500m",
+                memory: "256Mi",
             },
         )
         .await

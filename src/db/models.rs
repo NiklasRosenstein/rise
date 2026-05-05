@@ -27,6 +27,13 @@ pub struct Project {
     pub finalizers: Vec<String>,
     /// URL to where the project code lives (e.g. a GitHub/GitLab repository)
     pub source_url: Option<String>,
+    /// Per-project deployment constraints (NULL = inherit platform defaults)
+    pub min_replicas: Option<i32>,
+    pub max_replicas: Option<i32>,
+    pub min_cpu: Option<String>,
+    pub max_cpu: Option<String>,
+    pub min_memory: Option<String>,
+    pub max_memory: Option<String>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
@@ -153,6 +160,12 @@ pub struct Deployment {
     pub job_url: Option<String>,
     /// URL to the pull request/merge request associated with this deployment
     pub pull_request_url: Option<String>,
+    /// Number of replicas for this deployment
+    pub replicas: i32,
+    /// CPU allocation (e.g., "500m", "1")
+    pub cpu: String,
+    /// Memory allocation (e.g., "256Mi", "1Gi")
+    pub memory: String,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }

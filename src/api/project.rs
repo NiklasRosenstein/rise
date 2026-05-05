@@ -52,6 +52,31 @@ pub struct Project {
     pub app_teams: Vec<TeamInfo>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub source_url: Option<String>,
+    /// Per-project deployment constraints (admin-settable)
+    #[serde(default)]
+    pub deployment_constraints: Option<ProjectDeploymentConstraints>,
+    /// Effective deployment defaults (from platform settings)
+    #[serde(default)]
+    pub deployment_defaults: Option<DeploymentDefaultsInfo>,
+}
+
+/// Per-project deployment constraints
+#[derive(Debug, Deserialize, Serialize, Clone, Default)]
+pub struct ProjectDeploymentConstraints {
+    pub min_replicas: Option<u32>,
+    pub max_replicas: Option<u32>,
+    pub min_cpu: Option<String>,
+    pub max_cpu: Option<String>,
+    pub min_memory: Option<String>,
+    pub max_memory: Option<String>,
+}
+
+/// Effective deployment defaults
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub struct DeploymentDefaultsInfo {
+    pub replicas: u32,
+    pub cpu: String,
+    pub memory: String,
 }
 
 /// User information in owner context

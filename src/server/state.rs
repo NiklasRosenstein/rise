@@ -76,6 +76,12 @@ pub struct AppState {
     /// Port for the internal metacontroller webhook listener
     #[cfg(feature = "backend")]
     pub metacontroller_webhook_port: Option<u16>,
+    /// Default resource values for new deployments
+    #[cfg(feature = "backend")]
+    pub deployment_defaults: Option<crate::server::settings::DeploymentDefaults>,
+    /// Platform-level constraints for deployment resources
+    #[cfg(feature = "backend")]
+    pub deployment_constraints: Option<crate::server::settings::DeploymentConstraints>,
 }
 
 /// Initialize encryption provider from settings
@@ -447,7 +453,14 @@ impl AppState {
 
         // Initialize ResourceBuilder and kube_client for Metacontroller webhook and deployment backend
         #[cfg(feature = "backend")]
-        let (resource_builder, webhook_kube_client, ip_validator, webhook_port) = {
+        let (
+            resource_builder,
+            webhook_kube_client,
+            ip_validator,
+            webhook_port,
+            deployment_defaults_opt,
+            deployment_constraints_opt,
+        ) = {
             use crate::server::deployment::resource_builder::ResourceBuilder;
             use crate::server::settings::DeploymentControllerSettings;
 
@@ -474,7 +487,8 @@ impl AppState {
                 use_default_service_account_for_production,
                 network_policy,
                 pod_security_enabled,
-                pod_resources,
+                deployment_defaults,
+                deployment_constraints: _deployment_constraints,
                 health_probes,
                 metacontroller_webhook_port,
                 metacontroller_pod_namespace,
@@ -534,7 +548,7 @@ impl AppState {
                         *use_default_service_account_for_production,
                     network_policy: network_policy.clone(),
                     pod_security_enabled: *pod_security_enabled,
-                    pod_resources: pod_resources.clone(),
+                    deployment_defaults: deployment_defaults.clone(),
                     health_probes: health_probes.clone(),
                     namespace_format: namespace_format.clone(),
                 };
@@ -570,9 +584,11 @@ impl AppState {
                     Some(kube_client),
                     validator,
                     Some(*metacontroller_webhook_port),
+                    Some(deployment_defaults.clone()),
+                    Some(_deployment_constraints.clone()),
                 )
             } else {
-                (None, None, None, None)
+                (None, None, None, None, None, None)
             }
         };
 
@@ -833,6 +849,10 @@ impl AppState {
             metacontroller_ip_validator: ip_validator,
             #[cfg(feature = "backend")]
             metacontroller_webhook_port: webhook_port,
+            #[cfg(feature = "backend")]
+            deployment_defaults: deployment_defaults_opt,
+            #[cfg(feature = "backend")]
+            deployment_constraints: deployment_constraints_opt,
         })
     }
 }

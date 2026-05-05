@@ -1,0 +1,112 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT DISTINCT\n            p.id, p.name,\n            p.status as \"status: ProjectStatus\",\n            p.access_class,\n            p.owner_user_id, p.owner_team_id,\n            p.finalizers, p.source_url,\n            p.min_replicas, p.max_replicas, p.min_cpu, p.max_cpu, p.min_memory, p.max_memory,\n            p.created_at, p.updated_at\n        FROM projects p\n        WHERE\n            p.owner_user_id = $1\n            OR EXISTS(\n                SELECT 1 FROM team_members tm\n                WHERE tm.team_id = p.owner_team_id\n                AND tm.user_id = $1\n            )\n            OR EXISTS(\n                SELECT 1 FROM service_accounts sa\n                WHERE sa.project_id = p.id\n                AND sa.user_id = $1\n                AND sa.deleted_at IS NULL\n            )\n        ORDER BY p.created_at DESC\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "status: ProjectStatus",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "access_class",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "owner_user_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 5,
+        "name": "owner_team_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 6,
+        "name": "finalizers",
+        "type_info": "TextArray"
+      },
+      {
+        "ordinal": 7,
+        "name": "source_url",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 8,
+        "name": "min_replicas",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 9,
+        "name": "max_replicas",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 10,
+        "name": "min_cpu",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 11,
+        "name": "max_cpu",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 12,
+        "name": "min_memory",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 13,
+        "name": "max_memory",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 14,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 15,
+        "name": "updated_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      true,
+      true,
+      false,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      false,
+      false
+    ]
+  },
+  "hash": "6137a3ec4237fe0c6e78aa7d1289864c05dfec56b7b2300b7073583c7b946815"
+}

@@ -144,6 +144,15 @@ struct DeployArgs {
     /// Auto-detected from: CI_MERGE_REQUEST_URL (GitLab), GITHUB_SERVER_URL + GITHUB_REPOSITORY + GITHUB_REF + GITHUB_EVENT_NAME (GitHub Actions).
     #[arg(long)]
     pull_request_url: Option<String>,
+    /// Number of replicas for this deployment (overrides rise.toml)
+    #[arg(long)]
+    replicas: Option<u32>,
+    /// CPU allocation (e.g., "500m", "1") — sets both K8s request and limit (overrides rise.toml)
+    #[arg(long)]
+    cpu: Option<String>,
+    /// Memory allocation (e.g., "256Mi", "1Gi") — sets both K8s request and limit (overrides rise.toml)
+    #[arg(long)]
+    memory: Option<String>,
     #[command(flatten)]
     build_args: build::BuildArgs,
 }
@@ -1316,6 +1325,30 @@ async fn main() -> Result<()> {
                 // 2. Source deployment's http_port (if --from is used)
                 // 3. Project's PORT env var (if set)
                 // 4. Default 8080
+                // Resolve deployment resources from CLI flags > rise.toml environment > rise.toml global
+                let toml_env_deploy = resolved_environment.as_deref().and_then(|env_name| {
+                    toml_config
+                        .as_ref()
+                        .and_then(|c| c.environments.get(env_name))
+                        .and_then(|e| e.deploy.as_ref())
+                });
+                let toml_global_deploy = toml_config.as_ref().and_then(|c| c.deploy.as_ref());
+
+                let replicas = args
+                    .replicas
+                    .or_else(|| toml_env_deploy.and_then(|d| d.replicas))
+                    .or_else(|| toml_global_deploy.and_then(|d| d.replicas));
+                let cpu = args
+                    .cpu
+                    .clone()
+                    .or_else(|| toml_env_deploy.and_then(|d| d.cpu.clone()))
+                    .or_else(|| toml_global_deploy.and_then(|d| d.cpu.clone()));
+                let memory = args
+                    .memory
+                    .clone()
+                    .or_else(|| toml_env_deploy.and_then(|d| d.memory.clone()))
+                    .or_else(|| toml_global_deploy.and_then(|d| d.memory.clone()));
+
                 deployment::create_deployment(
                     &http_client,
                     &backend_url,
@@ -1336,6 +1369,9 @@ async fn main() -> Result<()> {
                         job_url: args.job_url.clone(),
                         pull_request_url: args.pull_request_url.clone(),
                         toml_config,
+                        replicas,
+                        cpu,
+                        memory,
                     },
                 )
                 .await?;
