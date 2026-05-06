@@ -6,6 +6,8 @@ pub mod handlers;
 pub mod ip_validator;
 pub mod models;
 #[cfg(feature = "backend")]
+pub mod quantity;
+#[cfg(feature = "backend")]
 pub mod resource_builder;
 pub mod routes;
 pub mod state_machine;

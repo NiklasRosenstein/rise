@@ -367,6 +367,15 @@ pub async fn show_project(
         } else if project.status == ProjectStatus::Deleting {
             println!("\nFinalizers: (none - ready for deletion)");
         }
+
+        // Display deployment defaults and constraints
+        if let Some(ref defaults) = project.deployment_defaults {
+            println!("\nDeployment Defaults:");
+            println!(
+                "  Replicas: {}, CPU: {}, Memory: {}",
+                defaults.replicas, defaults.cpu, defaults.memory
+            );
+        }
     } else if response.status() == reqwest::StatusCode::NOT_FOUND {
         // Handle 404 with potential fuzzy match suggestions
         let error: ProjectErrorResponse = response

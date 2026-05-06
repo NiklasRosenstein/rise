@@ -170,6 +170,46 @@
       },
       "type": "object"
     },
+    "DeploymentConstraints": {
+      "description": "Platform-level constraints for deployment resources.\nPer-environment overrides (stored in the database) can narrow these ranges.",
+      "properties": {
+        "max_cpu": {
+          "default": "2",
+          "description": "Maximum CPU allowed (default: \"2\")",
+          "type": "string"
+        },
+        "max_memory": {
+          "default": "2Gi",
+          "description": "Maximum memory allowed (default: \"2Gi\")",
+          "type": "string"
+        },
+        "max_replicas": {
+          "default": 1,
+          "description": "Maximum replicas allowed (default: 1)",
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "min_cpu": {
+          "default": "100m",
+          "description": "Minimum CPU allowed (default: \"100m\")",
+          "type": "string"
+        },
+        "min_memory": {
+          "default": "64Mi",
+          "description": "Minimum memory allowed (default: \"64Mi\")",
+          "type": "string"
+        },
+        "min_replicas": {
+          "default": 1,
+          "description": "Minimum replicas allowed (default: 1)",
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "type": "object"
+    },
     "DeploymentControllerSettings": {
       "description": "Deployment controller configuration",
       "oneOf": [
@@ -210,6 +250,14 @@
               "$ref": "#/$defs/CustomDomainTlsMode",
               "default": "per-domain",
               "description": "TLS mode for custom domains\n- \"shared\": All custom domains share ingress_tls_secret_name (requires it to be set)\n- \"per-domain\": Each custom domain gets its own tls-{domain} secret\n  (works with cert-manager when custom_domain_ingress_annotations are configured)\n\nDefaults to \"per-domain\""
+            },
+            "deployment_constraints": {
+              "$ref": "#/$defs/DeploymentConstraints",
+              "description": "Platform-level constraints for deployment resources"
+            },
+            "deployment_defaults": {
+              "$ref": "#/$defs/DeploymentDefaults",
+              "description": "Default resource values for new deployments when not specified by the user"
             },
             "environment_ingress_url_template": {
               "default": null,
@@ -350,17 +398,6 @@
               "description": "Node selector for pod placement (controls which nodes pods can run on)\nDefault: {\"kubernetes.io/arch\": \"amd64\"}\nExample: {\"kubernetes.io/arch\": \"amd64\", \"node-type\": \"compute\"}",
               "type": "object"
             },
-            "pod_resources": {
-              "anyOf": [
-                {
-                  "$ref": "#/$defs/PodResourceLimits"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "description": "Resource limits for deployed containers\nIf not set, uses defaults: 500m CPU request, 256Mi memory request, 2 CPU limit, 2Gi memory limit"
-            },
             "pod_security_enabled": {
               "default": true,
               "description": "Pod security settings (enabled by default)\nSet to false to disable security context enforcement",
@@ -399,6 +436,29 @@
           "type": "object"
         }
       ]
+    },
+    "DeploymentDefaults": {
+      "description": "Default resource values for new deployments when not specified by the user",
+      "properties": {
+        "cpu": {
+          "default": "500m",
+          "description": "Default CPU allocation (default: \"500m\") — sets both K8s request and limit",
+          "type": "string"
+        },
+        "memory": {
+          "default": "256Mi",
+          "description": "Default memory allocation (default: \"256Mi\") — sets both K8s request and limit",
+          "type": "string"
+        },
+        "replicas": {
+          "default": 1,
+          "description": "Default number of replicas (default: 1)",
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "type": "object"
     },
     "EncryptionSettings": {
       "description": "Encryption provider configuration",
@@ -873,32 +933,6 @@
         "restrictive"
       ],
       "type": "string"
-    },
-    "PodResourceLimits": {
-      "description": "Resource limits for pods",
-      "properties": {
-        "cpu_limit": {
-          "default": "2",
-          "description": "CPU limit (e.g., \"1\", \"2\", \"4\")",
-          "type": "string"
-        },
-        "cpu_request": {
-          "default": "500m",
-          "description": "CPU request (e.g., \"100m\", \"500m\", \"1\")",
-          "type": "string"
-        },
-        "memory_limit": {
-          "default": "2Gi",
-          "description": "Memory limit (e.g., \"512Mi\", \"1Gi\", \"2Gi\")",
-          "type": "string"
-        },
-        "memory_request": {
-          "default": "256Mi",
-          "description": "Memory request (e.g., \"128Mi\", \"256Mi\", \"1Gi\")",
-          "type": "string"
-        }
-      },
-      "type": "object"
     },
     "RegistrySettings": {
       "description": "Registry provider configuration",

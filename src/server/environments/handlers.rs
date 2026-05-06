@@ -173,7 +173,14 @@ pub async fn update_environment(
         .internal_err("Failed to get environment")?
         .ok_or_else(|| ServerError::not_found(format!("Environment '{}' not found", env_name)))?;
 
-    let updated = db_environments::update(
+    // Reject early if non-admin tries to set deployment constraints
+    if payload.deployment_constraints.is_some() && !state.is_admin(&user.email) {
+        return Err(ServerError::forbidden(
+            "Only administrators can update deployment constraints",
+        ));
+    }
+
+    let mut updated = db_environments::update(
         &state.db_pool,
         env.id,
         project.id,
@@ -213,6 +220,77 @@ pub async fn update_environment(
             ServerError::internal_anyhow(e, "Failed to update environment")
         }
     })?;
+
+    // Update deployment constraints if provided (admin check already done above)
+    if let Some(ref constraints) = payload.deployment_constraints {
+        // Validate constraint values if provided
+        if let (Some(min), Some(max)) = (constraints.min_replicas, constraints.max_replicas) {
+            if min > max {
+                return Err(ServerError::bad_request(format!(
+                    "min_replicas ({}) must be <= max_replicas ({})",
+                    min, max
+                )));
+            }
+        }
+
+        #[cfg(feature = "backend")]
+        {
+            use crate::server::deployment::quantity;
+            if let Some(ref min_cpu) = constraints.min_cpu {
+                quantity::parse_cpu_millicores(min_cpu)
+                    .map_err(|e| ServerError::bad_request(format!("Invalid min_cpu: {}", e)))?;
+            }
+            if let Some(ref max_cpu) = constraints.max_cpu {
+                quantity::parse_cpu_millicores(max_cpu)
+                    .map_err(|e| ServerError::bad_request(format!("Invalid max_cpu: {}", e)))?;
+            }
+            if let (Some(ref min_cpu), Some(ref max_cpu)) =
+                (&constraints.min_cpu, &constraints.max_cpu)
+            {
+                let min_val = quantity::parse_cpu_millicores(min_cpu).unwrap();
+                let max_val = quantity::parse_cpu_millicores(max_cpu).unwrap();
+                if min_val > max_val {
+                    return Err(ServerError::bad_request(format!(
+                        "min_cpu ({}) must be <= max_cpu ({})",
+                        min_cpu, max_cpu
+                    )));
+                }
+            }
+            if let Some(ref min_memory) = constraints.min_memory {
+                quantity::parse_memory_bytes(min_memory)
+                    .map_err(|e| ServerError::bad_request(format!("Invalid min_memory: {}", e)))?;
+            }
+            if let Some(ref max_memory) = constraints.max_memory {
+                quantity::parse_memory_bytes(max_memory)
+                    .map_err(|e| ServerError::bad_request(format!("Invalid max_memory: {}", e)))?;
+            }
+            if let (Some(ref min_memory), Some(ref max_memory)) =
+                (&constraints.min_memory, &constraints.max_memory)
+            {
+                let min_val = quantity::parse_memory_bytes(min_memory).unwrap();
+                let max_val = quantity::parse_memory_bytes(max_memory).unwrap();
+                if min_val > max_val {
+                    return Err(ServerError::bad_request(format!(
+                        "min_memory ({}) must be <= max_memory ({})",
+                        min_memory, max_memory
+                    )));
+                }
+            }
+        }
+
+        updated = db_environments::update_deployment_constraints(
+            &state.db_pool,
+            updated.id,
+            constraints.min_replicas.map(|v| v as i32),
+            constraints.max_replicas.map(|v| v as i32),
+            constraints.min_cpu.clone(),
+            constraints.max_cpu.clone(),
+            constraints.min_memory.clone(),
+            constraints.max_memory.clone(),
+        )
+        .await
+        .internal_err("Failed to update deployment constraints")?;
+    }
 
     tracing::info!(
         "Updated environment '{}' in project '{}'",

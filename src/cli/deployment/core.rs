@@ -511,6 +511,12 @@ pub struct DeploymentOptions<'a> {
     pub pull_request_url: Option<String>,
     /// Pre-loaded project config from rise.toml to avoid re-loading during build.
     pub toml_config: Option<build::config::ProjectBuildConfig>,
+    /// Number of replicas (resolved from CLI flag > rise.toml > server default)
+    pub replicas: Option<u32>,
+    /// CPU allocation (resolved from CLI flag > rise.toml > server default)
+    pub cpu: Option<String>,
+    /// Memory allocation (resolved from CLI flag > rise.toml > server default)
+    pub memory: Option<String>,
 }
 
 pub async fn create_deployment(
@@ -578,6 +584,9 @@ pub async fn create_deployment(
         &deploy_opts.env_overrides,
         resolved_job_url.as_deref(),
         resolved_pull_request_url.as_deref(),
+        deploy_opts.replicas,
+        deploy_opts.cpu.as_deref(),
+        deploy_opts.memory.as_deref(),
     )
     .await?;
 
@@ -975,6 +984,9 @@ async fn call_create_deployment_api(
     env_overrides: &[EnvOverride],
     job_url: Option<&str>,
     pull_request_url: Option<&str>,
+    replicas: Option<u32>,
+    cpu: Option<&str>,
+    memory: Option<&str>,
 ) -> Result<CreateDeploymentResponse> {
     let url = format!("{}/api/v1/deployments", backend_url);
     let mut payload = serde_json::json!({
@@ -1026,6 +1038,17 @@ async fn call_create_deployment_api(
     // Add pull_request_url if provided
     if let Some(url) = pull_request_url {
         payload["pull_request_url"] = serde_json::json!(url);
+    }
+
+    // Add resource fields if provided
+    if let Some(r) = replicas {
+        payload["replicas"] = serde_json::json!(r);
+    }
+    if let Some(c) = cpu {
+        payload["cpu"] = serde_json::json!(c);
+    }
+    if let Some(m) = memory {
+        payload["memory"] = serde_json::json!(m);
     }
 
     // Add env_overrides if any

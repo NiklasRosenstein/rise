@@ -21,7 +21,9 @@ where
         r#"
         INSERT INTO environments (project_id, name, primary_deployment_group, is_production, color)
         VALUES ($1, $2, $3, $4, $5)
-        RETURNING id, project_id, name, primary_deployment_group, is_production, color, created_at, updated_at
+        RETURNING id, project_id, name, primary_deployment_group, is_production, color,
+                 min_replicas, max_replicas, min_cpu, max_cpu, min_memory, max_memory,
+                 created_at, updated_at
         "#,
         project_id,
         name,
@@ -41,7 +43,9 @@ pub async fn list_for_project(pool: &PgPool, project_id: Uuid) -> Result<Vec<Env
     let envs = sqlx::query_as!(
         Environment,
         r#"
-        SELECT id, project_id, name, primary_deployment_group, is_production, color, created_at, updated_at
+        SELECT id, project_id, name, primary_deployment_group, is_production, color,
+               min_replicas, max_replicas, min_cpu, max_cpu, min_memory, max_memory,
+               created_at, updated_at
         FROM environments
         WHERE project_id = $1
         ORDER BY
@@ -66,7 +70,9 @@ pub async fn find_by_name(
     let env = sqlx::query_as!(
         Environment,
         r#"
-        SELECT id, project_id, name, primary_deployment_group, is_production, color, created_at, updated_at
+        SELECT id, project_id, name, primary_deployment_group, is_production, color,
+               min_replicas, max_replicas, min_cpu, max_cpu, min_memory, max_memory,
+               created_at, updated_at
         FROM environments
         WHERE project_id = $1 AND name = $2
         "#,
@@ -89,7 +95,9 @@ pub async fn find_by_primary_group(
     let env = sqlx::query_as!(
         Environment,
         r#"
-        SELECT id, project_id, name, primary_deployment_group, is_production, color, created_at, updated_at
+        SELECT id, project_id, name, primary_deployment_group, is_production, color,
+               min_replicas, max_replicas, min_cpu, max_cpu, min_memory, max_memory,
+               created_at, updated_at
         FROM environments
         WHERE project_id = $1 AND primary_deployment_group = $2
         "#,
@@ -109,7 +117,9 @@ pub async fn find_production(pool: &PgPool, project_id: Uuid) -> Result<Option<E
     let env = sqlx::query_as!(
         Environment,
         r#"
-        SELECT id, project_id, name, primary_deployment_group, is_production, color, created_at, updated_at
+        SELECT id, project_id, name, primary_deployment_group, is_production, color,
+               min_replicas, max_replicas, min_cpu, max_cpu, min_memory, max_memory,
+               created_at, updated_at
         FROM environments
         WHERE project_id = $1 AND is_production = true
         "#,
@@ -127,7 +137,9 @@ pub async fn find_by_id(pool: &PgPool, id: Uuid) -> Result<Option<Environment>> 
     let env = sqlx::query_as!(
         Environment,
         r#"
-        SELECT id, project_id, name, primary_deployment_group, is_production, color, created_at, updated_at
+        SELECT id, project_id, name, primary_deployment_group, is_production, color,
+               min_replicas, max_replicas, min_cpu, max_cpu, min_memory, max_memory,
+               created_at, updated_at
         FROM environments
         WHERE id = $1
         "#,
@@ -194,12 +206,14 @@ pub async fn update(
             color = COALESCE($6, color),
             updated_at = NOW()
         WHERE id = $1
-        RETURNING id, project_id, name, primary_deployment_group, is_production, color, created_at, updated_at
+        RETURNING id, project_id, name, primary_deployment_group, is_production, color,
+                 min_replicas, max_replicas, min_cpu, max_cpu, min_memory, max_memory,
+                 created_at, updated_at
         "#,
         id,
         name,
-        primary_deployment_group.is_some(),  // $3: whether to update primary_deployment_group
-        primary_deployment_group.flatten(),    // $4: the new value (can be NULL)
+        primary_deployment_group.is_some(), // $3: whether to update primary_deployment_group
+        primary_deployment_group.flatten(), // $4: the new value (can be NULL)
         is_production,
         color
     )
@@ -237,6 +251,44 @@ pub async fn create_with_flag_swap(
     .await?;
 
     tx.commit().await.context("Failed to commit transaction")?;
+
+    Ok(env)
+}
+
+/// Update per-environment deployment constraints (admin only)
+#[allow(clippy::too_many_arguments)]
+pub async fn update_deployment_constraints(
+    pool: &PgPool,
+    id: Uuid,
+    min_replicas: Option<i32>,
+    max_replicas: Option<i32>,
+    min_cpu: Option<String>,
+    max_cpu: Option<String>,
+    min_memory: Option<String>,
+    max_memory: Option<String>,
+) -> Result<Environment> {
+    let env = sqlx::query_as!(
+        Environment,
+        r#"
+        UPDATE environments
+        SET min_replicas = $2, max_replicas = $3, min_cpu = $4, max_cpu = $5,
+            min_memory = $6, max_memory = $7, updated_at = NOW()
+        WHERE id = $1
+        RETURNING id, project_id, name, primary_deployment_group, is_production, color,
+                 min_replicas, max_replicas, min_cpu, max_cpu, min_memory, max_memory,
+                 created_at, updated_at
+        "#,
+        id,
+        min_replicas,
+        max_replicas,
+        min_cpu,
+        max_cpu,
+        min_memory,
+        max_memory
+    )
+    .fetch_one(pool)
+    .await
+    .context("Failed to update deployment constraints")?;
 
     Ok(env)
 }

@@ -479,6 +479,9 @@ async fn convert_deployment(
         http_port: deployment.http_port as u16,
         is_active: deployment.is_active,
         can_rollback,
+        replicas: deployment.replicas as u32,
+        cpu: deployment.cpu,
+        memory: deployment.memory,
         job_url: deployment.job_url,
         pull_request_url: deployment.pull_request_url,
         created: deployment.created_at.to_rfc3339(),
@@ -632,6 +635,82 @@ async fn resolve_effective_http_port(
     Ok(8080)
 }
 
+/// Validate deployment resources against effective constraints.
+///
+/// Constraints are resolved from: environment-specific overrides > platform defaults.
+/// When `is_redeploy` is true, error messages include a hint about using CLI flags to override
+/// inherited resource values.
+#[cfg(feature = "backend")]
+fn validate_resource_constraints(
+    state: &AppState,
+    resolved_environment: &Option<crate::db::models::Environment>,
+    replicas: u32,
+    cpu: &str,
+    memory: &str,
+    is_redeploy: bool,
+) -> Result<(), ServerError> {
+    let platform_constraints = state
+        .deployment_constraints
+        .as_ref()
+        .cloned()
+        .unwrap_or_default();
+
+    let eff_min_replicas = resolved_environment
+        .as_ref()
+        .and_then(|e| e.min_replicas)
+        .map(|v| v as u32)
+        .unwrap_or(platform_constraints.min_replicas);
+    let eff_max_replicas = resolved_environment
+        .as_ref()
+        .and_then(|e| e.max_replicas)
+        .map(|v| v as u32)
+        .unwrap_or(platform_constraints.max_replicas);
+    let eff_min_cpu = resolved_environment
+        .as_ref()
+        .and_then(|e| e.min_cpu.as_deref())
+        .unwrap_or(&platform_constraints.min_cpu);
+    let eff_max_cpu = resolved_environment
+        .as_ref()
+        .and_then(|e| e.max_cpu.as_deref())
+        .unwrap_or(&platform_constraints.max_cpu);
+    let eff_min_memory = resolved_environment
+        .as_ref()
+        .and_then(|e| e.min_memory.as_deref())
+        .unwrap_or(&platform_constraints.min_memory);
+    let eff_max_memory = resolved_environment
+        .as_ref()
+        .and_then(|e| e.max_memory.as_deref())
+        .unwrap_or(&platform_constraints.max_memory);
+
+    let redeploy_hint = if is_redeploy {
+        ". Use --replicas, --cpu, or --memory flags with `rise deploy` to override inherited values"
+    } else {
+        ""
+    };
+
+    if replicas < eff_min_replicas || replicas > eff_max_replicas {
+        return Err(ServerError::bad_request(format!(
+            "Requested {} replicas but allowed range is [{}, {}]{}",
+            replicas, eff_min_replicas, eff_max_replicas, redeploy_hint
+        )));
+    }
+
+    super::quantity::validate_cpu_range(cpu, eff_min_cpu, eff_max_cpu).map_err(|e| {
+        ServerError::bad_request(format!("CPU constraint violation: {}{}", e, redeploy_hint))
+    })?;
+
+    super::quantity::validate_memory_range(memory, eff_min_memory, eff_max_memory).map_err(
+        |e| {
+            ServerError::bad_request(format!(
+                "Memory constraint violation: {}{}",
+                e, redeploy_hint
+            ))
+        },
+    )?;
+
+    Ok(())
+}
+
 /// POST /deployments - Create a new deployment
 pub async fn create_deployment(
     State(state): State<AppState>,
@@ -782,6 +861,41 @@ pub async fn create_deployment(
         effective_http_port, deployment_id
     );
 
+    // Resolve effective deployment resources (replicas, cpu, memory)
+    // Priority: request payload > platform defaults
+    // Validation against constraints happens after rollback inheritance (below)
+    let (mut effective_replicas, mut effective_cpu, mut effective_memory) = {
+        #[cfg(feature = "backend")]
+        {
+            let defaults = state
+                .deployment_defaults
+                .as_ref()
+                .cloned()
+                .unwrap_or_default();
+
+            // Resolve: request > platform defaults
+            let replicas = payload.replicas.unwrap_or(defaults.replicas);
+            let cpu = payload.cpu.clone().unwrap_or_else(|| defaults.cpu.clone());
+            let memory = payload
+                .memory
+                .clone()
+                .unwrap_or_else(|| defaults.memory.clone());
+
+            (replicas, cpu, memory)
+        }
+
+        #[cfg(not(feature = "backend"))]
+        {
+            let replicas = payload.replicas.unwrap_or(1);
+            let cpu = payload.cpu.clone().unwrap_or_else(|| "500m".to_string());
+            let memory = payload
+                .memory
+                .clone()
+                .unwrap_or_else(|| "256Mi".to_string());
+            (replicas, cpu, memory)
+        }
+    };
+
     // Handle deployment creation from an existing deployment (redeploy/rollback)
     if let Some(ref from_deployment_id) = payload.from_deployment {
         info!(
@@ -836,6 +950,28 @@ pub async fn create_deployment(
             source_deployment.http_port as u16
         };
 
+        // Inherit resources from source deployment unless explicitly overridden
+        if payload.replicas.is_none() {
+            effective_replicas = source_deployment.replicas as u32;
+        }
+        if payload.cpu.is_none() {
+            effective_cpu = source_deployment.cpu.clone();
+        }
+        if payload.memory.is_none() {
+            effective_memory = source_deployment.memory.clone();
+        }
+
+        // Validate resources against constraints (after rollback inheritance)
+        #[cfg(feature = "backend")]
+        validate_resource_constraints(
+            &state,
+            &resolved_environment,
+            effective_replicas,
+            &effective_cpu,
+            &effective_memory,
+            payload.from_deployment.is_some(),
+        )?;
+
         // Create new deployment with Pushed status and invoke extension hooks
         // Copy image and image_digest from source - the helper function will determine the tag
         // For pre-built images: image_digest is copied, helper returns it
@@ -857,6 +993,9 @@ pub async fn create_deployment(
                 is_active: false,                  // Deployments start as inactive
                 job_url: job_url.as_deref(),
                 pull_request_url: pull_request_url.as_deref(),
+                replicas: effective_replicas as i32,
+                cpu: &effective_cpu,
+                memory: &effective_memory,
             },
             &project,
         )
@@ -961,6 +1100,17 @@ pub async fn create_deployment(
         }));
     }
 
+    // Validate resources against constraints (normal deployment path)
+    #[cfg(feature = "backend")]
+    validate_resource_constraints(
+        &state,
+        &resolved_environment,
+        effective_replicas,
+        &effective_cpu,
+        &effective_memory,
+        false,
+    )?;
+
     // Branch based on whether user provided a pre-built image
     if let Some(ref user_image) = payload.image {
         if payload.push_image {
@@ -997,6 +1147,9 @@ pub async fn create_deployment(
                     is_active: false,
                     job_url: job_url.as_deref(),
                     pull_request_url: pull_request_url.as_deref(),
+                    replicas: effective_replicas as i32,
+                    cpu: &effective_cpu,
+                    memory: &effective_memory,
                 },
                 &project,
             )
@@ -1090,6 +1243,9 @@ pub async fn create_deployment(
                 is_active: false,
                 job_url: job_url.as_deref(),
                 pull_request_url: pull_request_url.as_deref(),
+                replicas: effective_replicas as i32,
+                cpu: &effective_cpu,
+                memory: &effective_memory,
             },
             &project,
         )
@@ -1197,6 +1353,9 @@ pub async fn create_deployment(
                 is_active: false,                      // Deployments start as inactive
                 job_url: job_url.as_deref(),
                 pull_request_url: pull_request_url.as_deref(),
+                replicas: effective_replicas as i32,
+                cpu: &effective_cpu,
+                memory: &effective_memory,
             },
             &project,
         )

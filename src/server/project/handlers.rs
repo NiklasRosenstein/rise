@@ -1,8 +1,9 @@
 use super::fuzzy::find_similar_projects;
 use super::models::{
-    AccessClassInfo, CreateProjectRequest, CreateProjectResponse, GetProjectParams,
-    ListAccessClassesResponse, OwnerInfo, Project as ApiProject, ProjectOwner, ProjectStatus,
-    TeamInfo, UpdateProjectRequest, UpdateProjectResponse, UserInfo,
+    AccessClassInfo, CreateProjectRequest, CreateProjectResponse, DeploymentDefaultsInfo,
+    GetProjectParams, ListAccessClassesResponse, OwnerInfo, PlatformConstraintsInfo,
+    Project as ApiProject, ProjectOwner, ProjectStatus, TeamInfo, UpdateProjectRequest,
+    UpdateProjectResponse, UserInfo,
 };
 use crate::db::models::User;
 use crate::db::{projects, teams as db_teams, users as db_users};
@@ -239,7 +240,7 @@ pub async fn create_project(
         .map_err(|e| ServerError::internal(format!("Failed to resolve owner info: {}", e)))?;
 
     Ok(Json(CreateProjectResponse {
-        project: convert_project(project, owner_info),
+        project: convert_project(project, owner_info, &state),
     }))
 }
 
@@ -368,6 +369,8 @@ pub async fn list_projects(
             app_users: vec![],       // Not populated in list view for performance
             app_teams: vec![],       // Not populated in list view for performance
             source_url: project.source_url,
+            deployment_defaults: None,  // Not populated in list view
+            platform_constraints: None, // Not populated in list view
         });
     }
 
@@ -442,7 +445,7 @@ pub async fn get_project(
         .await
         .map_err(|e| ServerError::internal(format!("Failed to resolve owner info: {}", e)))?;
 
-    let mut api_project = convert_project(project.clone(), owner_info);
+    let mut api_project = convert_project(project.clone(), owner_info, &state);
     api_project.default_url = default_url;
     api_project.primary_url = primary_url;
     api_project.custom_domain_urls = custom_domain_urls;
@@ -689,7 +692,7 @@ pub async fn update_project(
         .map_err(|e| ServerError::internal(format!("Failed to resolve owner info: {}", e)))?;
 
     Ok(Json(UpdateProjectResponse {
-        project: convert_project(updated_project, owner_info),
+        project: convert_project(updated_project, owner_info, &state),
     }))
 }
 
@@ -839,7 +842,7 @@ async fn resolve_project(
                         Ok(all_projects) => {
                             let api_projects: Vec<ApiProject> = all_projects
                                 .into_iter()
-                                .map(|p| convert_project(p, None))
+                                .map(|p| convert_project(p, None, state))
                                 .collect();
                             let similar = find_similar_projects(id_or_name, &api_projects, 0.85);
                             if similar.is_empty() {
@@ -918,7 +921,43 @@ async fn load_app_users_for_project(
 }
 
 /// Convert database Project model to API Project model
-fn convert_project(project: crate::db::models::Project, owner: Option<OwnerInfo>) -> ApiProject {
+fn convert_project(
+    project: crate::db::models::Project,
+    owner: Option<OwnerInfo>,
+    state: &AppState,
+) -> ApiProject {
+    #[cfg(feature = "backend")]
+    let (deployment_defaults, platform_constraints) = {
+        let defaults = state
+            .deployment_defaults
+            .as_ref()
+            .map(|d| DeploymentDefaultsInfo {
+                replicas: d.replicas,
+                cpu: d.cpu.clone(),
+                memory: d.memory.clone(),
+            });
+        let constraints = state
+            .deployment_constraints
+            .as_ref()
+            .map(|c| PlatformConstraintsInfo {
+                min_replicas: c.min_replicas,
+                max_replicas: c.max_replicas,
+                min_cpu: c.min_cpu.clone(),
+                max_cpu: c.max_cpu.clone(),
+                min_memory: c.min_memory.clone(),
+                max_memory: c.max_memory.clone(),
+            });
+        (defaults, constraints)
+    };
+    #[cfg(not(feature = "backend"))]
+    let (deployment_defaults, platform_constraints) = {
+        let _ = state;
+        (
+            None::<DeploymentDefaultsInfo>,
+            None::<PlatformConstraintsInfo>,
+        )
+    };
+
     ApiProject {
         id: project.id.to_string(),
         created: project.created_at.to_rfc3339(),
@@ -936,6 +975,8 @@ fn convert_project(project: crate::db::models::Project, owner: Option<OwnerInfo>
         app_users: vec![], // Will be populated by caller if needed
         app_teams: vec![], // Will be populated by caller if needed
         source_url: project.source_url,
+        deployment_defaults,
+        platform_constraints,
     }
 }
 

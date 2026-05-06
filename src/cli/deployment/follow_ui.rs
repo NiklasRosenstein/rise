@@ -367,6 +367,12 @@ pub fn print_deployment_snapshot(deployment: &Deployment) {
         println!("   Image digest:   {}", digest);
     }
 
+    // Resources
+    println!(
+        "   Resources:      {} replicas, cpu={}, memory={}",
+        deployment.replicas, deployment.cpu, deployment.memory
+    );
+
     // URL if available
     if let Some(ref url) = deployment.primary_url {
         println!("   URL:            {}", url);

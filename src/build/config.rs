@@ -229,11 +229,13 @@ FOO = "bar"
                 env: BTreeMap::from([("GLOBAL".to_string(), "val".to_string())]),
             }),
             build: None,
+            deploy: None,
             environments: BTreeMap::from([(
                 "staging".to_string(),
                 EnvironmentConfig {
                     default: true,
                     env: BTreeMap::from([("STAGE_VAR".to_string(), "stage_val".to_string())]),
+                    deploy: None,
                 },
             )]),
         };

@@ -88,6 +88,12 @@ pub struct Project {
     pub app_teams: Vec<TeamInfo>, // Teams whose members can access the deployed app
     #[serde(skip_serializing_if = "Option::is_none")]
     pub source_url: Option<String>, // URL to where the project code lives
+    /// Effective deployment defaults (platform defaults, shown to users)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub deployment_defaults: Option<DeploymentDefaultsInfo>,
+    /// Platform-level deployment constraints (min/max ranges)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub platform_constraints: Option<PlatformConstraintsInfo>,
     // Timestamps
     #[serde(default)]
     pub created: String,
@@ -149,6 +155,25 @@ pub struct TeamInfo {
 pub enum OwnerInfo {
     User(UserInfo),
     Team(TeamInfo),
+}
+
+/// Effective deployment defaults (from platform settings)
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub struct DeploymentDefaultsInfo {
+    pub replicas: u32,
+    pub cpu: String,
+    pub memory: String,
+}
+
+/// Platform-level deployment constraints (from platform settings)
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub struct PlatformConstraintsInfo {
+    pub min_replicas: u32,
+    pub max_replicas: u32,
+    pub min_cpu: String,
+    pub max_cpu: String,
+    pub min_memory: String,
+    pub max_memory: String,
 }
 
 // Query parameters for project lookup

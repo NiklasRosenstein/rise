@@ -5,12 +5,25 @@ use serde::{Deserialize, Serialize};
 
 use crate::config::Config;
 
+/// Per-environment deployment constraints
+#[derive(Debug, Deserialize)]
+struct EnvironmentDeploymentConstraints {
+    min_replicas: Option<u32>,
+    max_replicas: Option<u32>,
+    min_cpu: Option<String>,
+    max_cpu: Option<String>,
+    min_memory: Option<String>,
+    max_memory: Option<String>,
+}
+
 #[derive(Debug, Deserialize)]
 pub(crate) struct EnvironmentResponse {
     pub(crate) name: String,
     primary_deployment_group: Option<String>,
     is_production: bool,
     color: String,
+    #[serde(default)]
+    deployment_constraints: Option<EnvironmentDeploymentConstraints>,
     created_at: String,
     updated_at: String,
 }
@@ -274,6 +287,24 @@ async fn show_environment(
         if env.is_production { "yes" } else { "no" }
     );
     println!("Color:          {}", env.color);
+    if let Some(ref c) = env.deployment_constraints {
+        println!("\nDeployment Constraints:");
+        println!(
+            "  Replicas: {}–{}",
+            c.min_replicas.map(|v| v.to_string()).unwrap_or("-".into()),
+            c.max_replicas.map(|v| v.to_string()).unwrap_or("-".into()),
+        );
+        println!(
+            "  CPU: {}–{}",
+            c.min_cpu.as_deref().unwrap_or("-"),
+            c.max_cpu.as_deref().unwrap_or("-"),
+        );
+        println!(
+            "  Memory: {}–{}",
+            c.min_memory.as_deref().unwrap_or("-"),
+            c.max_memory.as_deref().unwrap_or("-"),
+        );
+    }
     println!("Created:        {}", env.created_at);
     println!("Updated:        {}", env.updated_at);
 

@@ -1625,6 +1625,9 @@ export function DeploymentDetail({ projectName, deploymentId }) {
                 )}
                 <div><span>completed</span><strong>{deployment.completed_at ? formatDate(deployment.completed_at) : '-'}</strong></div>
                 <div><span>expires</span><strong>{deployment.expires_at ? formatTimeRemaining(deployment.expires_at) : '-'}</strong></div>
+                <div><span>replicas</span><strong>{deployment.replicas}</strong></div>
+                <div><span>cpu</span><strong>{deployment.cpu}</strong></div>
+                <div><span>memory</span><strong>{deployment.memory}</strong></div>
             </div>
 
             {deployment.error_message && (

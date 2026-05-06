@@ -1838,7 +1838,6 @@ mod tests {
                 egress: None,
             },
             pod_security_enabled: true,
-            pod_resources: None,
             health_probes: None,
             namespace_format: "{project_name}".to_string(),
         }
@@ -1884,6 +1883,9 @@ mod tests {
             first_healthy_at: None,
             job_url: None,
             pull_request_url: None,
+            replicas: 1,
+            cpu: "500m".to_string(),
+            memory: "256Mi".to_string(),
             created_at: chrono::Utc::now(),
             updated_at: chrono::Utc::now(),
         }
