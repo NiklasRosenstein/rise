@@ -98,8 +98,6 @@ pub struct ResourceBuilder {
     pub use_default_service_account_for_production: bool,
     pub network_policy: crate::server::settings::NetworkPolicyConfig,
     pub pod_security_enabled: bool,
-    #[allow(dead_code)]
-    pub deployment_defaults: crate::server::settings::DeploymentDefaults,
     pub health_probes: Option<crate::server::settings::HealthProbeConfig>,
     pub namespace_format: String,
 }
@@ -1423,7 +1421,6 @@ mod tests {
                 egress: None,
             },
             pod_security_enabled: true,
-            deployment_defaults: crate::server::settings::DeploymentDefaults::default(),
             health_probes: None,
             namespace_format: "{project_name}".to_string(),
         }

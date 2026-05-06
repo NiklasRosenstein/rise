@@ -548,7 +548,6 @@ impl AppState {
                         *use_default_service_account_for_production,
                     network_policy: network_policy.clone(),
                     pod_security_enabled: *pod_security_enabled,
-                    deployment_defaults: deployment_defaults.clone(),
                     health_probes: health_probes.clone(),
                     namespace_format: namespace_format.clone(),
                 };

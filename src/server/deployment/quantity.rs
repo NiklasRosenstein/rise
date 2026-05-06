@@ -26,6 +26,9 @@ pub fn parse_cpu_millicores(s: &str) -> Result<u64> {
         let value: f64 = s
             .parse()
             .with_context(|| format!("invalid CPU quantity: {s}"))?;
+        if !value.is_finite() {
+            bail!("CPU quantity must be a finite number: {s}");
+        }
         if value < 0.0 {
             bail!("CPU quantity must be non-negative: {s}");
         }
@@ -62,7 +65,9 @@ pub fn parse_memory_bytes(s: &str) -> Result<u64> {
     let value: u64 = num_str
         .parse()
         .with_context(|| format!("invalid memory quantity: {s}"))?;
-    Ok(value * multiplier)
+    value
+        .checked_mul(multiplier)
+        .with_context(|| format!("memory quantity too large: {s}"))
 }
 
 /// Validate that a CPU value (as a string) falls within [min, max].
@@ -107,6 +112,9 @@ mod tests {
         assert!(parse_cpu_millicores("").is_err());
         assert!(parse_cpu_millicores("abc").is_err());
         assert!(parse_cpu_millicores("m").is_err());
+        assert!(parse_cpu_millicores("NaN").is_err());
+        assert!(parse_cpu_millicores("inf").is_err());
+        assert!(parse_cpu_millicores("-inf").is_err());
     }
 
     #[test]
@@ -124,6 +132,8 @@ mod tests {
         assert!(parse_memory_bytes("").is_err());
         assert!(parse_memory_bytes("abc").is_err());
         assert!(parse_memory_bytes("Mi").is_err());
+        // Overflow: u64::MAX Ti would overflow
+        assert!(parse_memory_bytes("18446744073709551615Ti").is_err());
     }
 
     #[test]

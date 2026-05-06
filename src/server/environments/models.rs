@@ -62,8 +62,8 @@ impl From<crate::db::models::Environment> for EnvironmentResponse {
             || env.max_memory.is_some()
         {
             Some(EnvironmentDeploymentConstraints {
-                min_replicas: env.min_replicas.map(|v| v as u32),
-                max_replicas: env.max_replicas.map(|v| v as u32),
+                min_replicas: env.min_replicas.and_then(|v| u32::try_from(v).ok()),
+                max_replicas: env.max_replicas.and_then(|v| u32::try_from(v).ok()),
                 min_cpu: env.min_cpu,
                 max_cpu: env.max_cpu,
                 min_memory: env.min_memory,

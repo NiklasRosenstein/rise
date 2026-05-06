@@ -243,6 +243,18 @@ pub async fn update_environment(
                 quantity::parse_cpu_millicores(max_cpu)
                     .map_err(|e| ServerError::bad_request(format!("Invalid max_cpu: {}", e)))?;
             }
+            if let (Some(ref min_cpu), Some(ref max_cpu)) =
+                (&constraints.min_cpu, &constraints.max_cpu)
+            {
+                let min_val = quantity::parse_cpu_millicores(min_cpu).unwrap();
+                let max_val = quantity::parse_cpu_millicores(max_cpu).unwrap();
+                if min_val > max_val {
+                    return Err(ServerError::bad_request(format!(
+                        "min_cpu ({}) must be <= max_cpu ({})",
+                        min_cpu, max_cpu
+                    )));
+                }
+            }
             if let Some(ref min_memory) = constraints.min_memory {
                 quantity::parse_memory_bytes(min_memory)
                     .map_err(|e| ServerError::bad_request(format!("Invalid min_memory: {}", e)))?;
@@ -250,6 +262,18 @@ pub async fn update_environment(
             if let Some(ref max_memory) = constraints.max_memory {
                 quantity::parse_memory_bytes(max_memory)
                     .map_err(|e| ServerError::bad_request(format!("Invalid max_memory: {}", e)))?;
+            }
+            if let (Some(ref min_memory), Some(ref max_memory)) =
+                (&constraints.min_memory, &constraints.max_memory)
+            {
+                let min_val = quantity::parse_memory_bytes(min_memory).unwrap();
+                let max_val = quantity::parse_memory_bytes(max_memory).unwrap();
+                if min_val > max_val {
+                    return Err(ServerError::bad_request(format!(
+                        "min_memory ({}) must be <= max_memory ({})",
+                        min_memory, max_memory
+                    )));
+                }
             }
         }
 

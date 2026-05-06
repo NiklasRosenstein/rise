@@ -1838,7 +1838,6 @@ mod tests {
                 egress: None,
             },
             pod_security_enabled: true,
-            deployment_defaults: crate::server::settings::DeploymentDefaults::default(),
             health_probes: None,
             namespace_format: "{project_name}".to_string(),
         }
