@@ -173,6 +173,13 @@ pub async fn update_environment(
         .internal_err("Failed to get environment")?
         .ok_or_else(|| ServerError::not_found(format!("Environment '{}' not found", env_name)))?;
 
+    // Reject early if non-admin tries to set deployment constraints
+    if payload.deployment_constraints.is_some() && !state.is_admin(&user.email) {
+        return Err(ServerError::forbidden(
+            "Only administrators can update deployment constraints",
+        ));
+    }
+
     let mut updated = db_environments::update(
         &state.db_pool,
         env.id,
@@ -214,14 +221,8 @@ pub async fn update_environment(
         }
     })?;
 
-    // Update deployment constraints if provided (admin only)
+    // Update deployment constraints if provided (admin check already done above)
     if let Some(ref constraints) = payload.deployment_constraints {
-        if !state.is_admin(&user.email) {
-            return Err(ServerError::forbidden(
-                "Only administrators can update deployment constraints",
-            ));
-        }
-
         // Validate constraint values if provided
         if let (Some(min), Some(max)) = (constraints.min_replicas, constraints.max_replicas) {
             if min > max {
