@@ -1657,12 +1657,13 @@ async fn delete_resource(
 /// A Controller subject writes its own `status.controllers[<name>]` slot (the
 /// store enforces that a controller can only ever touch its own slot); every
 /// other subject writes the shared writer-keyed slot `operator_update_status`
-/// reserves, keyed on its own stable subject — never its email, since the slot
-/// is stored inside the resource document and served to every reader of it,
-/// which makes it product data rather than an audit record (ADR-0001 §1). That
-/// slot is still named for the operator tier it was introduced for;
-/// ADR-0002's subresource execution model owns the field separation and is
-/// where the naming is settled, not here.
+/// reserves — `status.controllers["operator:<subject>"]` (e.g.
+/// `operator:user:<uid>`), keyed on the caller's stable subject, never its
+/// email, since the slot is stored inside the resource document and served to
+/// every reader of it, which makes it product data rather than an audit
+/// record (ADR-0001 §1). That slot is still named for the operator tier it
+/// was introduced for; ADR-0002's subresource execution model owns the field
+/// separation and is where the naming is settled, not here.
 async fn apply_status(
     authz: &AuthorizationContext,
     row: &ResourceRow,

@@ -84,7 +84,7 @@ Status writes use a separate URL (`.../<name>/status`) and a separate body shape
 
 The body's `status` value is stored verbatim under `status.controllers[<name>]`, where `<name>` is the calling Controller's resource name. Other controller slots are unaffected. The update applies unconditionally to the latest row and bumps `revision`. Access is an ordinary RBAC decision — see [Controller authorization](/operator-docs/resources/api/#controller-authorization) for how to grant a controller `update` on this subresource.
 
-Operator status writes use the same endpoint and store under `status.controllers["operator:<email>"]`. This is the recovery path when a controller has been deprovisioned and its status slot needs to be cleared or overridden.
+Operator status writes use the same endpoint and store under `status.controllers["operator:<subject>"]` — e.g. `operator:user:<uid>`, keyed on the caller's stable subject, never its email. This is the recovery path when a controller has been deprovisioned and its status slot needs to be cleared or overridden.
 
 ## Controller-owned finalizers
 

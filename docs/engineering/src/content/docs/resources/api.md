@@ -341,7 +341,7 @@ Authorization: Bearer <controller-jwt>
 {"status": {"phase": "Ready", "message": "all good"}}
 ```
 
-The body's `status` is stored under `status.controllers[<key>]` where `<key>` is the calling Controller's resource name (for a controller token) or `operator:<email>` (for a user write, authorized by `(update, Kind, status)`). Other slots in `status.controllers` are unaffected. A controller can only write its own slot; a user write lands in its own writer-keyed slot and never overwrites a controller's.
+The body's `status` is stored under `status.controllers[<key>]` where `<key>` is the calling Controller's resource name (for a controller token) or `operator:<subject>` — e.g. `operator:user:<uid>` — for a user write, authorized by `(update, Kind, status)`. Other slots in `status.controllers` are unaffected. A controller can only write its own slot; a user write lands in its own writer-keyed slot and never overwrites a controller's.
 
 The status update applies unconditionally to the latest row (no revision needed) and increments `revision`.
 
