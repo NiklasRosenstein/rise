@@ -175,9 +175,12 @@ Status legend: `[x]` shipped · `[~]` in progress · `[ ]` planned.
   after exact live, active `UserIdentity (issuer, subject)` and active parent
   User resolution.
 - [ ] Move workload token exchange to each ServiceAccount or Controller `/token`
-  subresource. Validate external assertions only against trust-policy children
-  of that URL target; do not perform a global source-identity search, and mask
-  target/assertion/policy failures behind the same coarse authentication error.
+  subresource, introduced additively per kind: a resource-API-backed identity
+  gains its `/token` route without touching any other, not-yet-migrated identity
+  of the same kind still on the legacy exchange endpoint. Validate external
+  assertions only against trust-policy children of that URL target; do not
+  perform a global source-identity search, and mask target/assertion/policy
+  failures behind the same coarse authentication error.
 - [ ] Support delegated issuance on the same `/token` route for an already
   Rise-authenticated principal holding `(create, qualified ResourceKind,
   token)`. Workload exchange and delegated request modes are disjoint.
@@ -192,9 +195,15 @@ Status legend: `[x]` shipped · `[~]` in progress · `[ ]` planned.
 - [ ] Reject stale UID tokens, inactive/deleted principals, Group subjects as
   principals, malformed subjects/scopes, and external workload JWTs on every
   non-token endpoint.
-- [ ] Retire synthetic ServiceAccount users/emails and the transitional
-  identity-selection contract once built-in identity resources and target
-  `/token` routes are live.
+- [ ] Retire the typed `service_accounts` table, its synthetic users/emails, and
+  the transitional identity-selection contract — gated on every service account
+  having migrated to a resource-API `ServiceAccount` and that legacy path's
+  traffic having drained to zero (ADR-0001 §10), not merely on the `/token`
+  route existing. Unlike Controller's `auth.controllers[]`, which carried no
+  production traffic and was removed unconditionally in the same change that
+  shipped `ControllerTrustPolicy` (§1), the typed ServiceAccount table is in
+  production use today and needs the same measure-then-drain-then-remove
+  discipline as `auth.allow_raw_external_tokens`.
 - [ ] Keep the platform-global maximum token TTL and add negative tests for
   audience, cap, target trust, mode-confusion, and name-recreation behavior.
 
