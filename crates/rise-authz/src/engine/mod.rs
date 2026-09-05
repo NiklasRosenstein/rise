@@ -39,7 +39,9 @@ pub use gate::{
     RoleBodyChange,
 };
 pub use membership::{MembershipResolver, PrincipalMembership};
-pub use principal::{AuthenticatedPrincipal, AuthorizationCap, CapEntry, CapPermission};
+pub use principal::{
+    AuthenticatedPrincipal, AuthorizationCap, CapEntry, CapPermission, RBAC_DETAIL_TYPE,
+};
 pub use tree::{ResourceNode, ResourceTree};
 
 use bindings::{load_organization_bindings, load_platform_bindings, BindingFact};

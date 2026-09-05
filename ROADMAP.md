@@ -71,7 +71,9 @@ Status legend: `[x]` shipped · `[~]` in progress · `[ ]` planned.
   `require_operator`. The choke point is live on the generic resource API, with
   per-item list filtering, the allowlisted list-only projection, and
   `metadata.effectiveLabels` on every response. Controllers are ordinary
-  `controller:<name>` principals evaluated by the same choke point; the
+  `controller:<name>` principals evaluated by the same choke point, whether
+  they authenticate with a JWT matched against their trust policies or with
+  an identity token from their `/token` subresource; the
   `ResourceDefinition.allowedStatusControllerIds` allowlist is removed.
 - [~] Add Role/policy audit and explain diagnostics for semantically inert
   configuration: no-op recipient or membership constraints, owners with no
@@ -174,27 +176,33 @@ Status legend: `[x]` shipped · `[~]` in progress · `[ ]` planned.
 - [ ] Issue User sessions with canonical `sub` plus immutable `rise_uid`
   after exact live, active `UserIdentity (issuer, subject)` and active parent
   User resolution.
-- [ ] Move workload token exchange to each ServiceAccount or Controller `/token`
+- [x] Move workload token exchange to each ServiceAccount or Controller `/token`
   subresource, introduced additively per kind: a resource-API-backed identity
   gains its `/token` route without touching any other, not-yet-migrated identity
   of the same kind still on the legacy exchange endpoint. Validate external
   assertions only against trust-policy children of that URL target; do not
   perform a global source-identity search, and mask target/assertion/policy
   failures behind the same coarse authentication error.
-- [ ] Support delegated issuance on the same `/token` route for an already
+  The route is live on `rise.dev/ServiceAccount` and `rise.dev/Controller`;
+  the minted identity token (`typ: rise-identity+jwt`, canonical `sub` plus
+  `rise_uid`) is a principal of the generic resource API, re-resolved to one
+  live resource on every request.
+- [x] Support delegated issuance on the same `/token` route for an already
   Rise-authenticated principal holding `(create, qualified ResourceKind,
   token)`. Workload exchange and delegated request modes are disjoint.
-- [ ] Add a canonical RFC 9396 `authorization_details` claim with
+- [x] Add a canonical RFC 9396 `authorization_details` claim with
   `type: rise.dev/rbac`, one qualified `scope` per entry, and multiple entries
   whose permissions union. Reject empty permission axes, carry the parsed cap
   on `AuthenticatedPrincipal`, and enforce live RBAC intersected with that cap
   on every primary and secondary decision.
-- [ ] Add bounded nested `act` attribution. Delegation chains are allowed only
+- [x] Add bounded nested `act` attribution. Delegation chains are allowed only
   across explicit live token-create grants; there is no token-class/one-hop
   bypass rule.
-- [ ] Reject stale UID tokens, inactive/deleted principals, Group subjects as
+- [~] Reject stale UID tokens, inactive/deleted principals, Group subjects as
   principals, malformed subjects/scopes, and external workload JWTs on every
-  non-token endpoint.
+  non-token endpoint. Identity tokens are rejected on every one of those
+  grounds; raw external JWTs on ordinary endpoints remain governed by the
+  transitional `auth.allow_raw_external_tokens` above.
 - [ ] Retire the typed `service_accounts` table, its synthetic users/emails, and
   the transitional identity-selection contract — gated on every service account
   having migrated to a resource-API `ServiceAccount` and that legacy path's
@@ -204,8 +212,12 @@ Status legend: `[x]` shipped · `[~]` in progress · `[ ]` planned.
   shipped `ControllerTrustPolicy` (§1), the typed ServiceAccount table is in
   production use today and needs the same measure-then-drain-then-remove
   discipline as `auth.allow_raw_external_tokens`.
-- [ ] Keep the platform-global maximum token TTL and add negative tests for
+- [~] Keep the platform-global maximum token TTL and add negative tests for
   audience, cap, target trust, mode-confusion, and name-recreation behavior.
+  The maximum is `server.auth_token_max_ttl_seconds` for both token kinds,
+  and cap, target-trust, mode-confusion, and name-recreation behavior are
+  tested through the route; audience-mismatch coverage waits on the
+  middleware-level test harness.
 
 ## 3. Subresource execution
 
@@ -214,9 +226,11 @@ Status legend: `[x]` shipped · `[~]` in progress · `[ ]` planned.
 - [ ] Register generic `status` and `finalizers` mutation strategies once in
   the resource layer; individual resource handlers must not reimplement their
   field separation.
-- [ ] Register `token` as a generated finite response with the two typed
+- [~] Register `token` as a generated finite response with the two typed
   authentication outcomes from ADR-0001. Raw assertions are consumed before
-  handler invocation.
+  handler invocation. Both outcomes are served today on the two built-in
+  identity kinds; moving that fixed registration onto the declared registry
+  seam waits on ADR-0002.
 - [ ] Make discovery report each kind's supported subresources, verbs, media
   types, and execution shape.
 - [ ] Design Deployment `logs` as the first streaming product subresource,

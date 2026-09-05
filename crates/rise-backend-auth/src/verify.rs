@@ -10,13 +10,14 @@ use std::collections::HashMap;
 use async_trait::async_trait;
 use jsonwebtoken::{decode, decode_header, Algorithm, DecodingKey, Validation};
 
-use crate::claims::{AccessClaims, ExternalClaims, RiseClaims};
+use crate::claims::{AccessClaims, ExternalClaims, IdentityClaims, RiseClaims};
 use crate::error::AuthError;
-use crate::signer::{RiseTokenSigner, RISE_ACCESS_TYP};
+use crate::signer::{RiseTokenSigner, RISE_ACCESS_TYP, RISE_IDENTITY_TYP};
 
 /// A verified Rise-issued token. The output type models only what the verifier
 /// can ever return: `Session` (HS256 session, UI/CLI login), `Access` (HS256
-/// exchanged SA / controller principal), and `Ingress` (RS256, deployed-app
+/// exchanged SA / controller principal), `Identity` (HS256 resource principal
+/// minted by a `/token` subresource), and `Ingress` (RS256, deployed-app
 /// ingress auth). Workload tokens are sign-only and never appear here.
 ///
 /// The variants carry their claim types; there is no public constructor other
@@ -29,6 +30,10 @@ pub enum RiseToken {
     /// HS256, `typ = "rise-access+jwt"`, aud = public_url — exchanged SA /
     /// controller principal (RFC 8693 token exchange).
     Access(AccessClaims),
+    /// HS256, `typ = "rise-identity+jwt"`, aud = public_url — a ServiceAccount
+    /// or Controller resource principal (ADR-0001 §7). The middleware still has
+    /// to resolve `(sub, rise_uid)` to a live resource before it is a principal.
+    Identity(IdentityClaims),
     /// RS256, aud = project_url — deployed-app ingress auth (aud not checked here).
     Ingress(RiseClaims),
 }
@@ -39,11 +44,12 @@ impl RiseTokenSigner {
     /// Verifies the signature and `iss`, then disambiguates:
     /// - **RS256** → [`RiseToken::Ingress`].
     /// - **HS256** → branch on the header `typ`: the access `typ`
-    ///   ([`RISE_ACCESS_TYP`]) → [`RiseToken::Access`]; anything else (the default
-    ///   `"JWT"`, a missing or unknown `typ`) → [`RiseToken::Session`]. Legacy
-    ///   session tokens carry the default `"JWT"`, so the access `typ` is matched
-    ///   *exclusively* — never requiring a session-specific `typ` that would break
-    ///   existing sessions.
+    ///   ([`RISE_ACCESS_TYP`]) → [`RiseToken::Access`]; the identity `typ`
+    ///   ([`RISE_IDENTITY_TYP`]) → [`RiseToken::Identity`]; anything else (the
+    ///   default `"JWT"`, a missing or unknown `typ`) → [`RiseToken::Session`].
+    ///   Legacy session tokens carry the default `"JWT"`, so the special `typ`s
+    ///   are matched *exclusively* — never requiring a session-specific `typ`
+    ///   that would break existing sessions.
     ///
     /// No `aud` check is performed here — callers enforce audience per context
     /// (the API middleware requires `aud == public_url` for `Session` and
@@ -69,6 +75,10 @@ impl RiseTokenSigner {
                     let token_data =
                         decode::<AccessClaims>(token, self.hs256_decoding_key(), &validation)?;
                     Ok(RiseToken::Access(token_data.claims))
+                } else if header.typ.as_deref() == Some(RISE_IDENTITY_TYP) {
+                    let token_data =
+                        decode::<IdentityClaims>(token, self.hs256_decoding_key(), &validation)?;
+                    Ok(RiseToken::Identity(token_data.claims))
                 } else {
                     let token_data =
                         decode::<RiseClaims>(token, self.hs256_decoding_key(), &validation)?;
@@ -380,6 +390,139 @@ mod tests {
         }
     }
 
+    fn identity_spec<'a>(
+        subject: &'a str,
+        rise_uid: uuid::Uuid,
+        act: Option<crate::ActorClaim>,
+    ) -> crate::IdentityTokenSpec<'a> {
+        crate::IdentityTokenSpec {
+            subject,
+            rise_uid,
+            audience: "https://rise.test",
+            ttl_secs: 600,
+            authorization_details: None,
+            act,
+        }
+    }
+
+    #[test]
+    fn test_verify_rise_jwt_identity_round_trip() {
+        let signer = create_test_signer();
+        let uid = uuid::Uuid::new_v4();
+        let details = vec![serde_json::json!({
+            "type": "rise.dev/rbac",
+            "scope": "rise.dev/Project/acme/app",
+            "permissions": [{"verbs": ["get"], "kinds": ["rise.dev/Deployment"]}],
+        })];
+        let actor = crate::ActorClaim {
+            sub: "user:u-01".into(),
+            rise_uid: uuid::Uuid::new_v4(),
+            act: None,
+        };
+        let (token, minted) = signer
+            .sign_identity_jwt(crate::IdentityTokenSpec {
+                subject: "serviceaccount:acme/ci",
+                rise_uid: uid,
+                audience: "https://rise.test",
+                ttl_secs: 600,
+                authorization_details: Some(details.clone()),
+                act: Some(actor.clone()),
+            })
+            .unwrap();
+
+        let header = jsonwebtoken::decode_header(&token).unwrap();
+        assert_eq!(header.alg, Algorithm::HS256);
+        assert_eq!(header.typ.as_deref(), Some(crate::RISE_IDENTITY_TYP));
+
+        match signer.verify_rise_jwt(&token).unwrap() {
+            RiseToken::Identity(c) => {
+                assert_eq!(c.sub, "serviceaccount:acme/ci");
+                assert_eq!(c.rise_uid, uid);
+                assert_eq!(c.aud, "https://rise.test");
+                assert_eq!(c.jti, minted.jti);
+                assert_eq!(c.exp, c.iat + 600);
+                assert_eq!(c.authorization_details, Some(details));
+                assert_eq!(c.act, Some(actor));
+                assert_eq!(c.delegation_depth(), 1);
+            }
+            other => panic!("expected Identity, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_identity_token_rejected_by_legacy_adapters() {
+        let signer = create_test_signer();
+        let (token, _) = signer
+            .sign_identity_jwt(identity_spec("controller:k8s", uuid::Uuid::new_v4(), None))
+            .unwrap();
+
+        assert!(
+            signer.verify_user_jwt(&token, "https://rise.test").is_err(),
+            "identity token must not verify as a user/session token"
+        );
+        assert!(
+            signer.verify_jwt_skip_aud(&token).is_err(),
+            "identity token must not verify on the ingress path"
+        );
+    }
+
+    #[test]
+    fn test_verify_jwt_skip_aud_rejects_rise_uid_claim() {
+        // The identity-shaped counterpart of the `principal` hardening: a token
+        // without the identity typ that carries `rise_uid` deserializes as a
+        // session token, so the ingress path must reject it by payload shape.
+        let claims = serde_json::json!({
+            "sub": "u",
+            "email": "u@example.com",
+            "iss": "https://rise.test",
+            "aud": "https://rise.test",
+            "iat": now(),
+            "exp": now() + 3600,
+            "rise_uid": uuid::Uuid::new_v4(),
+        });
+        let token = encode(&Header::new(Algorithm::HS256), &claims, &hs256_key()).unwrap();
+        let signer = create_test_signer();
+        assert!(matches!(
+            signer.verify_rise_jwt(&token).unwrap(),
+            RiseToken::Session(_)
+        ));
+        assert!(signer.verify_jwt_skip_aud(&token).is_err());
+    }
+
+    #[test]
+    fn test_sign_identity_jwt_refuses_overlong_delegation_chain() {
+        let signer = create_test_signer();
+        let mut chain: Option<Box<crate::ActorClaim>> = None;
+        for depth in 0..crate::MAX_DELEGATION_DEPTH + 1 {
+            chain = Some(Box::new(crate::ActorClaim {
+                sub: format!("controller:c{depth}"),
+                rise_uid: uuid::Uuid::new_v4(),
+                act: chain,
+            }));
+        }
+        let too_long = *chain.unwrap();
+        assert_eq!(too_long.depth(), crate::MAX_DELEGATION_DEPTH + 1);
+        let err = signer
+            .sign_identity_jwt(identity_spec(
+                "controller:k8s",
+                uuid::Uuid::new_v4(),
+                Some(too_long.clone()),
+            ))
+            .unwrap_err();
+        assert!(matches!(err, crate::JwtSignerError::DelegationChainTooLong));
+
+        // Exactly the limit is accepted.
+        let at_limit = *too_long.act.unwrap();
+        assert_eq!(at_limit.depth(), crate::MAX_DELEGATION_DEPTH);
+        signer
+            .sign_identity_jwt(identity_spec(
+                "controller:k8s",
+                uuid::Uuid::new_v4(),
+                Some(at_limit),
+            ))
+            .expect("a chain at the platform limit is accepted");
+    }
+
     #[test]
     fn test_access_token_rejected_by_legacy_adapters() {
         let signer = create_test_signer();
@@ -461,6 +604,19 @@ mod tests {
         assert!(matches!(
             signer.verify_rise_jwt(&access_token).unwrap(),
             RiseToken::Access(_)
+        ));
+
+        // HS256 + identity typ → Identity.
+        let (identity_token, _) = signer
+            .sign_identity_jwt(identity_spec(
+                "serviceaccount:acme/ci",
+                uuid::Uuid::new_v4(),
+                None,
+            ))
+            .unwrap();
+        assert!(matches!(
+            signer.verify_rise_jwt(&identity_token).unwrap(),
+            RiseToken::Identity(_)
         ));
 
         // HS256 + default "JWT" / missing / unknown typ → Session.

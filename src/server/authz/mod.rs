@@ -42,7 +42,7 @@ use sqlx::PgPool;
 use uuid::Uuid;
 
 use crate::db::models::User;
-use crate::server::auth::context::AnyAuth;
+use crate::server::auth::context::{AnyAuth, AuthContext};
 use crate::server::error::ServerError;
 use crate::server::resources::error_map::{store_error_to_server_error, RESOURCE_NOT_FOUND};
 
@@ -83,38 +83,45 @@ impl ResourceAuthorizer {
 
     /// The principal behind a credential.
     ///
-    /// A Rise-authenticated User or a Controller reaches the generic resource
-    /// API; both are evaluated identically by the engine from here on. A
-    /// Controller carries no `User` row, so the second element is `None` for
-    /// it and the third is the actor string audit records use in its place.
+    /// Three credentials reach the generic resource API, and the engine
+    /// evaluates all of them identically from here on: a Rise-authenticated
+    /// User; a Controller resolved from a JWT matched against its trust
+    /// policies; and an identity token for a ServiceAccount or Controller
+    /// resource minted by that resource's `/token` subresource (ADR-0001 §7).
+    /// Only a User carries a `User` row, so the second element is `None` for
+    /// the others and the third is the actor string audit records use.
     ///
     /// A User's subject is its stable identity as this install expresses it:
     /// the typed `users` row's UID, which is also the credential's `rise_uid`.
     /// ADR-0001 §1's generated `User` resource name replaces it when identity
     /// resources go live; both are opaque, immutable, and never the email. A
-    /// Controller's subject and UID are already its resource's — that identity
-    /// is already live.
+    /// Controller's or identity token's subject and UID are already its
+    /// resource's, and an identity token's ceiling travels with it: every
+    /// decision below intersects with that cap.
     ///
-    /// Workload principals other than Controllers (project-scoped service
-    /// accounts) still authenticate through the exchange endpoint but do not
-    /// reach the generic resource API: they are bound to a Project, which is a
-    /// typed concept the generic API does not share, and ADR-0001 §7's
-    /// target-bound `/token` route (which would make them principals here) is
-    /// not built yet.
+    /// The typed-table service accounts of the transitional exchange endpoint
+    /// do not reach this API: they are bound to a Project, which is a typed
+    /// concept the generic API does not share.
     fn principal(
         auth: &AnyAuth,
     ) -> Result<(AuthenticatedPrincipal, Option<User>, String), ServerError> {
         match auth {
+            AnyAuth::User(AuthContext::Identity(identity)) => {
+                let principal = AuthenticatedPrincipal::new(
+                    identity.subject.clone(),
+                    identity.uid,
+                    identity.cap.clone(),
+                )
+                .map_err(authorization_error_to_server_error)?;
+                Ok((principal, None, identity.subject.to_string()))
+            }
             AnyAuth::User(auth_ctx) => {
                 let user = auth_ctx.user()?.clone();
                 let subject: SubjectId = format!("user:{}", user.id).parse().map_err(|error| {
                     ServerError::internal(format!("principal is not a valid subject: {error}"))
                 })?;
+                // Unrestricted: a session token carries no authorization details.
                 let principal =
-                    // Unrestricted: authorization details (§7) are not issued
-                    // yet, so no credential carries a ceiling. When they are,
-                    // the parsed cap arrives here and every decision below
-                    // intersects with it, with no other change.
                     AuthenticatedPrincipal::new(subject, user.id, AuthorizationCap::Unrestricted)
                         .map_err(authorization_error_to_server_error)?;
                 let actor = user.email.clone();

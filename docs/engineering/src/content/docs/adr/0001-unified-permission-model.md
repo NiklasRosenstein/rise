@@ -6,6 +6,16 @@ title: "ADR-0001: Unified Permission Model"
 
 **Proposed** (under review). Date: 2026-07-10.
 
+Implementation progress: §1–§6 are live on the generic resource API — the
+policy and identity resources, the evaluation engine, the write-time grant
+gate, and the centralized choke point. §7's `token` subresource is live for
+`ServiceAccount` and `Controller`: target-bound workload exchange, delegated
+issuance, the `rise.dev/rbac` authorization-detail ceiling, UID-bound
+re-resolution on every request, and the bounded `act` chain. Still open: live
+`User`/`UserIdentity` resolution with operator selectors and JIT login,
+retirement of the typed-table exchange endpoint, and the conformance suite.
+`ROADMAP.md` §§1–3 hold the remaining steps.
+
 scope: the generic resource API (`/api/v1/resources/...`) and
 ServiceAccount/Controller token issuance (the `token` subresource). It does
 not change how `rise project create`, `rise deployment create`, or other

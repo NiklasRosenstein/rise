@@ -16,6 +16,7 @@ algorithm/claim disambiguation rules, see the engineering reference in
 |---|---|---|---|---|---|
 | **[Session](#session-hs256)** | Issued | HS256 | Rise `public_url` | Rise API middleware | `server.jwt_signing_secret`, `server.jwt_expiry_seconds` |
 | **[Access](#access-hs256--token-exchange)** | Issued | HS256 | Rise `public_url` | Rise API middleware | `server.auth_token_max_ttl_seconds`, `auth.allow_raw_external_tokens` |
+| **[Identity](#identity-hs256--the-token-subresource)** | Issued | HS256 | Rise `public_url` | Rise API middleware, re-resolved against the resource store per request | `server.auth_token_max_ttl_seconds`; trust policies are resources |
 | **[Ingress](#ingress-rs256)** | Issued | RS256 | Project URL | Nginx/ingress via Rise JWKS | `server.rs256_private_key_pem` |
 | **[Workload identity](#workload-identity-rs256)** | Issued | RS256 | Caller-supplied (e.g. `sts.amazonaws.com`) | External system via Rise JWKS | `server.rs256_private_key_pem`, `deployment_controller.identity_token_ttl_seconds` |
 | **[User login (OIDC)](#user-login-oidc)** | Accepted | per IdP | — | Rise (JWKS of `auth.issuer`) | `auth.issuer`, `auth.client_id`, `auth.client_secret` |
@@ -91,6 +92,48 @@ environment restrictions only takes effect once it expires).
 > This STS-style endpoint is **distinct** from the OIDC `token_endpoint` (the
 > authorization-code exchange at `/api/v1/auth/code/exchange`); the discovery
 > document continues to advertise the latter.
+
+This endpoint resolves the *typed* service accounts and configured controllers
+that the project APIs use today. Its resource-model successor is the `token`
+subresource below; the two coexist until the typed-object migration moves
+service accounts onto the resource store.
+
+### Identity (HS256) — the `token` subresource
+
+A short-lived, Rise-issued token whose subject is a **ServiceAccount or
+Controller resource** of the generic resource API (`serviceaccount:<org>/<name>`
+or `controller:<name>`), carrying that resource's UID as `rise_uid`. It is minted
+only by the target's own `token` subresource —
+`POST /api/v1/resources/rise.dev/v1alpha1/serviceaccounts/{org}/{name}/token` or
+`…/controllers/{name}/token` — in one of two disjoint modes: **workload token
+exchange**, where an external OIDC JWT in the body is validated against the
+`ServiceAccountTrustPolicy` / `ControllerTrustPolicy` children of that exact
+target; or **delegated issuance**, where an already-authenticated Rise principal
+holding `(create, <kind>, token)` on the target mints for it. It is
+distinguished from the other HS256 tokens by its header `typ`
+(`rise-identity+jwt`), and is accepted only by the generic resource API.
+
+**What it carries and what it does not.** Identity and an optional ceiling,
+never a snapshot of grants. Rise re-resolves `(sub, rise_uid)` to one live
+resource on every request and evaluates the identity's *current* RBAC,
+intersected with the token's RFC 9396 `authorization_details` if present. So:
+
+- deleting the target, or a draining Organization above it, fails every
+  outstanding token immediately — there is nothing to revoke;
+- recreating the same name under a new UID does not revive old tokens;
+- narrowing the target's Roles takes effect on the next request;
+- revoking the *caller's* token-create grant stops new issuance only.
+
+Delegated tokens record their delegators in a bounded `act` chain (at most four),
+for audit; actor data never grants access. Lifetime is capped by
+`server.auth_token_max_ttl_seconds`, the platform-global maximum shared with
+Access tokens. Trust policies are ordinary governed resources: they hold public
+matching configuration (issuer, `aud`, further string claims with `*` globs),
+never keys, and may not name Rise's own issuer. Every failure of a workload
+exchange after the route is entered is one coarse `401`, so the route confirms
+nothing about which identities or policies exist. The request/response shape and
+the authorization rules are specified in the
+[resource HTTP API](/operator-docs/resources/api/#token-subresource-serviceaccount-and-controller).
 
 **Migrating off raw tokens (`auth.allow_raw_external_tokens`).** Defaults to
 `true`: a service account may still present its raw external OIDC token directly
@@ -184,7 +227,10 @@ token's `iss` byte-for-byte, matching `UserIdentity`.
 > `finalizers` subresources of a kind (or any other verb) through a
 > `PlatformRoleBinding` naming that subject. See
 > [Controller authorization](/operator-docs/resources/api/#controller-authorization)
-> for the full model and a worked example.
+> for the full model and a worked example. A controller may also exchange its
+> OIDC JWT once, at its own `token` subresource, for an
+> [identity token](#identity-hs256--the-token-subresource) that carries the
+> same `controller:<name>` principal.
 
 ## Security checklist
 

@@ -5,6 +5,7 @@ pub mod entra_sync;
 pub mod exchange;
 pub mod group_sync;
 pub mod handlers;
+pub mod identity;
 pub mod jwt;
 pub mod middleware;
 pub mod oauth;

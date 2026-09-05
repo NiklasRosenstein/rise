@@ -1,11 +1,12 @@
 use crate::db::models::User;
 use crate::db::service_accounts;
 use crate::server::auth::controller::{self, ControllerAuthContext, ControllerResolution};
+use crate::server::auth::identity::ResourcePrincipal;
 use crate::server::auth::sa_match::{match_service_account, SaMatchError};
 use crate::server::error::{ServerError, ServerErrorExt};
 use crate::server::resources::error_map::store_error_to_server_error;
 use crate::server::state::AppState;
-use axum::{extract::FromRequestParts, http::request::Parts};
+use axum::{extract::FromRequestParts, http::request::Parts, http::StatusCode};
 use rise_backend_auth::{AccessClaims, PrincipalClaims};
 use sqlx::PgPool;
 
@@ -36,6 +37,11 @@ pub enum AuthContext {
     /// only ever a service account or controller — the exchange never mints a
     /// `User` access token. Recognized by handlers via `resolve_for_project`.
     Access(AccessClaims),
+    /// A Rise identity token: a ServiceAccount or Controller *resource*
+    /// principal minted by its `/token` subresource and re-resolved against the
+    /// live store on this request (ADR-0001 §7). It is a principal of the
+    /// generic resource API; the typed APIs do not accept it.
+    Identity(ResourcePrincipal),
 }
 
 impl AuthContext {
@@ -47,7 +53,7 @@ impl AuthContext {
     pub fn user(&self) -> Result<&User, ServerError> {
         match self {
             AuthContext::User(user) => Ok(user),
-            AuthContext::ExternalToken(_) | AuthContext::Access(_) => {
+            AuthContext::ExternalToken(_) | AuthContext::Access(_) | AuthContext::Identity(_) => {
                 Err(ServerError::unauthorized(
                     "This endpoint does not support service account authentication",
                 ))
@@ -81,6 +87,11 @@ impl AuthContext {
         match self {
             AuthContext::User(user) => Ok((user.clone(), false)),
             AuthContext::Access(claims) => resolve_access_for_project(pool, project, claims).await,
+            // A resource principal is not bound to a typed Project; the typed
+            // APIs converge onto it with the typed-object migration.
+            AuthContext::Identity(_) => Err(ServerError::unauthorized(
+                "Identity tokens are not accepted by project-scoped endpoints",
+            )),
             AuthContext::ExternalToken(token) => {
                 // A token satisfying a live controller trust policy is never a
                 // service account, whatever claims it also happens to carry.
@@ -192,7 +203,32 @@ impl AuthContext {
             AuthContext::Access(claims) => {
                 matches!(&claims.principal, PrincipalClaims::ServiceAccount { .. })
             }
+            AuthContext::Identity(principal) => principal.subject.kind() == "serviceaccount",
             AuthContext::User(_) => false,
+        }
+    }
+}
+
+/// An `AnyAuth` that may be absent.
+///
+/// Only one route accepts an unauthenticated request: a `/token` subresource
+/// receiving a workload assertion, whose credential is in the body (ADR-0001
+/// §7). Every other handler keeps extracting `AnyAuth` and gets its 401 from
+/// the extractor; this wrapper lets that one route decide for itself.
+#[derive(Clone, Debug)]
+pub struct MaybeAuth(pub Option<AnyAuth>);
+
+impl FromRequestParts<AppState> for MaybeAuth {
+    type Rejection = ServerError;
+
+    async fn from_request_parts(
+        parts: &mut Parts,
+        state: &AppState,
+    ) -> Result<Self, Self::Rejection> {
+        match AnyAuth::from_request_parts(parts, state).await {
+            Ok(auth) => Ok(Self(Some(auth))),
+            Err(error) if error.status == StatusCode::UNAUTHORIZED => Ok(Self(None)),
+            Err(error) => Err(error),
         }
     }
 }
@@ -262,6 +298,11 @@ impl FromRequestParts<AppState> for AuthContext {
         // Try the exchanged access-token extension (Rise access token path)
         if let Some(claims) = parts.extensions.get::<AccessClaims>().cloned() {
             return Ok(AuthContext::Access(claims));
+        }
+
+        // Try the resource-principal extension (Rise identity token path)
+        if let Some(principal) = parts.extensions.get::<ResourcePrincipal>().cloned() {
+            return Ok(AuthContext::Identity(principal));
         }
 
         // Try VerifiedExternalToken extension (legacy raw external JWT path)

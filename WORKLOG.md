@@ -62,11 +62,14 @@ scope and avoiding dead-end compatibility layers.
    list projection — plus the live `MembershipResolver`, pulled forward from
    increment 10 so the choke point has a real principal to build a snapshot
    from.
-10. **Planned — identity authentication and token convergence.** Add live
-   User/UserIdentity resolution, operator selection/JIT, target-bound workload
-   exchange, delegated `/token`, UID checks, caps, and actor-chain handling.
-   The live `MembershipResolver` moved to 9b; `authorization_details` parsing
-   stays here.
+10. **Split into 10a and 10b — identity authentication and token
+   convergence.** 10a (implemented) is the target-bound `/token` subresource
+   on ServiceAccount and Controller: workload exchange against the target's
+   trust policies, delegated issuance under `(create, <kind>, token)`, the
+   identity token with `rise_uid`, `authorization_details` parsing into the
+   engine's cap, UID-bound re-resolution on every request, and the bounded
+   `act` chain. 10b (planned) is live User/UserIdentity resolution, operator
+   selection, and JIT login.
 11. **Planned — full conformance and finalization.** Close every applicable
    ADR-0001 acceptance scenario, update documentation/status, and audit the
    implementation requirement by requirement.
@@ -1839,3 +1842,70 @@ idempotent when a read-modify-write client replays the stored spec.
     which only affects their own resource. The owner-reference half of this —
     holding another resource's deletion open with `blockOwnerDeletion` — is
     closed by the `use` requirement on both attaching and detaching an edge.
+
+## Increment 10a — the `token` subresource and resource principals
+
+- State: implemented on branch `claude/adr-001-token-cutover-6kjopq`.
+- Acceptance criteria:
+  - `POST …/serviceaccounts/{org}/{name}/token` and `POST …/controllers/{name}/token`
+    issue a Rise identity token for exactly the addressed resource; `/token` on
+    any other kind is the ordinary route-not-found before authentication, and
+    every other method on it is `405`.
+  - Workload exchange consults only the target's `ServiceAccountTrustPolicy` /
+    `ControllerTrustPolicy` children, narrowed by issuer before JWKS work,
+    requires exactly one claim match, and answers every post-route failure —
+    absent, wrong-kind, or draining target; unaccepted issuer; failed
+    verification; zero or several matches — with one byte-identical `401`.
+  - Delegated issuance needs `(create, <kind>, token)` on the exact target
+    under the caller's own cap; `get` on the target, `create` on the main
+    resource, and `get` on the subresource each grant nothing. A caller who
+    cannot `get` the target is masked to `404`.
+  - The two modes never mix; a Rise-issued assertion is never exchanged; a
+    trust policy may not name Rise's issuer.
+  - The identity token carries canonical `sub` and `rise_uid`, optional
+    `rise.dev/rbac` `authorization_details`, and a bounded `act` chain; it is
+    accepted only by the generic resource API, where the middleware re-resolves
+    `(sub, rise_uid)` to one live resource on every request and parses the
+    ceiling fail-closed.
+  - Delegation chains only across live token-create grants; actor data never
+    grants; a chain past `MAX_DELEGATION_DEPTH` is refused at both the handler
+    and the signer.
+- Decisions:
+  - The claim types, signer, verifier variant (`RiseToken::Identity`), `act`
+    chain, and TTL enforcement live in `rise-backend-auth`; the
+    `authorization_details` wire form and its parsing into `AuthorizationCap`
+    live in `rise-authz`; `rise-deploy` owns target resolution, trust-policy
+    lookup, and the route. `rise-backend-auth` therefore carries the details as
+    opaque JSON and stays free of the resource API crate.
+  - The generic resource API router carries its own authentication layers,
+    identical to the platform-wide ones except that a credential-less `POST`
+    to a `/token` path reaches the handler. The handler, not the middleware,
+    decides whether that path really is a registered token route; anything
+    else without a credential is `401`, and an unknown collection is `401`
+    rather than `404` so the registry stays invisible to unauthenticated
+    callers.
+  - Token issuance is not a serializable write: it persists nothing and runs
+    on a read-path authorization context.
+  - `server.auth_token_max_ttl_seconds` is the platform-global maximum for
+    identity tokens as well as access tokens; `expires_in` is clamped to it.
+  - The membership resolver holds an optional `User`: a resource principal has
+    no Group ties and no operator standing by construction, and the engine
+    rejects a resolver that claims otherwise.
+  - Built on PR #491's controller principals. A Controller resolved per
+    request from its trust policies and one holding an identity token from
+    its `/token` subresource are the same `controller:<name>` principal to
+    the engine; delegated issuance records either as the delegator, and the
+    resource API's `AnyAuth` is the one credential type both arrive through.
+  - The transitional `POST /api/v1/auth/token` and its typed-table principals
+    are untouched; they retire with the typed-object migration.
+- Verification:
+  - `rise-backend-auth`: identity round trip, rejection by both legacy
+    adapters, the `rise_uid` payload guard on the ingress path, the
+    disambiguation matrix, and the chain limit.
+  - `rise-authz`: scenarios 49–52 over `AuthorizationCap::from_details`,
+    including a checked list of malformed shapes.
+  - `rise-deploy` against Postgres: exchange by name and by UID for both
+    kinds; the coarse-401 matrix; delegated issuance across the grant
+    variants; a minted token authenticating as the target, gaining a live
+    grant, and dying with its UID; a two-hop delegation chain; caps applied to
+    `get` and `list`; create-only enforcement; the Rise-issuer guard.

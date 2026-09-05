@@ -37,14 +37,16 @@ verifier; callers enforce audience per context).
 | Alg | header `typ` | Verifier output | Notes |
 |---|---|---|---|
 | HS256 | `"rise-access+jwt"` | `RiseToken::Access(AccessClaims)` | exchanged SA / controller principal (RFC 8693), `aud = public_url` (checked by the API middleware, not here) |
+| HS256 | `"rise-identity+jwt"` | `RiseToken::Identity(IdentityClaims)` | ServiceAccount / Controller *resource* principal minted by a `/token` subresource (ADR-0001 §7); `aud = public_url` and the `(sub, rise_uid)` liveness check are the API middleware's |
 | HS256 | any other (incl. default `"JWT"`, missing, unknown) | `RiseToken::Session(RiseClaims)` | UI / CLI user login, `aud = public_url` (checked by the API middleware, not here) |
 | RS256 | any (incl. default `"JWT"`) | `RiseToken::Ingress(RiseClaims)` | deployed-app ingress auth, `aud = project_url` (not checked here) |
 | anything else | — | **rejected** (`InvalidAlgorithm`) | only HS256 / RS256 are accepted |
 
 **Dispatch:** RS256 → `Ingress`. HS256 branches on the header `typ` **first** — the
-access `typ` (`rise-access+jwt`) → `Access`; anything else → `Session`. The access
-`typ` is matched *exclusively*; legacy session tokens carry the default `"JWT"`, so a
-session is never required to set a specific `typ`. The
+access `typ` (`rise-access+jwt`) → `Access`, the identity `typ` (`rise-identity+jwt`)
+→ `Identity`; anything else → `Session`. The special `typ`s are matched
+*exclusively*; legacy session tokens carry the default `"JWT"`, so a session is
+never required to set a specific `typ`. The
 `rise_token_disambiguation_matrix` unit test pins this table against the real
 `verify_rise_jwt`.
 
@@ -53,9 +55,10 @@ Two notes on the RS256 / HS256 boundaries:
 - **Session vs. Access (HS256).** Both are HS256, and `RiseClaims` has no
   `#[serde(deny_unknown_fields)]`, so they are not serde-distinguishable — the
   `header.typ` discriminator is what keeps them apart. `AccessClaims` *does* use
-  `deny_unknown_fields`. The ingress adapter (`verify_jwt_skip_aud`) additionally
-  rejects any token carrying a `principal` claim, so an access-shaped payload can
-  never be honored on the ingress path.
+  `deny_unknown_fields`, as does `IdentityClaims`. The ingress adapter
+  (`verify_jwt_skip_aud`) additionally rejects any token carrying a `principal` or
+  `rise_uid` claim, so an access- or identity-shaped payload can never be honored
+  on the ingress path.
 - **Workload vs. Ingress (RS256).** Rise also mints **Workload** tokens (RS256,
   same key, default `typ:"JWT"`), but they are **sign-only** — `verify_rise_jwt`
   never returns a `Workload` variant. The *only* thing currently keeping a Workload
@@ -71,9 +74,11 @@ Two notes on the RS256 / HS256 boundaries:
 |---|---|---|---|---|
 | Workload (`WorkloadClaims`) | RS256 | `"JWT"` | n/a — sign-only; verified **externally** via the published JWKS (AWS STS / GCP WIF / Vault), never by Rise | outbound federation |
 
-The signer (`RiseTokenSigner`) mints all four kinds — `sign_user_jwt` (Session),
-`sign_access_jwt` (Access), `sign_ingress_jwt` (Ingress), `sign_workload_jwt`
-(Workload) — but the verifier classifies only the three inbound kinds above.
+The signer (`RiseTokenSigner`) mints all five kinds — `sign_user_jwt` (Session),
+`sign_access_jwt` (Access), `sign_identity_jwt` (Identity), `sign_ingress_jwt`
+(Ingress), `sign_workload_jwt` (Workload) — but the verifier classifies only the
+four inbound kinds above. `sign_identity_jwt` also enforces `MAX_DELEGATION_DEPTH`
+on the `act` chain, so no signing path can emit a token the platform limit forbids.
 
 ### External tokens — `verify_external_jwt` (Path A)
 
@@ -102,13 +107,15 @@ enforces `iss` + `exp`. Audience and any custom-claim constraints are validated
 ## Public surface (selected)
 
 - Verify: [`verify_external_jwt`], [`RiseTokenSigner::verify_rise_jwt`].
-- Sign: [`RiseTokenSigner`] (`sign_user_jwt`, `sign_access_jwt`, `sign_ingress_jwt`,
-  `sign_workload_jwt`, `generate_jwks`), [`compute_key_id`], `RISE_ACCESS_TYP`.
+- Sign: [`RiseTokenSigner`] (`sign_user_jwt`, `sign_access_jwt`, `sign_identity_jwt`,
+  `sign_ingress_jwt`, `sign_workload_jwt`, `generate_jwks`), [`compute_key_id`],
+  `RISE_ACCESS_TYP`, `RISE_IDENTITY_TYP`, `IdentityTokenSpec`.
 - Adapters (legacy, thin wrappers over `verify_rise_jwt`): `verify_user_jwt`
   (HS256 + `aud`), `verify_jwt_skip_aud` (HS256 **or** RS256, `aud` skipped; rejects
   access tokens / `principal`-carrying tokens).
 - Claims: [`RiseClaims`], [`AccessClaims`], [`PrincipalClaims`], [`Scope`],
-  [`WorkloadClaims`], [`WorkloadSubjectInfo`], [`ExternalClaims`].
+  `IdentityClaims`, `ActorClaim`, `MAX_DELEGATION_DEPTH`, [`WorkloadClaims`],
+  [`WorkloadSubjectInfo`], [`ExternalClaims`].
 - Matchers: [`TrustCandidate`], [`TrustMatch`], [`match_trust_candidates`]
   (shape-agnostic claim matching a caller builds from its own trust-policy
   resources — Controller, ServiceAccount — since this crate cannot depend on

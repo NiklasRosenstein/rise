@@ -1,6 +1,6 @@
 use axum::{
     extract::{Request, State},
-    http::{HeaderMap, StatusCode},
+    http::{HeaderMap, Method, StatusCode},
     middleware::Next,
     response::Response,
 };
@@ -11,6 +11,7 @@ use serde::Deserialize;
 use crate::db::{service_accounts, users, User};
 use crate::server::auth::context::VerifiedExternalToken;
 use crate::server::auth::cookie_helpers;
+use crate::server::auth::identity::{resolve_identity, ResourcePrincipal};
 use crate::server::state::AppState;
 use rise_backend_auth::{is_rise_issued_jwt, AccessClaims, PrincipalClaims, RiseToken};
 
@@ -172,6 +173,32 @@ pub async fn auth_middleware(
                     claims.principal
                 );
                 req.extensions_mut().insert(claims);
+            }
+            RiseToken::Identity(claims) => {
+                // Identity token — `aud` must be the Rise public URL, and the
+                // `(sub, rise_uid)` pair must still name one live resource
+                // (ADR-0001 §7). Every rejection is the same 401: which check
+                // failed is a fact about a resource the caller may not read.
+                if claims.aud != state.public_url {
+                    tracing::warn!("Auth middleware: identity token audience mismatch");
+                    return Err((StatusCode::UNAUTHORIZED, "Invalid token".to_string()));
+                }
+                let principal = resolve_identity(state.resource_store.as_ref(), &claims)
+                    .await
+                    .map_err(|rejection| {
+                        tracing::warn!(
+                            sub = %claims.sub,
+                            rise_uid = %claims.rise_uid,
+                            jti = %claims.jti,
+                            "Auth middleware: identity token rejected: {rejection}"
+                        );
+                        (StatusCode::UNAUTHORIZED, "Invalid token".to_string())
+                    })?;
+                tracing::debug!(
+                    subject = %principal.subject,
+                    "Auth middleware: Rise identity token accepted"
+                );
+                req.extensions_mut().insert(principal);
             }
             RiseToken::Ingress(_) => {
                 // RS256 ingress tokens are for deployed-app ingress auth only.
@@ -390,6 +417,14 @@ pub async fn platform_access_middleware(
         }
     }
 
+    // Resource principals carry no platform-access notion: what they reach is
+    // exactly what stored policy grants them (ADR-0001 §4), and the generic
+    // resource API is the only surface that accepts them.
+    if req.extensions().get::<ResourcePrincipal>().is_some() {
+        tracing::debug!("Skipping platform access check for identity token (resource principal)");
+        return Ok(next.run(req).await);
+    }
+
     // Extract user from extensions (injected by auth_middleware for Rise JWTs)
     let user = req.extensions().get::<User>().ok_or_else(|| {
         tracing::error!("platform_access_middleware called without user in extensions");
@@ -443,10 +478,109 @@ pub async fn platform_access_middleware(
     Ok(next.run(req).await)
 }
 
+/// Whether a request may reach its handler without a credential.
+///
+/// Exactly one shape qualifies: a `POST` to a path ending in `/token` that
+/// carries neither a bearer nor a session cookie. That is a workload token
+/// exchange, whose credential is the external assertion in the body (ADR-0001
+/// §7): the `/token` subresource authenticates it against the target's trust
+/// policies itself. The predicate is purely syntactic — it does not know
+/// whether the path really is a registered token route — so a request it lets
+/// through that turns out to be anything else is refused by the handler, which
+/// requires a principal for every other operation.
+pub fn is_unauthenticated_token_exchange(req: &Request) -> bool {
+    req.method() == Method::POST
+        && req.uri().path().trim_end_matches('/').ends_with("/token")
+        && extract_bearer_token(req.headers()).is_none()
+        && extract_rise_jwt_from_cookie(req.headers()).is_none()
+}
+
+/// [`auth_middleware`] for the generic resource API: identical, except that an
+/// unauthenticated workload token exchange passes through to its handler.
+pub async fn resource_auth_middleware(
+    state: State<AppState>,
+    headers: HeaderMap,
+    req: Request,
+    next: Next,
+) -> Result<Response, (StatusCode, String)> {
+    if is_unauthenticated_token_exchange(&req) {
+        return Ok(next.run(req).await);
+    }
+    auth_middleware(state, headers, req, next).await
+}
+
+/// [`platform_access_middleware`] for the generic resource API, with the same
+/// pass-through as [`resource_auth_middleware`].
+pub async fn resource_platform_access_middleware(
+    state: State<AppState>,
+    req: Request,
+    next: Next,
+) -> Result<Response, (StatusCode, String)> {
+    if is_unauthenticated_token_exchange(&req) {
+        return Ok(next.run(req).await);
+    }
+    platform_access_middleware(state, req, next).await
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use axum::http::HeaderValue;
+
+    fn request(method: Method, path: &str, authorization: Option<&str>) -> Request {
+        let mut builder = Request::builder().method(method).uri(path);
+        if let Some(value) = authorization {
+            builder = builder.header("Authorization", value);
+        }
+        builder.body(axum::body::Body::empty()).unwrap()
+    }
+
+    #[test]
+    fn unauthenticated_token_exchange_is_a_credential_less_post_to_token() {
+        let path = "/resources/rise.dev/v1alpha1/serviceaccounts/acme/ci/token";
+        assert!(is_unauthenticated_token_exchange(&request(
+            Method::POST,
+            path,
+            None
+        )));
+        assert!(is_unauthenticated_token_exchange(&request(
+            Method::POST,
+            &format!("{path}/"),
+            None
+        )));
+        // A credential means the ordinary middleware decides.
+        assert!(!is_unauthenticated_token_exchange(&request(
+            Method::POST,
+            path,
+            Some("Bearer x")
+        )));
+        let mut with_cookie = request(Method::POST, path, None);
+        with_cookie
+            .headers_mut()
+            .insert("Cookie", HeaderValue::from_static("rise_jwt=abc"));
+        assert!(!is_unauthenticated_token_exchange(&with_cookie));
+        // Other methods and other paths never pass through.
+        assert!(!is_unauthenticated_token_exchange(&request(
+            Method::GET,
+            path,
+            None
+        )));
+        assert!(!is_unauthenticated_token_exchange(&request(
+            Method::PUT,
+            path,
+            None
+        )));
+        assert!(!is_unauthenticated_token_exchange(&request(
+            Method::POST,
+            "/resources/rise.dev/v1alpha1/serviceaccounts/acme/ci/status",
+            None
+        )));
+        assert!(!is_unauthenticated_token_exchange(&request(
+            Method::POST,
+            "/resources/rise.dev/v1alpha1/serviceaccounts/acme",
+            None
+        )));
+    }
 
     #[test]
     fn test_extract_bearer_token_valid() {

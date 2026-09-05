@@ -39,9 +39,10 @@ use super::models::{
 use super::path::{
     parse_resource_path, parse_uid_token, CollectionRef, RawResourcePath, Subresource, UID_PREFIX,
 };
-use crate::server::auth::context::AnyAuth;
+use super::token::{self, TokenService};
 #[cfg(test)]
 use crate::server::auth::context::AuthContext;
+use crate::server::auth::context::{AnyAuth, MaybeAuth};
 #[cfg(test)]
 use crate::server::auth::controller::ControllerAuthContext;
 use crate::server::authz::{
@@ -71,6 +72,9 @@ pub(crate) struct ResourceApiCtx {
     /// and the row it authorizes are the same ones the write commits.
     store: Arc<dyn ResourceStore>,
     authz: ResourceAuthorizer,
+    /// What the `token` subresource needs: the signer, the JWKS source for
+    /// external assertions, the trust-policy lookup, and the platform limits.
+    tokens: Arc<TokenService>,
 }
 
 impl ResourceApiCtx {
@@ -78,6 +82,14 @@ impl ResourceApiCtx {
         Self {
             store: state.resource_store.clone(),
             authz: state.resource_authorizer.clone(),
+            tokens: Arc::new(TokenService::new(
+                state.jwt_signer.clone(),
+                state.jwt_validator.clone(),
+                rise_resource_store_postgres::TrustPolicyLookup::new(state.db_pool.clone()),
+                state.public_url.clone(),
+                state.server_settings.auth_token_max_ttl_seconds,
+                Some(state.oauth_rate_limiter.clone()),
+            )),
         }
     }
 }
@@ -108,9 +120,9 @@ fn response_resource(
 // Path resolution
 // -----------------------------------------------------------------------------
 
-struct ResolvedCollection {
+pub(super) struct ResolvedCollection {
     collection: String,
-    info: CollectionInfo,
+    pub(super) info: CollectionInfo,
 }
 
 async fn resolve_collection(
@@ -328,7 +340,7 @@ struct DeletionBlockerResponse {
 // -----------------------------------------------------------------------------
 
 /// How to resolve the leaf resource row of an item/subresource path.
-enum LeafRef {
+pub(super) enum LeafRef {
     /// Named form: `D` ancestor name segments plus the leaf name.
     Named {
         ancestor_segs: Vec<PathSegment>,
@@ -339,7 +351,7 @@ enum LeafRef {
 }
 
 /// A resource path classified against the leaf kind's parent-chain depth.
-enum ResolvedPath {
+pub(super) enum ResolvedPath {
     /// `pending-deletion`: resources tombstoned and awaiting GC.
     PendingDeletion,
     /// A collection listing — `D` ancestor name segments, no leaf.
@@ -387,7 +399,7 @@ fn segment_count_error(resolved: &ResolvedCollection, depth: usize, got: usize) 
 /// then either short-circuits the `uid:` form (a UID is globally unique, so the
 /// ancestor chain is irrelevant — no parent-chain walk) or walks the parent
 /// chain to learn `D` and classifies the named segments against it.
-async fn classify_path(
+pub(super) async fn classify_path(
     store: &Arc<dyn ResourceStore>,
     raw: RawResourcePath,
 ) -> Result<ResolvedPath, ServerError> {
@@ -521,7 +533,7 @@ async fn resolve_parent_row(
 /// leaf is missing, an ancestor is missing, the row is of another kind, the
 /// version is not declared — and each of those is itself a fact about a
 /// resource the caller may hold nothing on. One body, every time.
-async fn resolve_leaf(
+pub(super) async fn resolve_leaf(
     store: &Arc<dyn ResourceStore>,
     resolved: &ResolvedCollection,
     leaf: &LeafRef,
@@ -823,10 +835,59 @@ async fn dispatch_get_inner(
 pub async fn dispatch_post(
     State(state): State<AppState>,
     Path(raw): Path<String>,
-    auth: AnyAuth,
+    auth: MaybeAuth,
+    headers: axum::http::HeaderMap,
     Json(body): Json<serde_json::Value>,
 ) -> Result<Response, ServerError> {
-    dispatch_post_inner(&ResourceApiCtx::from_state(&state), raw, auth, body).await
+    let client_ip = crate::server::rate_limit::extract_client_ip(&headers);
+    dispatch_post_any(
+        &ResourceApiCtx::from_state(&state),
+        raw,
+        auth,
+        body,
+        &client_ip,
+    )
+    .await
+}
+
+/// POST, before the credential question is settled.
+///
+/// The `token` subresource is the one route that may be reached without a
+/// Rise credential, and — credential or not — the one POST that is not a
+/// serializable write: it persists nothing (ADR-0001 §2). Both of its modes are
+/// dispatched here; everything else is the ordinary create path.
+async fn dispatch_post_any(
+    ctx: &ResourceApiCtx,
+    raw: String,
+    auth: MaybeAuth,
+    body: serde_json::Value,
+    client_ip: &str,
+) -> Result<Response, ServerError> {
+    let raw_path = parse_resource_path(&raw)?;
+    let Some(auth) = auth.0 else {
+        return token::dispatch_unauthenticated(&ctx.store, &ctx.tokens, raw_path, body, client_ip)
+            .await;
+    };
+    if token::may_be_token_route(&raw_path) {
+        if let ResolvedPath::Subresource {
+            resolved,
+            leaf,
+            subresource: Subresource::Token,
+        } = classify_path(&ctx.store, raw_path).await?
+        {
+            return token::delegated_issuance(
+                &ctx.authz,
+                &ctx.store,
+                &ctx.tokens,
+                &auth,
+                &resolved,
+                &leaf,
+                body,
+            )
+            .await;
+        }
+    }
+    dispatch_post_inner(ctx, raw, auth, body).await
 }
 
 async fn dispatch_post_inner(
@@ -968,6 +1029,7 @@ async fn update_once(
                     StatusCode::METHOD_NOT_ALLOWED,
                     "deletion-blockers is a read-only subresource",
                 )),
+                Subresource::Token => Err(token_is_create_only()),
             }
         }
         _ => Err(ServerError::new(
@@ -977,6 +1039,15 @@ async fn update_once(
     }
 }
 
+/// `token` accepts `create` and nothing else (ADR-0001 §2): a Role may hold a
+/// broader wildcard, but only an operation the registered route serves can be
+/// authorized, and this one serves only POST.
+fn token_is_create_only() -> ServerError {
+    ServerError::new(
+        StatusCode::METHOD_NOT_ALLOWED,
+        "token is a create-only subresource: POST to it",
+    )
+}
 pub async fn dispatch_delete(
     State(state): State<AppState>,
     Path(raw): Path<String>,
@@ -1347,6 +1418,7 @@ async fn create_resource(
     let annotations: BTreeMap<String, String> = body.metadata.annotations.clone();
     let spec = serde_json::to_value(&body.spec)
         .map_err(|e| ServerError::bad_request(format!("invalid spec: {e}")))?;
+    token::reject_rise_issuer_in_trust_policy(&ctx.tokens, &resolved.info, &spec)?;
 
     authorize_owner_references(authz, None, &[], &body.metadata.owner_references).await?;
 
@@ -1848,12 +1920,13 @@ mod dispatch_tests {
             store,
             authz: ResourceAuthorizer::new(
                 pg_store,
-                pool,
+                pool.clone(),
                 crate::server::authz::OperatorSelectors {
                     users: Arc::new(operator_users),
                     idp_groups: Arc::new(operator_idp_groups),
                 },
             ),
+            tokens: Arc::new(token::tests::service(pool)),
         }
     }
 
@@ -5768,5 +5841,816 @@ mod dispatch_tests {
             .as_array()
             .expect("versions array");
         assert_eq!(versions.len(), 3, "expected 3 versions after update");
+    }
+
+    // -------------------------------------------------------------------------
+    // The token subresource (ADR-0001 §7)
+    // -------------------------------------------------------------------------
+
+    use crate::server::auth::identity::{resolve_identity, IdentityRejection};
+    use rise_backend_auth::{IdentityClaims, RiseToken};
+
+    const IP: &str = "203.0.113.7";
+
+    fn identity_body(name: &str, kind: &str) -> Value {
+        json!({
+            "apiVersion": "rise.dev/v1alpha1",
+            "kind": kind,
+            "metadata": {"name": name},
+            "spec": {},
+        })
+    }
+
+    async fn create_service_account(ctx: &ResourceApiCtx, org: &str, name: &str) -> Value {
+        create_at(
+            ctx,
+            &format!("rise.dev/v1alpha1/serviceaccounts/{org}"),
+            identity_body(name, "ServiceAccount"),
+        )
+        .await
+    }
+
+    fn trust_policy_body(kind: &str, name: &str, issuer: &str, claims: Value) -> Value {
+        json!({
+            "apiVersion": "rise.dev/v1alpha1",
+            "kind": kind,
+            "metadata": {"name": name},
+            "spec": {"issuer": issuer, "claims": claims},
+        })
+    }
+
+    async fn trust_service_account(
+        ctx: &ResourceApiCtx,
+        org: &str,
+        sa: &str,
+        name: &str,
+        issuer: &str,
+        claims: Value,
+    ) {
+        create_at(
+            ctx,
+            &format!("rise.dev/v1alpha1/serviceaccounttrustpolicies/{org}/{sa}"),
+            trust_policy_body("ServiceAccountTrustPolicy", name, issuer, claims),
+        )
+        .await;
+    }
+
+    async fn trust_controller(
+        ctx: &ResourceApiCtx,
+        controller: &str,
+        name: &str,
+        issuer: &str,
+        claims: Value,
+    ) {
+        create_at(
+            ctx,
+            &format!("rise.dev/v1alpha1/controllertrustpolicies/{controller}"),
+            trust_policy_body("ControllerTrustPolicy", name, issuer, claims),
+        )
+        .await;
+    }
+
+    fn exchange_body(assertion: &str) -> Value {
+        json!({
+            "grant_type": "urn:ietf:params:oauth:grant-type:token-exchange",
+            "subject_token": assertion,
+            "subject_token_type": "urn:ietf:params:oauth:token-type:jwt",
+        })
+    }
+
+    /// A credential-less POST: the workload exchange path.
+    async fn exchange(
+        ctx: &ResourceApiCtx,
+        path: &str,
+        body: Value,
+    ) -> Result<Response, ServerError> {
+        dispatch_post_any(ctx, path.to_string(), MaybeAuth(None), body, IP).await
+    }
+
+    /// An authenticated POST: the delegated path, or an ordinary create.
+    async fn post_as(
+        ctx: &ResourceApiCtx,
+        path: &str,
+        auth: AnyAuth,
+        body: Value,
+    ) -> Result<Response, ServerError> {
+        dispatch_post_any(ctx, path.to_string(), MaybeAuth(Some(auth)), body, IP).await
+    }
+
+    /// Decode a minted token through the service's own verifier.
+    fn decode(ctx: &ResourceApiCtx, body: &Value) -> IdentityClaims {
+        let token = body["access_token"].as_str().expect("access_token");
+        match ctx
+            .tokens
+            .signer()
+            .verify_rise_jwt(token)
+            .expect("verifies")
+        {
+            RiseToken::Identity(claims) => claims,
+            other => panic!("expected an identity token, got {other:?}"),
+        }
+    }
+
+    /// Authenticate a minted token exactly as the middleware does.
+    async fn identity_auth(ctx: &ResourceApiCtx, body: &Value) -> AnyAuth {
+        let claims = decode(ctx, body);
+        AnyAuth::User(AuthContext::Identity(
+            resolve_identity(ctx.store.as_ref(), &claims)
+                .await
+                .expect("the minted token resolves to a live principal"),
+        ))
+    }
+
+    const SA_TOKEN: &str = "rise.dev/v1alpha1/serviceaccounts/acme/ci/token";
+    const CI_CLAIMS: &str = "repo:acme/app:ref:main";
+
+    #[sqlx::test]
+    async fn workload_exchange_mints_a_target_bound_identity_token(pool: sqlx::PgPool) {
+        let ctx = ctx(pool).await;
+        create_org(&ctx, "acme").await;
+        let sa = create_service_account(&ctx, "acme", "ci").await;
+        trust_service_account(
+            &ctx,
+            "acme",
+            "ci",
+            "github",
+            token::tests::ISSUER,
+            json!({"aud": "rise", "sub": "repo:acme/*"}),
+        )
+        .await;
+
+        let assertion = token::tests::assertion(json!({"aud": "rise", "sub": CI_CLAIMS}));
+        let resp = exchange(&ctx, SA_TOKEN, exchange_body(&assertion))
+            .await
+            .expect("exchange succeeds");
+        let (status, body) = read(resp).await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        assert_eq!(body["token_type"], "Bearer");
+        assert_eq!(body["expires_in"], 600);
+        let claims = decode(&ctx, &body);
+        assert_eq!(claims.sub, "serviceaccount:acme/ci");
+        assert_eq!(claims.rise_uid, uid_of(&sa));
+        assert_eq!(claims.aud, token::tests::RISE_URL);
+        assert!(
+            claims.act.is_none(),
+            "a workload exchange records no delegator"
+        );
+        assert!(claims.authorization_details.is_none());
+
+        // `aud` may be an array (RFC 7519 §4.1.3), and the UID form addresses
+        // the same target.
+        let assertion =
+            token::tests::assertion(json!({"aud": ["other", "rise"], "sub": CI_CLAIMS}));
+        let resp = exchange(
+            &ctx,
+            &format!(
+                "rise.dev/v1alpha1/serviceaccounts/uid:{}/token",
+                uid_of(&sa)
+            ),
+            exchange_body(&assertion),
+        )
+        .await
+        .expect("exchange by uid succeeds");
+        let (status, body) = read(resp).await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        assert_eq!(decode(&ctx, &body).sub, "serviceaccount:acme/ci");
+
+        // A Controller is root-scoped and exchanges the same way.
+        let controller = create_controller(&ctx, "k8s").await;
+        trust_controller(
+            &ctx,
+            "k8s",
+            "cluster",
+            token::tests::ISSUER,
+            json!({"aud": "rise-controller", "sub": "system:serviceaccount:rise:k8s"}),
+        )
+        .await;
+        let assertion = token::tests::assertion(
+            json!({"aud": "rise-controller", "sub": "system:serviceaccount:rise:k8s"}),
+        );
+        let resp = exchange(
+            &ctx,
+            "rise.dev/v1alpha1/controllers/k8s/token",
+            exchange_body(&assertion),
+        )
+        .await
+        .expect("controller exchange succeeds");
+        let (status, body) = read(resp).await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        let claims = decode(&ctx, &body);
+        assert_eq!(claims.sub, "controller:k8s");
+        assert_eq!(claims.rise_uid, uid_of(&controller));
+    }
+
+    /// Scenarios 44, 45 and 47: after the route is entered, every failure is
+    /// the same 401 body, and only a registered token route is entered at all.
+    #[sqlx::test]
+    async fn workload_exchange_failures_are_one_coarse_401(pool: sqlx::PgPool) {
+        let ctx = ctx(pool).await;
+        create_org(&ctx, "acme").await;
+        let sa = create_service_account(&ctx, "acme", "ci").await;
+        create_service_account(&ctx, "acme", "unpoliced").await;
+        create_service_account(&ctx, "acme", "ambiguous").await;
+        trust_service_account(
+            &ctx,
+            "acme",
+            "ci",
+            "github",
+            token::tests::ISSUER,
+            json!({"aud": "rise", "sub": CI_CLAIMS}),
+        )
+        .await;
+        trust_service_account(
+            &ctx,
+            "acme",
+            "ci",
+            "elsewhere",
+            "https://other.example.com",
+            json!({"aud": "rise"}),
+        )
+        .await;
+        for name in ["one", "two"] {
+            trust_service_account(
+                &ctx,
+                "acme",
+                "ambiguous",
+                name,
+                token::tests::ISSUER,
+                json!({"aud": "rise"}),
+            )
+            .await;
+        }
+        let good = token::tests::assertion(json!({"aud": "rise", "sub": CI_CLAIMS}));
+
+        let coarse = |label: &'static str, err: ServerError| {
+            assert_eq!(
+                err.status,
+                StatusCode::UNAUTHORIZED,
+                "{label}: {}",
+                err.message
+            );
+            assert_eq!(err.message, token::WORKLOAD_EXCHANGE_REJECTED, "{label}");
+        };
+        let sa_path = |name: &str| format!("rise.dev/v1alpha1/serviceaccounts/acme/{name}/token");
+
+        // Absent target.
+        coarse(
+            "missing target",
+            exchange(&ctx, &sa_path("ghost"), exchange_body(&good))
+                .await
+                .unwrap_err(),
+        );
+        // A UID that resolves to another kind.
+        let org_uid = ctx
+            .store
+            .get_by_name("rise.dev/v1alpha1", "Organization", "acme", None)
+            .await
+            .unwrap()
+            .unwrap()
+            .uid;
+        coarse(
+            "wrong kind by uid",
+            exchange(
+                &ctx,
+                &format!("rise.dev/v1alpha1/serviceaccounts/uid:{org_uid}/token"),
+                exchange_body(&good),
+            )
+            .await
+            .unwrap_err(),
+        );
+        // No trust policy for this issuer.
+        coarse(
+            "no policy",
+            exchange(&ctx, &sa_path("unpoliced"), exchange_body(&good))
+                .await
+                .unwrap_err(),
+        );
+        // Claim mismatch.
+        let wrong_sub = token::tests::assertion(json!({"aud": "rise", "sub": "repo:beta/app"}));
+        coarse(
+            "claim mismatch",
+            exchange(&ctx, &sa_path("ci"), exchange_body(&wrong_sub))
+                .await
+                .unwrap_err(),
+        );
+        // Two matching policies.
+        coarse(
+            "ambiguous",
+            exchange(&ctx, &sa_path("ambiguous"), exchange_body(&good))
+                .await
+                .unwrap_err(),
+        );
+        // A policy exists for the issuer but its keys do not verify.
+        let unverifiable = token::tests::assertion_from(
+            "https://other.example.com",
+            json!({"aud": "rise", "sub": CI_CLAIMS}),
+        );
+        coarse(
+            "unverifiable",
+            exchange(&ctx, &sa_path("ci"), exchange_body(&unverifiable))
+                .await
+                .unwrap_err(),
+        );
+        // Rise's own issuer is never an external source.
+        let rise_issued = token::tests::assertion_from(
+            token::tests::RISE_URL,
+            json!({"aud": "rise", "sub": CI_CLAIMS}),
+        );
+        coarse(
+            "rise-issued",
+            exchange(&ctx, &sa_path("ci"), exchange_body(&rise_issued))
+                .await
+                .unwrap_err(),
+        );
+        // Not a JWT at all.
+        coarse(
+            "malformed",
+            exchange(&ctx, &sa_path("ci"), exchange_body("not-a-jwt"))
+                .await
+                .unwrap_err(),
+        );
+        // A draining target.
+        ctx.store.delete(uid_of(&sa)).await.expect("tombstone ci");
+        coarse(
+            "draining target",
+            exchange(&ctx, &sa_path("ci"), exchange_body(&good))
+                .await
+                .unwrap_err(),
+        );
+
+        // A kind that does not register `token` has no such route: the ordinary
+        // 404, before any authentication.
+        let err = exchange(
+            &ctx,
+            "rise.dev/v1alpha1/organizations/acme/token",
+            exchange_body(&good),
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(err.status, StatusCode::NOT_FOUND, "{}", err.message);
+        assert!(err.message.contains("no such route"), "{}", err.message);
+        // Any other credential-less request is simply unauthenticated —
+        // including one that reaches the same answer for an unknown collection.
+        for path in [
+            "rise.dev/v1alpha1/serviceaccounts/acme",
+            "rise.dev/v1alpha1/serviceaccounts/acme/ci/status",
+            "example.dev/v1/nothing/here/token",
+        ] {
+            let err = exchange(&ctx, path, exchange_body(&good))
+                .await
+                .unwrap_err();
+            assert_eq!(
+                err.status,
+                StatusCode::UNAUTHORIZED,
+                "{path}: {}",
+                err.message
+            );
+            assert_ne!(err.message, token::WORKLOAD_EXCHANGE_REJECTED, "{path}");
+        }
+        // No assertion and no credential is no credential.
+        let err = exchange(&ctx, &sa_path("ci"), json!({})).await.unwrap_err();
+        assert_eq!(err.status, StatusCode::UNAUTHORIZED);
+        // An assertion alongside a Rise credential is a malformed request, not
+        // an authentication failure (scenario 47).
+        let err = post_as(&ctx, &sa_path("ci"), auth(OPERATOR), exchange_body(&good))
+            .await
+            .unwrap_err();
+        assert_eq!(err.status, StatusCode::BAD_REQUEST, "{}", err.message);
+    }
+
+    /// Scenarios 46, 48 and 57: delegated issuance is RBAC only, needs `create`
+    /// on the `token` subresource of the exact target, and records the caller.
+    #[sqlx::test]
+    async fn delegated_issuance_requires_create_on_the_token_subresource(pool: sqlx::PgPool) {
+        let ctx = ctx(pool).await;
+        create_org(&ctx, "acme").await;
+        let sa = create_service_account(&ctx, "acme", "ci").await;
+        // No trust policy at all: delegated issuance never consults them.
+
+        let operator = auth(OPERATOR);
+        let operator_id = operator.user().unwrap().id;
+        let resp = post_as(&ctx, SA_TOKEN, operator, json!({}))
+            .await
+            .expect("an operator holds every subresource");
+        let (status, body) = read(resp).await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        let claims = decode(&ctx, &body);
+        assert_eq!(claims.sub, "serviceaccount:acme/ci");
+        assert_eq!(claims.rise_uid, uid_of(&sa));
+        let act = claims.act.expect("a delegated token records its delegator");
+        assert_eq!(act.sub, format!("user:{operator_id}"));
+        assert_eq!(act.rise_uid, operator_id);
+        assert!(act.act.is_none());
+
+        // A caller with no grant may not learn the target exists.
+        let err = post_as(&ctx, SA_TOKEN, auth(PLAIN_USER), json!({}))
+            .await
+            .unwrap_err();
+        assert_eq!(err.status, StatusCode::NOT_FOUND, "{}", err.message);
+
+        // `get` on the parent, `create` on the main resource, and `get` on the
+        // subresource each grant nothing here.
+        grant_authenticated(
+            &ctx,
+            "not-enough",
+            json!([
+                {"effect": "Allow", "kinds": ["rise.dev/ServiceAccount"], "verbs": ["get", "create"]},
+                {"effect": "Allow", "kinds": ["rise.dev/ServiceAccount"], "verbs": ["get"], "subresources": ["token"]},
+            ]),
+        )
+        .await;
+        let err = post_as(&ctx, SA_TOKEN, auth(PLAIN_USER), json!({}))
+            .await
+            .unwrap_err();
+        assert_eq!(err.status, StatusCode::FORBIDDEN, "{}", err.message);
+
+        // `(create, rise.dev/ServiceAccount, token)` is the grant.
+        grant_authenticated(
+            &ctx,
+            "token-minter",
+            json!([{
+                "effect": "Allow",
+                "kinds": ["rise.dev/ServiceAccount"],
+                "verbs": ["create"],
+                "subresources": ["token"],
+            }]),
+        )
+        .await;
+        let resp = post_as(&ctx, SA_TOKEN, auth(PLAIN_USER), json!({}))
+            .await
+            .expect("the token grant suffices");
+        let (status, body) = read(resp).await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        assert_eq!(decode(&ctx, &body).sub, "serviceaccount:acme/ci");
+
+        // The grant is on ServiceAccount, so a Controller target is still
+        // refused — masked, since the caller holds no `get` on Controllers.
+        create_controller(&ctx, "k8s").await;
+        let err = post_as(
+            &ctx,
+            "rise.dev/v1alpha1/controllers/k8s/token",
+            auth(PLAIN_USER),
+            json!({}),
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(err.status, StatusCode::NOT_FOUND, "{}", err.message);
+
+        // A kind without the subresource has no route, whoever asks.
+        let err = post_as(
+            &ctx,
+            "rise.dev/v1alpha1/organizations/acme/token",
+            auth(OPERATOR),
+            json!({}),
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(err.status, StatusCode::NOT_FOUND, "{}", err.message);
+        assert!(err.message.contains("no such route"), "{}", err.message);
+    }
+
+    /// Scenario 54 and §1's UID binding: a minted token is a principal of the
+    /// generic API, exercises the target's live policy, and dies with the
+    /// target's UID.
+    #[sqlx::test]
+    async fn a_minted_token_authenticates_as_the_target_until_its_uid_dies(pool: sqlx::PgPool) {
+        let ctx = ctx(pool).await;
+        create_org(&ctx, "acme").await;
+        let sa = create_service_account(&ctx, "acme", "ci").await;
+        let resp = post_as(&ctx, SA_TOKEN, auth(OPERATOR), json!({}))
+            .await
+            .expect("mint");
+        let (_, body) = read(resp).await;
+        let as_ci = identity_auth(&ctx, &body).await;
+        let AnyAuth::User(inner) = &as_ci else {
+            panic!("an identity token is an AuthContext principal");
+        };
+        assert!(inner.is_service_account());
+        assert!(inner.user().is_err(), "a resource principal is not a User");
+
+        // With no grant, the identity reaches nothing — not even itself.
+        let err = dispatch_get_inner(
+            &ctx,
+            "rise.dev/v1alpha1/serviceaccounts/acme/ci".to_string(),
+            as_ci.clone(),
+            PendingDeletionQuery::default(),
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(err.status, StatusCode::NOT_FOUND, "{}", err.message);
+
+        // A live grant to the identity delivers on the next request: nothing
+        // is snapshotted in the token.
+        create_at(
+            &ctx,
+            "rise.dev/v1alpha1/platformroles",
+            json!({
+                "apiVersion": "rise.dev/v1alpha1",
+                "kind": "PlatformRole",
+                "metadata": {"name": "self-reader"},
+                "spec": {"statements": [
+                    {"effect": "Allow", "kinds": ["rise.dev/ServiceAccount"], "verbs": ["get"]}
+                ]},
+            }),
+        )
+        .await;
+        create_at(
+            &ctx,
+            "rise.dev/v1alpha1/platformrolebindings",
+            json!({
+                "apiVersion": "rise.dev/v1alpha1",
+                "kind": "PlatformRoleBinding",
+                "metadata": {"name": "ci-reads-itself"},
+                "spec": {
+                    "subject": "serviceaccount:acme/ci",
+                    "scope": "rise.dev/ServiceAccount/acme/ci",
+                    "roleRef": {"kind": "PlatformRole", "name": "self-reader"},
+                },
+            }),
+        )
+        .await;
+        let resp = dispatch_get_inner(
+            &ctx,
+            "rise.dev/v1alpha1/serviceaccounts/acme/ci".to_string(),
+            as_ci.clone(),
+            PendingDeletionQuery::default(),
+        )
+        .await
+        .expect("the live grant reaches the token holder");
+        let (status, read_back) = read(resp).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(read_back["metadata"]["uid"], sa["metadata"]["uid"]);
+
+        // Group ties and operator standing belong to Users alone, so the
+        // identity is neither an operator nor affiliated by group.
+        let read_ctx = ctx.authz.read_context(&as_ci).await.unwrap();
+        assert!(!read_ctx.is_operator());
+        assert_eq!(read_ctx.subject().to_string(), "serviceaccount:acme/ci");
+        assert_eq!(read_ctx.actor(), "serviceaccount:acme/ci");
+
+        // Delete and recreate the same name: the name-bound binding delivers to
+        // the replacement, but every token for the old UID fails immediately.
+        ctx.store.delete(uid_of(&sa)).await.expect("delete ci");
+        let claims = decode(&ctx, &body);
+        assert!(matches!(
+            resolve_identity(ctx.store.as_ref(), &claims).await,
+            Err(IdentityRejection::NoLiveResource)
+        ));
+        // A tombstone, if the delete left one, has to be collected before the
+        // name is free again.
+        let _ = ctx.store.try_collect(uid_of(&sa)).await;
+        let replacement = create_service_account(&ctx, "acme", "ci").await;
+        assert_ne!(uid_of(&replacement), uid_of(&sa));
+        assert!(matches!(
+            resolve_identity(ctx.store.as_ref(), &claims).await,
+            Err(IdentityRejection::NoLiveResource)
+        ));
+    }
+
+    /// Scenario 48: a minted identity may mint the next only through its own
+    /// live token-create grant, and the chain records every delegator.
+    #[sqlx::test]
+    async fn delegation_chains_only_across_explicit_grants(pool: sqlx::PgPool) {
+        let ctx = ctx(pool).await;
+        create_org(&ctx, "acme").await;
+        create_service_account(&ctx, "acme", "ci").await;
+        create_controller(&ctx, "k8s").await;
+
+        let operator = auth(OPERATOR);
+        let operator_id = operator.user().unwrap().id;
+        let resp = post_as(
+            &ctx,
+            "rise.dev/v1alpha1/controllers/k8s/token",
+            operator,
+            json!({}),
+        )
+        .await
+        .expect("operator mints for the controller");
+        let (_, controller_token) = read(resp).await;
+        let as_k8s = identity_auth(&ctx, &controller_token).await;
+
+        // The controller holds no token-create on the ServiceAccount.
+        let err = post_as(&ctx, SA_TOKEN, as_k8s.clone(), json!({}))
+            .await
+            .unwrap_err();
+        assert_eq!(err.status, StatusCode::NOT_FOUND, "{}", err.message);
+
+        // A Controller is org-agnostic, so its grant on an org-contained target
+        // arrives through a PlatformRoleBinding (ADR-0001 §7).
+        create_at(
+            &ctx,
+            "rise.dev/v1alpha1/platformroles",
+            json!({
+                "apiVersion": "rise.dev/v1alpha1",
+                "kind": "PlatformRole",
+                "metadata": {"name": "sa-token-minter"},
+                "spec": {"statements": [{
+                    "effect": "Allow",
+                    "kinds": ["rise.dev/ServiceAccount"],
+                    "verbs": ["create"],
+                    "subresources": ["token"],
+                }]},
+            }),
+        )
+        .await;
+        create_at(
+            &ctx,
+            "rise.dev/v1alpha1/platformrolebindings",
+            json!({
+                "apiVersion": "rise.dev/v1alpha1",
+                "kind": "PlatformRoleBinding",
+                "metadata": {"name": "k8s-mints-ci"},
+                "spec": {
+                    "subject": "controller:k8s",
+                    "scope": "rise.dev/Organization/acme",
+                    "roleRef": {"kind": "PlatformRole", "name": "sa-token-minter"},
+                },
+            }),
+        )
+        .await;
+        let resp = post_as(&ctx, SA_TOKEN, as_k8s, json!({}))
+            .await
+            .expect("the controller now holds token-create on the ServiceAccount");
+        let (status, sa_token) = read(resp).await;
+        assert_eq!(status, StatusCode::OK, "{sa_token}");
+        let claims = decode(&ctx, &sa_token);
+        assert_eq!(claims.sub, "serviceaccount:acme/ci");
+        assert_eq!(claims.delegation_depth(), 2);
+        let act = claims.act.expect("act");
+        assert_eq!(act.sub, "controller:k8s");
+        let inner = act.act.expect("the controller's own delegator");
+        assert_eq!(inner.sub, format!("user:{operator_id}"));
+        assert!(inner.act.is_none());
+
+        // Actor data never grants: the ServiceAccount token holds only what the
+        // ServiceAccount holds, which is nothing here.
+        let as_ci = identity_auth(&ctx, &sa_token).await;
+        let err = post_as(
+            &ctx,
+            "rise.dev/v1alpha1/controllers/k8s/token",
+            as_ci,
+            json!({}),
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(err.status, StatusCode::NOT_FOUND, "{}", err.message);
+    }
+
+    /// Scenarios 52 and 53: `authorization_details` narrow the issued token,
+    /// the ceiling applies on every request, and a malformed set is refused.
+    #[sqlx::test]
+    async fn authorization_details_narrow_the_issued_token(pool: sqlx::PgPool) {
+        let ctx = ctx(pool).await;
+        create_org(&ctx, "acme").await;
+        create_org(&ctx, "beta").await;
+        create_service_account(&ctx, "acme", "ci").await;
+        // The identity may read every ServiceAccount, live.
+        grant_authenticated(
+            &ctx,
+            "sa-reader",
+            json!([{"effect": "Allow", "kinds": ["rise.dev/ServiceAccount"], "verbs": ["get", "list"]}]),
+        )
+        .await;
+        create_service_account(&ctx, "beta", "deploy").await;
+
+        let details = json!([{
+            "type": "rise.dev/rbac",
+            "scope": "rise.dev/Organization/acme",
+            "permissions": [{"verbs": ["get"], "kinds": ["rise.dev/ServiceAccount"]}],
+        }]);
+        let resp = post_as(
+            &ctx,
+            SA_TOKEN,
+            auth(OPERATOR),
+            json!({"authorization_details": details, "expires_in": 60}),
+        )
+        .await
+        .expect("mint a narrowed token");
+        let (status, body) = read(resp).await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        assert_eq!(body["expires_in"], 60);
+        let claims = decode(&ctx, &body);
+        assert_eq!(
+            claims.authorization_details.as_ref().map(|d| json!(d)),
+            Some(details),
+            "the token carries the canonical detail set"
+        );
+        let capped = identity_auth(&ctx, &body).await;
+
+        // Inside the ceiling, the live grant delivers.
+        let resp = dispatch_get_inner(
+            &ctx,
+            "rise.dev/v1alpha1/serviceaccounts/acme/ci".to_string(),
+            capped.clone(),
+            PendingDeletionQuery::default(),
+        )
+        .await
+        .expect("get inside the ceiling");
+        assert_eq!(read(resp).await.0, StatusCode::OK);
+        // Outside it, live RBAC is denied — and masked, as any denial is.
+        let err = dispatch_get_inner(
+            &ctx,
+            "rise.dev/v1alpha1/serviceaccounts/beta/deploy".to_string(),
+            capped.clone(),
+            PendingDeletionQuery::default(),
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(err.status, StatusCode::NOT_FOUND, "{}", err.message);
+        // `list` is outside the ceiling too, so the listing is masked empty.
+        let resp = dispatch_get_inner(
+            &ctx,
+            "rise.dev/v1alpha1/serviceaccounts/acme".to_string(),
+            capped,
+            PendingDeletionQuery::default(),
+        )
+        .await
+        .expect("a list outside the ceiling is empty");
+        let (status, listing) = read(resp).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(listing["items"].as_array().map(Vec::len), Some(0));
+
+        // A malformed detail set is a bad request, never a fallback.
+        for details in [json!([]), json!({}), json!([{"type": "rise.dev/rbac"}])] {
+            let err = post_as(
+                &ctx,
+                SA_TOKEN,
+                auth(OPERATOR),
+                json!({"authorization_details": details}),
+            )
+            .await
+            .unwrap_err();
+            assert_eq!(err.status, StatusCode::BAD_REQUEST, "{}", err.message);
+        }
+        // And a token whose stored claim is malformed fails authentication.
+        let mut claims = decode(&ctx, &body);
+        claims.authorization_details = Some(vec![]);
+        assert!(matches!(
+            resolve_identity(ctx.store.as_ref(), &claims).await,
+            Err(IdentityRejection::Cap(_))
+        ));
+    }
+
+    /// `token` is create-only (ADR-0001 §2), and a trust policy may never name
+    /// Rise's own issuer (scenario 47).
+    #[sqlx::test]
+    async fn token_is_create_only_and_rise_is_never_an_external_issuer(pool: sqlx::PgPool) {
+        let ctx = ctx(pool).await;
+        create_org(&ctx, "acme").await;
+        create_service_account(&ctx, "acme", "ci").await;
+
+        let err = dispatch_put_inner(&ctx, SA_TOKEN.to_string(), auth(OPERATOR), json!({}))
+            .await
+            .unwrap_err();
+        assert_eq!(
+            err.status,
+            StatusCode::METHOD_NOT_ALLOWED,
+            "{}",
+            err.message
+        );
+        let err = dispatch_put_inner(
+            &ctx,
+            SA_TOKEN.to_string(),
+            any_controller("reconciler"),
+            json!({}),
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(
+            err.status,
+            StatusCode::METHOD_NOT_ALLOWED,
+            "{}",
+            err.message
+        );
+        let err = dispatch_get_inner(
+            &ctx,
+            SA_TOKEN.to_string(),
+            auth(OPERATOR),
+            PendingDeletionQuery::default(),
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(
+            err.status,
+            StatusCode::METHOD_NOT_ALLOWED,
+            "{}",
+            err.message
+        );
+
+        let err = post_as(
+            &ctx,
+            "rise.dev/v1alpha1/serviceaccounttrustpolicies/acme/ci",
+            auth(OPERATOR),
+            trust_policy_body(
+                "ServiceAccountTrustPolicy",
+                "self",
+                token::tests::RISE_URL,
+                json!({"aud": "rise"}),
+            ),
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(err.status, StatusCode::BAD_REQUEST, "{}", err.message);
+        assert!(err.message.contains("Rise's own issuer"), "{}", err.message);
     }
 }

@@ -174,6 +174,92 @@ pub struct AccessClaims {
     pub principal: PrincipalClaims,
 }
 
+/// The longest delegation chain an identity token may record (ADR-0001 §7).
+///
+/// Counted in `act` entries: a workload-exchanged token has none; a token
+/// minted by that workload for another target has one; and so on. A request
+/// whose result would exceed this is refused rather than silently truncated,
+/// so the audit chain a token carries is always complete.
+pub const MAX_DELEGATION_DEPTH: usize = 4;
+
+/// One delegator in an identity token's `act` chain (RFC 8693 §4.1).
+///
+/// The nested shape records every principal that minted a token along the way,
+/// outermost first: `act` names the caller that requested this token, and its
+/// own `act` names whoever minted the credential *that* caller presented.
+/// Actor data is audit provenance only; it never grants access.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct ActorClaim {
+    /// The delegator's canonical subject (`user:<name>`,
+    /// `serviceaccount:<org>/<name>`, or `controller:<name>`).
+    pub sub: String,
+    /// The delegator's resource UID at issuance time.
+    pub rise_uid: Uuid,
+    /// The delegator's own delegator, if it was itself acting on a delegated
+    /// token.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub act: Option<Box<ActorClaim>>,
+}
+
+impl ActorClaim {
+    /// How many delegators this chain records, this entry included.
+    pub fn depth(&self) -> usize {
+        1 + self.act.as_ref().map_or(0, |inner| inner.depth())
+    }
+}
+
+/// Claims for a Rise-issued **identity token** (HS256) — the credential of a
+/// ServiceAccount or Controller *resource* principal (ADR-0001 §7).
+///
+/// Minted only by a target's `/token` subresource, either from an external
+/// workload assertion matched against that target's trust policies or by a
+/// Rise principal holding `(create, <kind>, token)` on it. Consumed only by
+/// Rise's own middleware, which re-resolves `(sub, rise_uid)` to a live resource
+/// on every request: the token carries identity and an optional ceiling, never
+/// a snapshot of grants.
+///
+/// Kept structurally separate from [`AccessClaims`] (which encodes a resolved
+/// typed-table principal) and from [`RiseClaims`] so none of the three can be
+/// honored on another's path.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct IdentityClaims {
+    /// Issuer (Rise public URL).
+    pub iss: String,
+    /// Audience (Rise public URL) — verified by the middleware like a session token.
+    pub aud: String,
+    /// The principal's canonical subject: `serviceaccount:<org>/<name>` or
+    /// `controller:<name>`.
+    pub sub: String,
+    /// The principal's resource UID at issuance. Authentication requires `sub`
+    /// and `rise_uid` to identify the same live resource, so a token issued for
+    /// a deleted-and-recreated name fails even though the name resolves again.
+    pub rise_uid: Uuid,
+    /// Issued at timestamp.
+    pub iat: u64,
+    /// Expiration timestamp.
+    pub exp: u64,
+    /// Audit id.
+    pub jti: String,
+    /// RFC 9396 authorization details forming a signed Allow ceiling (ADR-0001
+    /// §7). Absent means the target's full live policy; present is parsed by
+    /// the authorization engine on every request and fails closed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub authorization_details: Option<Vec<serde_json::Value>>,
+    /// The delegation chain, when this token was minted through delegated
+    /// issuance rather than workload exchange.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub act: Option<ActorClaim>,
+}
+
+impl IdentityClaims {
+    /// The number of delegators recorded in the `act` chain.
+    pub fn delegation_depth(&self) -> usize {
+        self.act.as_ref().map_or(0, ActorClaim::depth)
+    }
+}
+
 /// Subject info for workload identity JWT claims.
 pub struct WorkloadSubjectInfo<'a> {
     pub sub: &'a str,
