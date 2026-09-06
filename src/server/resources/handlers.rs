@@ -5955,7 +5955,7 @@ mod dispatch_tests {
     async fn identity_auth(ctx: &ResourceApiCtx, body: &Value) -> AnyAuth {
         let claims = decode(ctx, body);
         AnyAuth::User(AuthContext::Identity(
-            resolve_identity(ctx.store.as_ref(), &claims)
+            resolve_identity(ctx.store.as_ref(), &claims, token::tests::RISE_URL)
                 .await
                 .expect("the minted token resolves to a live principal"),
         ))
@@ -6393,7 +6393,7 @@ mod dispatch_tests {
         ctx.store.delete(uid_of(&sa)).await.expect("delete ci");
         let claims = decode(&ctx, &body);
         assert!(matches!(
-            resolve_identity(ctx.store.as_ref(), &claims).await,
+            resolve_identity(ctx.store.as_ref(), &claims, token::tests::RISE_URL).await,
             Err(IdentityRejection::NoLiveResource)
         ));
         // A tombstone, if the delete left one, has to be collected before the
@@ -6402,7 +6402,7 @@ mod dispatch_tests {
         let replacement = create_service_account(&ctx, "acme", "ci").await;
         assert_ne!(uid_of(&replacement), uid_of(&sa));
         assert!(matches!(
-            resolve_identity(ctx.store.as_ref(), &claims).await,
+            resolve_identity(ctx.store.as_ref(), &claims, token::tests::RISE_URL).await,
             Err(IdentityRejection::NoLiveResource)
         ));
     }
@@ -6586,9 +6586,79 @@ mod dispatch_tests {
         let mut claims = decode(&ctx, &body);
         claims.authorization_details = Some(vec![]);
         assert!(matches!(
-            resolve_identity(ctx.store.as_ref(), &claims).await,
+            resolve_identity(ctx.store.as_ref(), &claims, token::tests::RISE_URL).await,
             Err(IdentityRejection::Cap(_))
         ));
+    }
+
+    /// An `audience` mints the same token for another verifier: Rise's own API
+    /// refuses it, and a ceiling cannot be combined with it.
+    #[sqlx::test]
+    async fn an_audience_bound_token_is_for_that_verifier_only(pool: sqlx::PgPool) {
+        let ctx = ctx(pool).await;
+        create_org(&ctx, "acme").await;
+        let sa = create_service_account(&ctx, "acme", "ci").await;
+
+        let resp = post_as(
+            &ctx,
+            SA_TOKEN,
+            auth(OPERATOR),
+            json!({"audience": "https://vault.example.com"}),
+        )
+        .await
+        .expect("mint for an external audience");
+        let (status, body) = read(resp).await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        let claims = decode(&ctx, &body);
+        assert_eq!(claims.aud, "https://vault.example.com");
+        assert_eq!(claims.sub, "serviceaccount:acme/ci");
+        assert_eq!(claims.rise_uid, uid_of(&sa));
+        assert!(matches!(
+            resolve_identity(ctx.store.as_ref(), &claims, token::tests::RISE_URL).await,
+            Err(IdentityRejection::Audience(_))
+        ));
+
+        // The audience defaults to Rise, and an explicit Rise audience is the
+        // same thing.
+        let resp = post_as(
+            &ctx,
+            SA_TOKEN,
+            auth(OPERATOR),
+            json!({"audience": token::tests::RISE_URL}),
+        )
+        .await
+        .expect("mint for Rise explicitly");
+        let (_, body) = read(resp).await;
+        assert!(resolve_identity(
+            ctx.store.as_ref(),
+            &decode(&ctx, &body),
+            token::tests::RISE_URL
+        )
+        .await
+        .is_ok());
+
+        // A ceiling is meaningless to another verifier, so the pair is refused
+        // before anything about the target is consulted.
+        let err = post_as(
+            &ctx,
+            SA_TOKEN,
+            auth(OPERATOR),
+            json!({
+                "audience": "https://vault.example.com",
+                "authorization_details": [{
+                    "type": "rise.dev/rbac",
+                    "scope": "rise.dev/Organization/acme",
+                    "permissions": [{"verbs": ["get"], "kinds": ["rise.dev/ServiceAccount"]}],
+                }],
+            }),
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(err.status, StatusCode::BAD_REQUEST, "{}", err.message);
+        let err = post_as(&ctx, SA_TOKEN, auth(OPERATOR), json!({"audience": "  "}))
+            .await
+            .unwrap_err();
+        assert_eq!(err.status, StatusCode::BAD_REQUEST, "{}", err.message);
     }
 
     /// `token` is create-only (ADR-0001 §2), and a trust policy may never name

@@ -144,10 +144,18 @@ pub struct TokenRequest {
     /// RFC 9396 narrowing; `null` is as invalid as any other malformed value.
     #[serde(default, deserialize_with = "present_even_if_null")]
     pub authorization_details: Option<serde_json::Value>,
+    /// The `aud` to mint for (RFC 8693 `audience`). Omitted means Rise's own
+    /// API; any other value produces a token for an external verifier, which
+    /// checks it against Rise's published JWKS and which Rise's API refuses.
+    #[serde(default)]
+    pub audience: Option<String>,
     /// Requested lifetime in seconds, clamped to the platform maximum.
     #[serde(default)]
     pub expires_in: Option<u64>,
 }
+
+/// Longest accepted `audience`, matching the workload identity endpoint.
+const MAX_AUDIENCE_LEN: usize = 1024;
 
 /// Keep an explicit `null` distinct from an omitted field: the omitted claim
 /// means the full live policy, and `null` must not quietly mean the same.
@@ -163,6 +171,8 @@ fn present_even_if_null<'de, D: serde::Deserializer<'de>>(
 struct ValidatedRequest {
     assertion: Option<String>,
     cap: AuthorizationCap,
+    /// The `aud` to mint; Rise's own URL unless the caller named another.
+    audience: String,
     ttl_seconds: u64,
 }
 
@@ -209,6 +219,22 @@ fn validate_request(
             ))
         }
     };
+    let audience = match body.audience.as_deref().map(str::trim) {
+        None => service.audience.clone(),
+        Some("") => return Err(ServerError::bad_request("audience must not be empty")),
+        Some(audience) if audience.len() > MAX_AUDIENCE_LEN => {
+            return Err(ServerError::bad_request("audience value too long"))
+        }
+        Some(audience) => audience.to_owned(),
+    };
+    // A ceiling is a statement about Rise's own RBAC; on a token another
+    // verifier reads it would only look like a restriction.
+    if audience != service.audience && !matches!(cap, AuthorizationCap::Unrestricted) {
+        return Err(ServerError::bad_request(
+            "authorization_details narrows a token for Rise's own API; \
+             it cannot be combined with an external audience",
+        ));
+    }
     let ttl_seconds = match body.expires_in {
         None => service.max_ttl_seconds,
         Some(0) => return Err(ServerError::bad_request("expires_in must be positive")),
@@ -217,6 +243,7 @@ fn validate_request(
     Ok(ValidatedRequest {
         assertion,
         cap,
+        audience,
         ttl_seconds,
     })
 }
@@ -276,7 +303,7 @@ fn mint(
         .sign_identity_jwt(IdentityTokenSpec {
             subject: target.subject.as_ref(),
             rise_uid: target.uid,
-            audience: &service.audience,
+            audience: &request.audience,
             ttl_secs: request.ttl_seconds,
             authorization_details: request.cap.to_details(),
             act,
@@ -466,6 +493,7 @@ async fn workload_exchange(
         trust_policy = %policy.name,
         source_iss = %issuer,
         source_sub = claims.get("sub").and_then(|v| v.as_str()).unwrap_or(""),
+        audience = %request.audience,
         restricted = !matches!(request.cap, AuthorizationCap::Unrestricted),
         "resource.token_exchanged"
     );
@@ -639,6 +667,7 @@ pub(super) async fn delegated_issuance(
         uid = %target.uid,
         kind = %target.kind_name(),
         name = %target.name,
+        audience = %request.audience,
         restricted = !matches!(request.cap, AuthorizationCap::Unrestricted),
         "resource.token_delegated"
     );
@@ -867,6 +896,12 @@ pub(super) mod tests {
             serde_json::json!({ "authorization_details": {} }),
             serde_json::json!({ "authorization_details": [{ "type": "other", "scope": "*", "permissions": [{ "verbs": "*", "kinds": "*" }] }] }),
             serde_json::json!({ "unknown": true }),
+            serde_json::json!({ "audience": "" }),
+            serde_json::json!({ "audience": "x".repeat(MAX_AUDIENCE_LEN + 1) }),
+            serde_json::json!({
+                "audience": "https://vault.example.com",
+                "authorization_details": [{ "type": "rise.dev/rbac", "scope": "*", "permissions": [{ "verbs": "*", "kinds": "*" }] }]
+            }),
         ];
         for body in rejected {
             let err = validate_request(&service, body.clone()).unwrap_err();
@@ -893,6 +928,15 @@ pub(super) mod tests {
         )
         .unwrap();
         assert_eq!(narrowed.assertion.as_deref(), Some("a.b.c"));
+        assert_eq!(narrowed.audience, RISE_URL);
+
+        let external = validate_request(
+            &service,
+            serde_json::json!({ "audience": " https://vault.example.com " }),
+        )
+        .unwrap();
+        assert_eq!(external.audience, "https://vault.example.com");
+        assert_eq!(external.cap, AuthorizationCap::Unrestricted);
         assert!(
             matches!(narrowed.cap, AuthorizationCap::Restricted(ref entries) if entries.len() == 1)
         );

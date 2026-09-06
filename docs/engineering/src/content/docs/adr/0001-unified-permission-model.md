@@ -862,6 +862,19 @@ EffectivePolicy must authorize token creation, but the child does not silently
 inherit the caller's cap: token-create is the explicit delegation boundary and
 the requested child details constrain the target.
 
+Both modes may also name an `audience` (RFC 8693). Omitted, the token is for
+Rise's own API. Any other value mints the same kind of token with that `aud`
+for an external verifier — a secrets manager, a cloud STS, a Controller the
+apiserver forwards to — which checks it against Rise's published JWKS. Identity
+tokens are therefore always signed asymmetrically, whatever their audience:
+one token kind and one verification path, rather than a symmetric internal
+variant beside an asymmetric external one. Rise's API accepts only its own
+audience, and `authorization_details` — a ceiling over Rise's RBAC that means
+nothing to another verifier — is refused together with an external audience.
+The same `(create, ResourceKind, token)` grant governs delegated issuance for
+every audience: minting a token in the target's name for a third party is the
+same authority as minting one for Rise.
+
 Tokens carry identity and a ceiling, never a snapshot of grants. Every request
 re-resolves the target identity, Groups, Roles, bindings, and Denies. Narrowing
 or deleting the target affects outstanding tokens immediately; recreating the

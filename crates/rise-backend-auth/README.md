@@ -37,16 +37,18 @@ verifier; callers enforce audience per context).
 | Alg | header `typ` | Verifier output | Notes |
 |---|---|---|---|
 | HS256 | `"rise-access+jwt"` | `RiseToken::Access(AccessClaims)` | exchanged SA / controller principal (RFC 8693), `aud = public_url` (checked by the API middleware, not here) |
-| HS256 | `"rise-identity+jwt"` | `RiseToken::Identity(IdentityClaims)` | ServiceAccount / Controller *resource* principal minted by a `/token` subresource (ADR-0001 §7); `aud = public_url` and the `(sub, rise_uid)` liveness check are the API middleware's |
+| HS256 | `"rise-identity+jwt"` | **rejected** (`InvalidAlgorithm`) | identity tokens are never HS256 |
 | HS256 | any other (incl. default `"JWT"`, missing, unknown) | `RiseToken::Session(RiseClaims)` | UI / CLI user login, `aud = public_url` (checked by the API middleware, not here) |
-| RS256 | any (incl. default `"JWT"`) | `RiseToken::Ingress(RiseClaims)` | deployed-app ingress auth, `aud = project_url` (not checked here) |
+| RS256 | `"rise-identity+jwt"` | `RiseToken::Identity(IdentityClaims)` | ServiceAccount / Controller *resource* principal minted by a `/token` subresource (ADR-0001 §7), for Rise's own audience or an external one; `aud = public_url` and the `(sub, rise_uid)` liveness check are the API middleware's, an external audience verifies via the JWKS |
+| RS256 | any other (incl. default `"JWT"`) | `RiseToken::Ingress(RiseClaims)` | deployed-app ingress auth, `aud = project_url` (not checked here) |
 | anything else | — | **rejected** (`InvalidAlgorithm`) | only HS256 / RS256 are accepted |
 
-**Dispatch:** RS256 → `Ingress`. HS256 branches on the header `typ` **first** — the
-access `typ` (`rise-access+jwt`) → `Access`, the identity `typ` (`rise-identity+jwt`)
-→ `Identity`; anything else → `Session`. The special `typ`s are matched
-*exclusively*; legacy session tokens carry the default `"JWT"`, so a session is
-never required to set a specific `typ`. The
+**Dispatch:** both branches read the header `typ` **first**. RS256: the identity
+`typ` (`rise-identity+jwt`) → `Identity`; anything else → `Ingress`. HS256: the
+access `typ` (`rise-access+jwt`) → `Access`; the identity `typ` is rejected;
+anything else → `Session`. The special `typ`s are matched *exclusively*; legacy
+session and ingress tokens carry the default `"JWT"`, so neither is ever
+required to set a specific `typ`. The
 `rise_token_disambiguation_matrix` unit test pins this table against the real
 `verify_rise_jwt`.
 
@@ -77,8 +79,10 @@ Two notes on the RS256 / HS256 boundaries:
 The signer (`RiseTokenSigner`) mints all five kinds — `sign_user_jwt` (Session),
 `sign_access_jwt` (Access), `sign_identity_jwt` (Identity), `sign_ingress_jwt`
 (Ingress), `sign_workload_jwt` (Workload) — but the verifier classifies only the
-four inbound kinds above. `sign_identity_jwt` also enforces `MAX_DELEGATION_DEPTH`
-on the `act` chain, so no signing path can emit a token the platform limit forbids.
+four inbound kinds above. `sign_identity_jwt` signs with the RS256 key whatever
+the audience — a token for Rise's API and one for an external verifier are the
+same kind, and the JWKS serves both — and enforces `MAX_DELEGATION_DEPTH` on
+the `act` chain, so no signing path can emit a token the platform limit forbids.
 
 ### External tokens — `verify_external_jwt` (Path A)
 

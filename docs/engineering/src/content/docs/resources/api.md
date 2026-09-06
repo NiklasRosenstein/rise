@@ -456,10 +456,16 @@ Two request modes exist, and a request must be exactly one of them:
   minted identity may mint the next only through its own live token-create
   grant — actor data never grants anything.
 
-Both modes accept two optional fields. `expires_in` is clamped to
-`server.auth_token_max_ttl_seconds`, the platform-global maximum. `authorization_details`
-is an RFC 9396 list of `rise.dev/rbac` entries that only ever **narrows** the
-issued token:
+Both modes accept three optional fields. `expires_in` is clamped to
+`server.auth_token_max_ttl_seconds`, the platform-global maximum. `audience`
+(RFC 8693) names the verifier the token is for: omitted means Rise's own API;
+any other value mints the same token with that `aud`, which Rise's API refuses
+and the named verifier checks against Rise's JWKS at
+`GET {public_url}/api/v1/auth/jwks` (identity tokens are always RS256-signed
+with that key, whatever their audience). `authorization_details` is an RFC 9396
+list of `rise.dev/rbac` entries that only ever **narrows** the issued token; it
+is a statement about Rise's own RBAC, so it is rejected together with an
+external `audience`:
 
 ```json
 {

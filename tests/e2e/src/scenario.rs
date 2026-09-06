@@ -604,6 +604,56 @@ impl Scenario for ResourceTokenExchange {
             delegated.body
         );
 
+        // An audience-bound token: what an external verifier does with it is
+        // check the RS256 signature against Rise's published JWKS and its own
+        // audience. Rise's API refuses it.
+        let audience = "https://vault.example.com";
+        let external = b.api_post(&token_path, &serde_json::json!({"audience": audience}))?;
+        anyhow::ensure!(
+            external.status == 200,
+            "audience-bound issuance returned {}:\n{}",
+            external.status,
+            external.body
+        );
+        let external: serde_json::Value =
+            serde_json::from_str(&external.body).context("parse audience-bound token")?;
+        let external = external["access_token"]
+            .as_str()
+            .context("no access_token in audience-bound response")?;
+        let jwks = http::get(&format!("{}/api/v1/auth/jwks", b.api_base()), None)?;
+        anyhow::ensure!(jwks.status == 200, "JWKS returned {}", jwks.status);
+        let jwks: serde_json::Value = serde_json::from_str(&jwks.body).context("parse JWKS")?;
+        let header = jsonwebtoken::decode_header(external).context("decode token header")?;
+        let key = jwks["keys"]
+            .as_array()
+            .context("JWKS has no keys")?
+            .iter()
+            .find(|key| key["kid"].as_str() == header.kid.as_deref())
+            .context("the token's kid is not in the published JWKS")?;
+        let decoding_key = jsonwebtoken::DecodingKey::from_rsa_components(
+            key["n"].as_str().context("JWKS key has no n")?,
+            key["e"].as_str().context("JWKS key has no e")?,
+        )
+        .context("build decoding key from JWKS")?;
+        let mut validation = jsonwebtoken::Validation::new(jsonwebtoken::Algorithm::RS256);
+        validation.set_audience(&[audience]);
+        validation.validate_exp = true;
+        let verified =
+            jsonwebtoken::decode::<serde_json::Value>(external, &decoding_key, &validation)
+                .context("the audience-bound token must verify against the JWKS")?;
+        anyhow::ensure!(
+            verified.claims["sub"] == serde_json::json!(format!("serviceaccount:{org}/ci")),
+            "unexpected subject on the audience-bound token:\n{}",
+            verified.claims
+        );
+        let refused = b.api_get_as(&format!("{}/{sa_path}", Self::RESOURCES), external)?;
+        anyhow::ensure!(
+            refused.status == 401,
+            "Rise's API must refuse a token for another audience, got {}:\n{}",
+            refused.status,
+            refused.body
+        );
+
         // Tidy up: the Organization cascades over everything beneath it.
         let _ = b.api_delete(&format!("{}/organizations/{org}", Self::RESOURCES));
         Ok(())

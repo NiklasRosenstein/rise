@@ -38,6 +38,8 @@ pub struct ResourcePrincipal {
 /// applied is a fact about a resource the caller may hold nothing on.
 #[derive(Debug)]
 pub enum IdentityRejection {
+    /// The token was minted for another verifier, not for Rise's API.
+    Audience(String),
     /// The subject is malformed, or names a kind that cannot hold a token.
     Subject(String),
     /// No live resource matches both the subject and the UID.
@@ -51,6 +53,7 @@ pub enum IdentityRejection {
 impl std::fmt::Display for IdentityRejection {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            Self::Audience(audience) => write!(f, "token is for audience {audience:?}"),
             Self::Subject(detail) => write!(f, "invalid subject: {detail}"),
             Self::NoLiveResource => f.write_str("no live resource matches the subject and UID"),
             Self::Cap(detail) => write!(f, "invalid authorization_details: {detail}"),
@@ -70,16 +73,23 @@ pub(crate) fn expected_kind(subject: &SubjectId) -> Option<&'static str> {
 
 /// Resolve verified identity claims to a live resource principal.
 ///
-/// Requires, in order: a canonical ServiceAccount or Controller subject; a live
-/// (not tombstoned) resource at `rise_uid` whose group, kind, and name match
-/// the subject, contained — for a ServiceAccount — by a live Organization of
-/// the subject's org name; and a well-formed `authorization_details` claim, if
-/// one is present. The subject is compared to the resource *by name*, so the
-/// UID is what binds the credential to one incarnation of that name.
+/// Requires, in order: an `aud` equal to `expected_audience` (Rise's own
+/// public URL — a token minted for another verifier is never a principal
+/// here, however valid its signature); a canonical ServiceAccount or
+/// Controller subject; a live (not tombstoned) resource at `rise_uid` whose
+/// group, kind, and name match the subject, contained — for a ServiceAccount —
+/// by a live Organization of the subject's org name; and a well-formed
+/// `authorization_details` claim, if one is present. The subject is compared
+/// to the resource *by name*, so the UID is what binds the credential to one
+/// incarnation of that name.
 pub async fn resolve_identity(
     store: &dyn ResourceStore,
     claims: &IdentityClaims,
+    expected_audience: &str,
 ) -> Result<ResourcePrincipal, IdentityRejection> {
+    if claims.aud != expected_audience {
+        return Err(IdentityRejection::Audience(claims.aud.clone()));
+    }
     let subject: SubjectId = claims
         .sub
         .parse()

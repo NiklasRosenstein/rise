@@ -42,7 +42,8 @@ pub struct IdentityTokenSpec<'a> {
     pub subject: &'a str,
     /// The target resource's UID.
     pub rise_uid: Uuid,
-    /// The `aud` claim (the Rise public URL).
+    /// The `aud` claim: the Rise public URL for a token Rise's own API accepts,
+    /// or an external verifier's audience.
     pub audience: &'a str,
     /// Token lifetime in seconds (the caller clamps to the platform maximum).
     pub ttl_secs: u64,
@@ -456,14 +457,18 @@ impl RiseTokenSigner {
         Ok((token, claims))
     }
 
-    /// Sign a Rise identity token (HS256) for a ServiceAccount or Controller
+    /// Sign a Rise identity token (RS256) for a ServiceAccount or Controller
     /// resource principal (ADR-0001 §7).
     ///
-    /// Sets the header `typ` to [`RISE_IDENTITY_TYP`] so `verify_rise_jwt`
-    /// classifies it as [`RiseToken::Identity`] and every other adapter rejects
-    /// it. A delegation chain longer than [`crate::MAX_DELEGATION_DEPTH`] is
-    /// refused here as well as at the handler, so no signing path can produce a
-    /// token the platform limit forbids.
+    /// Always asymmetric, whatever the audience: a token for Rise's own API and
+    /// one for an external verifier are the same kind, signed with the RS256
+    /// key the JWKS publishes, so any audience can verify it and Rise has one
+    /// verification path rather than two. The header carries the `kid` and the
+    /// [`RISE_IDENTITY_TYP`] `typ` that routes `verify_rise_jwt` to
+    /// [`RiseToken::Identity`]; every other adapter rejects it. A delegation
+    /// chain longer than [`crate::MAX_DELEGATION_DEPTH`] is refused here as well
+    /// as at the handler, so no signing path can produce a token the platform
+    /// limit forbids.
     pub fn sign_identity_jwt(
         &self,
         spec: IdentityTokenSpec<'_>,
@@ -492,9 +497,10 @@ impl RiseTokenSigner {
             act: spec.act,
         };
 
-        let mut header = Header::new(Algorithm::HS256);
+        let mut header = Header::new(Algorithm::RS256);
+        header.kid = Some(self.rs256_key_id.clone());
         header.typ = Some(RISE_IDENTITY_TYP.to_string());
-        let token = encode(&header, &claims, &self.hs256_encoding_key)?;
+        let token = encode(&header, &claims, &self.rs256_encoding_key)?;
 
         Ok((token, claims))
     }

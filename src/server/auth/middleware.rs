@@ -179,21 +179,18 @@ pub async fn auth_middleware(
                 // `(sub, rise_uid)` pair must still name one live resource
                 // (ADR-0001 §7). Every rejection is the same 401: which check
                 // failed is a fact about a resource the caller may not read.
-                if claims.aud != state.public_url {
-                    tracing::warn!("Auth middleware: identity token audience mismatch");
-                    return Err((StatusCode::UNAUTHORIZED, "Invalid token".to_string()));
-                }
-                let principal = resolve_identity(state.resource_store.as_ref(), &claims)
-                    .await
-                    .map_err(|rejection| {
-                        tracing::warn!(
-                            sub = %claims.sub,
-                            rise_uid = %claims.rise_uid,
-                            jti = %claims.jti,
-                            "Auth middleware: identity token rejected: {rejection}"
-                        );
-                        (StatusCode::UNAUTHORIZED, "Invalid token".to_string())
-                    })?;
+                let principal =
+                    resolve_identity(state.resource_store.as_ref(), &claims, &state.public_url)
+                        .await
+                        .map_err(|rejection| {
+                            tracing::warn!(
+                                sub = %claims.sub,
+                                rise_uid = %claims.rise_uid,
+                                jti = %claims.jti,
+                                "Auth middleware: identity token rejected: {rejection}"
+                            );
+                            (StatusCode::UNAUTHORIZED, "Invalid token".to_string())
+                        })?;
                 tracing::debug!(
                     subject = %principal.subject,
                     "Auth middleware: Rise identity token accepted"

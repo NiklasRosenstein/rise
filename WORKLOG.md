@@ -1888,6 +1888,16 @@ idempotent when a read-modify-write client replays the stored spec.
     on a read-path authorization context.
   - `server.auth_token_max_ttl_seconds` is the platform-global maximum for
     identity tokens as well as access tokens; `expires_in` is clamped to it.
+  - Identity tokens are always RS256, signed with the JWKS key, whatever their
+    audience. The request may name an `audience`; omitted means Rise's own
+    API, which is the only audience the middleware accepts, and any other
+    value hands the same token to an external verifier. One token kind and
+    one verification path beat a symmetric internal variant beside an
+    asymmetric external one; the cost is that `rs256_private_key_pem` is now
+    load-bearing for the resource API too, which the upgrade notes say.
+    `authorization_details` is refused with an external audience, and the
+    audience check lives in `resolve_identity` so it is tested with the rest
+    of resolution rather than in the middleware alone.
   - The membership resolver holds an optional `User`: a resource principal has
     no Group ties and no operator standing by construction, and the engine
     rejects a resolver that claims otherwise.

@@ -154,8 +154,14 @@ Status legend: `[x]` shipped · `[~]` in progress · `[ ]` planned.
   subresources.
 - [ ] Add a resumable Watch API with explicit backpressure, connection limits,
   and observability.
-- [ ] Build `rise-resource-client` with Rise-issued credential providers,
-  watch resume, and generic finalizer/subresource helpers.
+- [ ] Build `rise-resource-client` in the shape of Kubernetes' dynamic client:
+  `(group, version, plural)` plus ancestor-name addressing over untyped
+  envelopes, verbs and named subresources that line up one-to-one with the
+  authorization tuples, Rise-issued credential providers (a session bearer,
+  and a `/token`-refreshed identity token from an external assertion or a
+  delegating principal), watch resume, and generic finalizer/subresource
+  helpers. The e2e harness and the CLI's token source become its first
+  consumers; typed wrappers for built-in kinds layer on top later.
 - [ ] Add built-in version conversion and define external
   `ResourceDefinition` schema-evolution behavior.
 - [ ] Close built-in `(group, kind)` shadowing and finish audit coverage for
@@ -184,9 +190,10 @@ Status legend: `[x]` shipped · `[~]` in progress · `[ ]` planned.
   perform a global source-identity search, and mask target/assertion/policy
   failures behind the same coarse authentication error.
   The route is live on `rise.dev/ServiceAccount` and `rise.dev/Controller`;
-  the minted identity token (`typ: rise-identity+jwt`, canonical `sub` plus
-  `rise_uid`) is a principal of the generic resource API, re-resolved to one
-  live resource on every request.
+  the minted identity token (RS256, `typ: rise-identity+jwt`, canonical `sub`
+  plus `rise_uid`) is a principal of the generic resource API, re-resolved to
+  one live resource on every request, and the same token minted for a
+  requested `audience` is verifiable by that party against Rise's JWKS.
 - [x] Support delegated issuance on the same `/token` route for an already
   Rise-authenticated principal holding `(create, qualified ResourceKind,
   token)`. Workload exchange and delegated request modes are disjoint.

@@ -30,9 +30,11 @@ pub enum RiseToken {
     /// HS256, `typ = "rise-access+jwt"`, aud = public_url — exchanged SA /
     /// controller principal (RFC 8693 token exchange).
     Access(AccessClaims),
-    /// HS256, `typ = "rise-identity+jwt"`, aud = public_url — a ServiceAccount
-    /// or Controller resource principal (ADR-0001 §7). The middleware still has
-    /// to resolve `(sub, rise_uid)` to a live resource before it is a principal.
+    /// RS256, `typ = "rise-identity+jwt"` — a ServiceAccount or Controller
+    /// resource principal (ADR-0001 §7), for whatever audience it was minted.
+    /// The middleware accepts it only with `aud = public_url`, and still has to
+    /// resolve `(sub, rise_uid)` to a live resource before it is a principal;
+    /// an external audience verifies it against the published JWKS.
     Identity(IdentityClaims),
     /// RS256, aud = project_url — deployed-app ingress auth (aud not checked here).
     Ingress(RiseClaims),
@@ -42,14 +44,15 @@ impl RiseTokenSigner {
     /// Verify a Rise-issued JWT and classify it into a typed [`RiseToken`].
     ///
     /// Verifies the signature and `iss`, then disambiguates:
-    /// - **RS256** → [`RiseToken::Ingress`].
+    /// - **RS256** → the identity `typ` ([`RISE_IDENTITY_TYP`]) →
+    ///   [`RiseToken::Identity`]; anything else → [`RiseToken::Ingress`].
     /// - **HS256** → branch on the header `typ`: the access `typ`
-    ///   ([`RISE_ACCESS_TYP`]) → [`RiseToken::Access`]; the identity `typ`
-    ///   ([`RISE_IDENTITY_TYP`]) → [`RiseToken::Identity`]; anything else (the
-    ///   default `"JWT"`, a missing or unknown `typ`) → [`RiseToken::Session`].
-    ///   Legacy session tokens carry the default `"JWT"`, so the special `typ`s
-    ///   are matched *exclusively* — never requiring a session-specific `typ`
-    ///   that would break existing sessions.
+    ///   ([`RISE_ACCESS_TYP`]) → [`RiseToken::Access`]; the identity `typ` is
+    ///   rejected (identity tokens are never HS256); anything else (the default
+    ///   `"JWT"`, a missing or unknown `typ`) → [`RiseToken::Session`]. Legacy
+    ///   session and ingress tokens carry the default `"JWT"`, so the special
+    ///   `typ`s are matched *exclusively* — never requiring a session-specific
+    ///   `typ` that would break existing sessions.
     ///
     /// No `aud` check is performed here — callers enforce audience per context
     /// (the API middleware requires `aud == public_url` for `Session` and
@@ -76,9 +79,11 @@ impl RiseTokenSigner {
                         decode::<AccessClaims>(token, self.hs256_decoding_key(), &validation)?;
                     Ok(RiseToken::Access(token_data.claims))
                 } else if header.typ.as_deref() == Some(RISE_IDENTITY_TYP) {
-                    let token_data =
-                        decode::<IdentityClaims>(token, self.hs256_decoding_key(), &validation)?;
-                    Ok(RiseToken::Identity(token_data.claims))
+                    // Identity tokens are RS256 only; an HS256 token wearing
+                    // the identity typ is not something Rise ever minted.
+                    Err(AuthError::Jwt(
+                        jsonwebtoken::errors::ErrorKind::InvalidAlgorithm.into(),
+                    ))
                 } else {
                     let token_data =
                         decode::<RiseClaims>(token, self.hs256_decoding_key(), &validation)?;
@@ -90,6 +95,13 @@ impl RiseTokenSigner {
                 validation.set_issuer(&[self.issuer()]);
                 validation.validate_aud = false;
 
+                // The identity typ is matched exclusively, like the access typ
+                // on the HS256 branch: ingress tokens carry the default "JWT".
+                if header.typ.as_deref() == Some(RISE_IDENTITY_TYP) {
+                    let token_data =
+                        decode::<IdentityClaims>(token, self.rs256_decoding_key(), &validation)?;
+                    return Ok(RiseToken::Identity(token_data.claims));
+                }
                 let token_data =
                     decode::<RiseClaims>(token, self.rs256_decoding_key(), &validation)?;
                 Ok(RiseToken::Ingress(token_data.claims))
@@ -431,7 +443,11 @@ mod tests {
             .unwrap();
 
         let header = jsonwebtoken::decode_header(&token).unwrap();
-        assert_eq!(header.alg, Algorithm::HS256);
+        assert_eq!(header.alg, Algorithm::RS256);
+        let published_kid = signer.generate_jwks().unwrap()["keys"][0]["kid"]
+            .as_str()
+            .map(str::to_owned);
+        assert_eq!(header.kid, published_kid, "the kid is the JWKS's");
         assert_eq!(header.typ.as_deref(), Some(crate::RISE_IDENTITY_TYP));
 
         match signer.verify_rise_jwt(&token).unwrap() {
@@ -447,6 +463,74 @@ mod tests {
             }
             other => panic!("expected Identity, got {other:?}"),
         }
+    }
+
+    /// An audience-bound identity token is the same kind of token, and an
+    /// external verifier checks it with nothing but the published JWKS.
+    #[test]
+    fn test_identity_token_verifies_against_the_published_jwks() {
+        let signer = create_test_signer();
+        let uid = uuid::Uuid::new_v4();
+        let (token, _) = signer
+            .sign_identity_jwt(crate::IdentityTokenSpec {
+                subject: "serviceaccount:acme/ci",
+                rise_uid: uid,
+                audience: "https://vault.example.com",
+                ttl_secs: 600,
+                authorization_details: None,
+                act: None,
+            })
+            .unwrap();
+
+        // What a third party does: pick the key by `kid` out of the JWKS and
+        // verify signature, issuer, and its own audience.
+        let jwks = signer.generate_jwks().unwrap();
+        let header = jsonwebtoken::decode_header(&token).unwrap();
+        let key = jwks["keys"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|key| key["kid"].as_str() == header.kid.as_deref())
+            .expect("the token's kid is published");
+        let decoding_key = DecodingKey::from_rsa_components(
+            key["n"].as_str().unwrap(),
+            key["e"].as_str().unwrap(),
+        )
+        .unwrap();
+        let mut validation = Validation::new(Algorithm::RS256);
+        validation.set_issuer(&["https://rise.test"]);
+        validation.set_audience(&["https://vault.example.com"]);
+        let external = decode::<crate::IdentityClaims>(&token, &decoding_key, &validation)
+            .expect("an external verifier accepts the token for its audience");
+        assert_eq!(external.claims.sub, "serviceaccount:acme/ci");
+        assert_eq!(external.claims.rise_uid, uid);
+
+        // Rise's own verifier classifies it too; the audience check that keeps
+        // it off Rise's API is the middleware's.
+        match signer.verify_rise_jwt(&token).unwrap() {
+            RiseToken::Identity(c) => assert_eq!(c.aud, "https://vault.example.com"),
+            other => panic!("expected Identity, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_hs256_token_with_identity_typ_is_rejected() {
+        // Identity tokens are RS256 only. An HS256 token wearing the identity
+        // typ, even one correctly signed with the session secret, is refused
+        // rather than read as an identity or as a session.
+        let claims = serde_json::json!({
+            "iss": "https://rise.test",
+            "aud": "https://rise.test",
+            "sub": "serviceaccount:acme/ci",
+            "rise_uid": uuid::Uuid::new_v4(),
+            "iat": now(),
+            "exp": now() + 600,
+            "jti": "x",
+        });
+        let mut header = Header::new(Algorithm::HS256);
+        header.typ = Some(crate::RISE_IDENTITY_TYP.to_string());
+        let token = encode(&header, &claims, &hs256_key()).unwrap();
+        assert!(create_test_signer().verify_rise_jwt(&token).is_err());
     }
 
     #[test]
@@ -606,7 +690,7 @@ mod tests {
             RiseToken::Access(_)
         ));
 
-        // HS256 + identity typ → Identity.
+        // RS256 + identity typ → Identity.
         let (identity_token, _) = signer
             .sign_identity_jwt(identity_spec(
                 "serviceaccount:acme/ci",

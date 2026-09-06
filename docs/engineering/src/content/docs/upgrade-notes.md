@@ -78,8 +78,14 @@ Merged to `develop`:
   layer; it is rate-limited through the OAuth limiter, and anything that is not
   a registered token route stays `401`. Identity tokens are accepted only by the
   generic resource API and are re-resolved against the live resource on every
-  request. The typed-table exchange at `POST /api/v1/auth/token` and the CLI
-  are unchanged. See [Authentication & Tokens](/operator-docs/authentication/#identity-hs256--the-token-subresource).
+  request. They are RS256-signed with `server.rs256_private_key_pem`, the key
+  behind the published JWKS, so a request may name an external `audience` and
+  hand the token to that verifier; this also means the key is now
+  load-bearing for the resource API itself — an unset key is regenerated on
+  every start and differs per replica, which invalidates identity tokens on
+  restart and across replicas exactly as it already does ingress and workload
+  tokens. The typed-table exchange at `POST /api/v1/auth/token` and the CLI
+  are unchanged. See [Authentication & Tokens](/operator-docs/authentication/#identity-rs256--the-token-subresource).
 
 - **ECS: a `capacity` setting, and service network configuration now converges.**
   *Config change.* `deployment_controller.capacity` selects where workload tasks
