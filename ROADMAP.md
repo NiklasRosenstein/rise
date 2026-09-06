@@ -64,16 +64,15 @@ Status legend: `[x]` shipped · `[~]` in progress · `[ ]` planned.
   target-parent workload trust lookup, and reverse name-based membership edges.
   These remain internal storage projections and do not change the generic
   resource API shape.
-- [~] Implement live membership expansion, per-item list filtering/projection,
+- [x] Implement live membership expansion, per-item list filtering/projection,
   effective-label resolution, typed `SubjectRef` values for dynamic ownership,
   tiered platform/org Deny filtering, admin/operator classification, platform
   ceilings, and the centralized authorization choke point replacing
   `require_operator`. The choke point is live on the generic resource API, with
   per-item list filtering, the allowlisted list-only projection, and
-  `metadata.effectiveLabels` on every response. Remaining: Controller writes
-  still go through `ResourceDefinition.allowedStatusControllerIds` rather than
-  RBAC, because a Controller is not a principal until its identity resource
-  exists; remove that allowlist once it is.
+  `metadata.effectiveLabels` on every response. Controllers are ordinary
+  `controller:<name>` principals evaluated by the same choke point; the
+  `ResourceDefinition.allowedStatusControllerIds` allowlist is removed.
 - [~] Add Role/policy audit and explain diagnostics for semantically inert
   configuration: no-op recipient or membership constraints, owners with no
   current grant, selectors matching nothing, stale references, and shadowed
@@ -176,9 +175,12 @@ Status legend: `[x]` shipped · `[~]` in progress · `[ ]` planned.
   after exact live, active `UserIdentity (issuer, subject)` and active parent
   User resolution.
 - [ ] Move workload token exchange to each ServiceAccount or Controller `/token`
-  subresource. Validate external assertions only against trust-policy children
-  of that URL target; do not perform a global source-identity search, and mask
-  target/assertion/policy failures behind the same coarse authentication error.
+  subresource, introduced additively per kind: a resource-API-backed identity
+  gains its `/token` route without touching any other, not-yet-migrated identity
+  of the same kind still on the legacy exchange endpoint. Validate external
+  assertions only against trust-policy children of that URL target; do not
+  perform a global source-identity search, and mask target/assertion/policy
+  failures behind the same coarse authentication error.
 - [ ] Support delegated issuance on the same `/token` route for an already
   Rise-authenticated principal holding `(create, qualified ResourceKind,
   token)`. Workload exchange and delegated request modes are disjoint.
@@ -193,9 +195,15 @@ Status legend: `[x]` shipped · `[~]` in progress · `[ ]` planned.
 - [ ] Reject stale UID tokens, inactive/deleted principals, Group subjects as
   principals, malformed subjects/scopes, and external workload JWTs on every
   non-token endpoint.
-- [ ] Retire synthetic ServiceAccount users/emails and the transitional
-  identity-selection contract once built-in identity resources and target
-  `/token` routes are live.
+- [ ] Retire the typed `service_accounts` table, its synthetic users/emails, and
+  the transitional identity-selection contract — gated on every service account
+  having migrated to a resource-API `ServiceAccount` and that legacy path's
+  traffic having drained to zero (ADR-0001 §10), not merely on the `/token`
+  route existing. Unlike Controller's `auth.controllers[]`, which carried no
+  production traffic and was removed unconditionally in the same change that
+  shipped `ControllerTrustPolicy` (§1), the typed ServiceAccount table is in
+  production use today and needs the same measure-then-drain-then-remove
+  discipline as `auth.allow_raw_external_tokens`.
 - [ ] Keep the platform-global maximum token TTL and add negative tests for
   audience, cap, target trust, mode-confusion, and name-recreation behavior.
 
@@ -238,7 +246,7 @@ and secret handling remain kind-specific prerequisites.
   User names and exact SSO mappings.
 - [ ] Migrate `ServiceAccount` as an Organization child and trust mappings as
   `ServiceAccountTrustPolicy` children.
-- [ ] Migrate `Controller` as a root built-in and trust mappings as
+- [x] Migrate `Controller` as a root built-in and trust mappings as
   `ControllerTrustPolicy` children.
 - [ ] Migrate `Deployment` as a Project child after pagination and Watch;
   controllers update it through registered `status` and `finalizers`

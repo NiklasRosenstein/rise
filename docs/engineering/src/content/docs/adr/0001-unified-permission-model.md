@@ -275,13 +275,12 @@ shared. Rise applies the same machinery to `/finalizers` as a deliberate
 hardening extension: finalizers remain part of `metadata`, but main writes
 preserve them and only `(update, ResourceKind, finalizers)` may change them.
 
-The target model removes `ResourceDefinition.allowedStatusControllerIds` and
-the corresponding collection metadata. A Controller is an authenticated
-subject, so its `status` and `finalizers` access comes solely from ordinary
-RoleBindings over the registered subresource tuples above. The legacy allowlist
-remains transitional only until controller requests pass through the unified
-authorization choke point; it is not a second authorization mechanism in the
-target API.
+`ResourceDefinition.allowedStatusControllerIds` and the corresponding
+collection metadata no longer exist. A Controller is an authenticated
+subject — `controller:<name>` — so its `status` and `finalizers` access comes
+solely from ordinary RoleBindings over the registered subresource tuples
+above, evaluated by the same choke point every other principal goes through.
+There is no separate controller authorization mechanism.
 
 This ADR standardizes that shared authorization and handler seam, plus
 the concrete `status`, `finalizers`, and `token` strategies. Streaming,
@@ -916,7 +915,7 @@ resource admission policy, which is out of scope (§10).
 ### 10. Explicitly out of scope
 
 - Org-registrable Controllers/ResourceDefinitions — falls out for free once registration is just another grant-gated verb, not designed now.
-- Migrating today's typed-table-backed APIs (`Project`, `User`, existing `Team`, `ServiceAccount`, `Deployment`, …) onto this model — happens separately. Existing Teams become `Group` resources and `team_members` become `GroupMembership`; ServiceAccounts move from Project to Organization placement and cease masquerading as synthetic Users.
+- Migrating today's typed-table-backed APIs (`Project`, `User`, existing `Team`, `ServiceAccount`, `Deployment`, …) onto this model — happens separately. Existing Teams become `Group` resources and `team_members` become `GroupMembership`; ServiceAccounts move from Project to Organization placement and cease masquerading as synthetic Users. A typed-table identity mechanism is retired only once it is safe to: either it never carried production traffic — `auth.controllers[]` static configuration, removed unconditionally in the same change that introduced live `ControllerTrustPolicy` resources (§1), because no installation had ever configured it — or every identity of that kind has migrated to its resource-API-backed replacement and the legacy path's traffic has drained to zero, evidenced the same way as any other breaking auth change (the `rise::deprecation`-style telemetry gating `auth.allow_raw_external_tokens`). Introducing a kind's `/token` subresource is additive and does not by itself retire that kind's legacy path — the typed `service_accounts` table keeps serving every service account still on it, unmodified, for as long as any remain.
 - Ingress-level authentication for a deployed application's own end users — a different problem domain entirely.
 - A pluggable subject-kind registry letting organizations define groups with custom membership semantics (§6.4) — organization-specific *naming* of a grouping concept is supported today by pairing an existing kind with an organization-chosen label key; genuinely custom membership resolution is not, and would need a larger extension to the closed subject-kind list.
 - A first-class cross-org sharing primitive — a deliberate grant reaching subjects of another org. The recipient boundary (§1) bans cross-org sharing through org bindings by construction; operator-authored `PlatformRoleBinding`s are the only cross-org grant path today. A tenant-authorable sharing mechanism is deferred; nothing here forecloses it.
