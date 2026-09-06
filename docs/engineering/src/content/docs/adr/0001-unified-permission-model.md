@@ -6,6 +6,16 @@ title: "ADR-0001: Unified Permission Model"
 
 **Proposed** (under review). Date: 2026-07-10.
 
+Implementation progress: §1–§6 are live on the generic resource API — the
+policy and identity resources, the evaluation engine, the write-time grant
+gate, and the centralized choke point. §7's `token` subresource is live for
+`ServiceAccount` and `Controller`: target-bound workload exchange, delegated
+issuance, the `rise.dev/rbac` authorization-detail ceiling, UID-bound
+re-resolution on every request, and the bounded `act` chain. Still open: live
+`User`/`UserIdentity` resolution with operator selectors and JIT login,
+retirement of the typed-table exchange endpoint, and the conformance suite.
+`ROADMAP.md` §§1–3 hold the remaining steps.
+
 scope: the generic resource API (`/api/v1/resources/...`) and
 ServiceAccount/Controller token issuance (the `token` subresource). It does
 not change how `rise project create`, `rise deployment create`, or other
@@ -851,6 +861,28 @@ target token. For delegated issuance, the caller's current capped
 EffectivePolicy must authorize token creation, but the child does not silently
 inherit the caller's cap: token-create is the explicit delegation boundary and
 the requested child details constrain the target.
+
+Both modes may also name an `audience` (RFC 8693). Omitted, the token is for
+Rise's own API. Any other value mints the same kind of token with that `aud`
+for an external verifier — a secrets manager, a cloud STS, a Controller the
+apiserver forwards to — which checks it against Rise's published JWKS. Identity
+tokens are therefore always signed asymmetrically, whatever their audience:
+one token kind and one verification path, rather than a symmetric internal
+variant beside an asymmetric external one. Rise's API accepts only its own
+audience, and `authorization_details` — a ceiling over Rise's RBAC that means
+nothing to another verifier — is refused together with an external audience.
+The same `(create, ResourceKind, token)` grant governs delegated issuance for
+every audience: minting a token in the target's name for a third party is the
+same authority as minting one for Rise. This mirrors Kubernetes'
+`TokenRequest` API, where a single `create` on `serviceaccounts/token`
+authorizes minting for any `spec.audiences` value, internal or external, with
+no separate grant per audience. Kubernetes has no per-token ceiling at all —
+RBAC is always re-evaluated live against the caller's current bindings, never
+baked into the token — so it has no analogue of `authorization_details`
+either. Rise's asymmetry, where a ceiling narrows a Rise-audience token but
+cannot apply to an external one, follows from `authorization_details` only
+ever meaning something against Rise's own RBAC, not from a difference in how
+the audience itself is authorized.
 
 Tokens carry identity and a ceiling, never a snapshot of grants. Every request
 re-resolves the target identity, Groups, Roles, bindings, and Denies. Narrowing

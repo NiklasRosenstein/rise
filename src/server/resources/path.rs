@@ -45,10 +45,13 @@ pub enum Subresource {
     Status,
     Finalizers,
     DeletionBlockers,
+    /// Token issuance for a ServiceAccount or Controller (ADR-0001 §7):
+    /// create-only, and registered on those two kinds alone.
+    Token,
 }
 
 impl Subresource {
-    pub const KEYWORDS: &str = "status, finalizers, deletion-blockers";
+    pub const KEYWORDS: &str = "status, finalizers, deletion-blockers, token";
 
     /// The canonical keyword for this subresource — the same name policy
     /// statements and authorization details use (ADR-0001 §2).
@@ -57,6 +60,7 @@ impl Subresource {
             Self::Status => "status",
             Self::Finalizers => "finalizers",
             Self::DeletionBlockers => "deletion-blockers",
+            Self::Token => "token",
         }
     }
 
@@ -66,6 +70,7 @@ impl Subresource {
             "status" => Some(Self::Status),
             "finalizers" => Some(Self::Finalizers),
             "deletion-blockers" => Some(Self::DeletionBlockers),
+            "token" => Some(Self::Token),
             _ => None,
         }
     }
@@ -172,6 +177,7 @@ mod tests {
             Subresource::from_keyword("deletion-blockers"),
             Some(Subresource::DeletionBlockers)
         );
+        assert_eq!(Subresource::from_keyword("token"), Some(Subresource::Token));
         assert_eq!(Subresource::from_keyword("reparent"), None);
         assert_eq!(Subresource::from_keyword("widgets"), None);
     }

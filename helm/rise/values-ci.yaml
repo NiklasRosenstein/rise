@@ -60,6 +60,10 @@ config:
     issuer: http://rise-ci-chart-dex.rise-ci.svc.cluster.local:5556/dex
     client_id: rise-backend
     client_secret: rise-backend-secret
+    # The e2e CI bearer. Operator standing lets scenarios author resources
+    # through the generic resource API (`resource-token-exchange`).
+    operator_users:
+      - admin@example.com
 
   encryption:
     type: aes-gcm-256

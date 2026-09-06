@@ -31,6 +31,7 @@ pub fn all() -> Vec<Box<dyn Scenario>> {
         Box::new(PublicDeploy),
         Box::new(RegistryBuildPushPull),
         Box::new(SaTokenExchange),
+        Box::new(ResourceTokenExchange),
         Box::new(PrivateIngressAuth),
         Box::new(RouteAccessOverride),
         Box::new(HealthRollingCutover),
@@ -400,6 +401,261 @@ impl Scenario for SaTokenExchange {
             "expected the un-exchanged external token to be rejected, but it succeeded:\n{}",
             raw.combined()
         );
+        Ok(())
+    }
+}
+
+// ---- (c') resource-API token exchange at the /token subresource -------------
+
+struct ResourceTokenExchange;
+
+impl ResourceTokenExchange {
+    const RESOURCES: &'static str = "/api/v1/resources/rise.dev/v1alpha1";
+    const TOKEN_EXCHANGE_GRANT: &'static str = "urn:ietf:params:oauth:grant-type:token-exchange";
+    const JWT_TOKEN_TYPE: &'static str = "urn:ietf:params:oauth:token-type:jwt";
+
+    /// POST a resource as the operator and assert `201`.
+    fn create(b: &dyn Backend, collection: &str, body: serde_json::Value) -> Result<()> {
+        let resp = b.api_post(&format!("{}/{collection}", Self::RESOURCES), &body)?;
+        anyhow::ensure!(
+            resp.status == 201,
+            "create {collection} {} returned {}:\n{}",
+            body["metadata"]["name"],
+            resp.status,
+            resp.body
+        );
+        Ok(())
+    }
+
+    fn exchange_body(assertion: &str) -> serde_json::Value {
+        serde_json::json!({
+            "grant_type": Self::TOKEN_EXCHANGE_GRANT,
+            "subject_token": assertion,
+            "subject_token_type": Self::JWT_TOKEN_TYPE,
+        })
+    }
+}
+
+impl Scenario for ResourceTokenExchange {
+    fn id(&self) -> &'static str {
+        "resource-token-exchange"
+    }
+
+    fn applies_to(&self, b: &dyn Backend) -> Applicability {
+        match b.kind() {
+            BackendKind::Docker | BackendKind::Minikube => Applicability::Run,
+            BackendKind::Ecs => Applicability::Skip(
+                "the ECS stack grants no operator, which authoring resources needs",
+            ),
+        }
+    }
+
+    fn run(&self, b: &dyn Backend) -> Result<()> {
+        let dexep = b.dex().context("backend exposes no reachable Dex")?;
+        let org = unique("e2e-org");
+        let sa_path = format!("serviceaccounts/{org}/ci");
+        let token_path = format!("{}/{sa_path}/token", Self::RESOURCES);
+
+        // As the operator: an Organization, a ServiceAccount beneath it, and one
+        // trust policy accepting the Dex id_token the password grant mints.
+        Self::create(
+            b,
+            "organizations",
+            serde_json::json!({
+                "apiVersion": "rise.dev/v1alpha1",
+                "kind": "Organization",
+                "metadata": {"name": org},
+                "spec": {"displayName": org},
+            }),
+        )?;
+        Self::create(
+            b,
+            &format!("serviceaccounts/{org}"),
+            serde_json::json!({
+                "apiVersion": "rise.dev/v1alpha1",
+                "kind": "ServiceAccount",
+                "metadata": {"name": "ci"},
+                "spec": {},
+            }),
+        )?;
+        Self::create(
+            b,
+            &format!("serviceaccounttrustpolicies/{org}/ci"),
+            serde_json::json!({
+                "apiVersion": "rise.dev/v1alpha1",
+                "kind": "ServiceAccountTrustPolicy",
+                "metadata": {"name": "dex"},
+                "spec": {
+                    "issuer": dexep.issuer,
+                    // `aud` is the Dex client id the id_token is minted for.
+                    "claims": {"aud": "rise-backend", "email": "user@example.com"},
+                },
+            }),
+        )?;
+
+        // The proof: a real Dex id_token for the federated user, presented with
+        // no Rise credential at the target's own /token route.
+        let oidc = dex::mint_password_token(dexep, "user@example.com", "password")
+            .context("mint Dex OIDC token (password grant)")?;
+        let minted = b.api_post_as(&token_path, None, &Self::exchange_body(&oidc))?;
+        anyhow::ensure!(
+            minted.status == 200,
+            "workload exchange returned {}:\n{}",
+            minted.status,
+            minted.body
+        );
+        let minted: serde_json::Value =
+            serde_json::from_str(&minted.body).context("parse token response")?;
+        let identity = minted["access_token"]
+            .as_str()
+            .context("no access_token in token response")?
+            .to_string();
+        anyhow::ensure!(
+            minted["token_type"] == serde_json::json!("Bearer"),
+            "unexpected token_type:\n{minted}"
+        );
+        eprintln!(
+            "[e2e] resource-token-exchange: minted an identity token for serviceaccount:{org}/ci"
+        );
+
+        // The identity holds nothing yet: reading its own resource is masked.
+        let masked = b.api_get_as(&format!("{}/{sa_path}", Self::RESOURCES), &identity)?;
+        anyhow::ensure!(
+            masked.status == 404,
+            "an ungranted identity must be masked (404), got {}:\n{}",
+            masked.status,
+            masked.body
+        );
+
+        // A live grant delivers on the next request — nothing is snapshotted in
+        // the token.
+        Self::create(
+            b,
+            "platformroles",
+            serde_json::json!({
+                "apiVersion": "rise.dev/v1alpha1",
+                "kind": "PlatformRole",
+                "metadata": {"name": format!("{org}-sa-reader")},
+                "spec": {"statements": [
+                    {"effect": "Allow", "kinds": ["rise.dev/ServiceAccount"], "verbs": ["get"]}
+                ]},
+            }),
+        )?;
+        Self::create(
+            b,
+            "platformrolebindings",
+            serde_json::json!({
+                "apiVersion": "rise.dev/v1alpha1",
+                "kind": "PlatformRoleBinding",
+                "metadata": {"name": format!("{org}-ci-reads-itself")},
+                "spec": {
+                    "subject": format!("serviceaccount:{org}/ci"),
+                    "scope": format!("rise.dev/Organization/{org}"),
+                    "roleRef": {"kind": "PlatformRole", "name": format!("{org}-sa-reader")},
+                },
+            }),
+        )?;
+        let read = b.api_get_as(&format!("{}/{sa_path}", Self::RESOURCES), &identity)?;
+        anyhow::ensure!(
+            read.status == 200,
+            "granted identity could not read its resource: {}:\n{}",
+            read.status,
+            read.body
+        );
+        let read: serde_json::Value =
+            serde_json::from_str(&read.body).context("parse ServiceAccount")?;
+        anyhow::ensure!(
+            read["metadata"]["name"] == serde_json::json!("ci"),
+            "unexpected resource read back:\n{read}"
+        );
+
+        // Negatives, both the same coarse 401: claims no policy accepts, and a
+        // target that does not exist.
+        let other = dex::mint_password_token(dexep, "admin@example.com", "password")
+            .context("mint Dex OIDC token for another user")?;
+        let mismatch = b.api_post_as(&token_path, None, &Self::exchange_body(&other))?;
+        let ghost = b.api_post_as(
+            &format!("{}/serviceaccounts/{org}/ghost/token", Self::RESOURCES),
+            None,
+            &Self::exchange_body(&oidc),
+        )?;
+        anyhow::ensure!(
+            mismatch.status == 401 && ghost.status == 401,
+            "expected 401 for a claim mismatch and an absent target, got {} and {}:\n{}\n{}",
+            mismatch.status,
+            ghost.status,
+            mismatch.body,
+            ghost.body
+        );
+        anyhow::ensure!(
+            mismatch.body == ghost.body,
+            "workload-exchange failures must be indistinguishable:\n{}\n{}",
+            mismatch.body,
+            ghost.body
+        );
+
+        // Delegated issuance: the operator holds token-create on everything and
+        // mints without any assertion.
+        let delegated = b.api_post(&token_path, &serde_json::json!({}))?;
+        anyhow::ensure!(
+            delegated.status == 200,
+            "delegated issuance returned {}:\n{}",
+            delegated.status,
+            delegated.body
+        );
+
+        // An audience-bound token: what an external verifier does with it is
+        // check the RS256 signature against Rise's published JWKS and its own
+        // audience. Rise's API refuses it.
+        let audience = "https://vault.example.com";
+        let external = b.api_post(&token_path, &serde_json::json!({"audience": audience}))?;
+        anyhow::ensure!(
+            external.status == 200,
+            "audience-bound issuance returned {}:\n{}",
+            external.status,
+            external.body
+        );
+        let external: serde_json::Value =
+            serde_json::from_str(&external.body).context("parse audience-bound token")?;
+        let external = external["access_token"]
+            .as_str()
+            .context("no access_token in audience-bound response")?;
+        let jwks = http::get(&format!("{}/api/v1/auth/jwks", b.api_base()), None)?;
+        anyhow::ensure!(jwks.status == 200, "JWKS returned {}", jwks.status);
+        let jwks: serde_json::Value = serde_json::from_str(&jwks.body).context("parse JWKS")?;
+        let header = jsonwebtoken::decode_header(external).context("decode token header")?;
+        let key = jwks["keys"]
+            .as_array()
+            .context("JWKS has no keys")?
+            .iter()
+            .find(|key| key["kid"].as_str() == header.kid.as_deref())
+            .context("the token's kid is not in the published JWKS")?;
+        let decoding_key = jsonwebtoken::DecodingKey::from_rsa_components(
+            key["n"].as_str().context("JWKS key has no n")?,
+            key["e"].as_str().context("JWKS key has no e")?,
+        )
+        .context("build decoding key from JWKS")?;
+        let mut validation = jsonwebtoken::Validation::new(jsonwebtoken::Algorithm::RS256);
+        validation.set_audience(&[audience]);
+        validation.validate_exp = true;
+        let verified =
+            jsonwebtoken::decode::<serde_json::Value>(external, &decoding_key, &validation)
+                .context("the audience-bound token must verify against the JWKS")?;
+        anyhow::ensure!(
+            verified.claims["sub"] == serde_json::json!(format!("serviceaccount:{org}/ci")),
+            "unexpected subject on the audience-bound token:\n{}",
+            verified.claims
+        );
+        let refused = b.api_get_as(&format!("{}/{sa_path}", Self::RESOURCES), external)?;
+        anyhow::ensure!(
+            refused.status == 401,
+            "Rise's API must refuse a token for another audience, got {}:\n{}",
+            refused.status,
+            refused.body
+        );
+
+        // Tidy up: the Organization cascades over everything beneath it.
+        let _ = b.api_delete(&format!("{}/organizations/{org}", Self::RESOURCES));
         Ok(())
     }
 }

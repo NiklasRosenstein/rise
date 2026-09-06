@@ -265,7 +265,8 @@ pub async fn run_server(settings: settings::Settings) -> Result<()> {
     }
 
     // Public routes (no authentication)
-    let public_routes = Router::new()
+    #[allow(unused_mut)]
+    let mut public_routes = Router::new()
         .route("/health", axum::routing::get(health_check))
         .route("/version", axum::routing::get(version_info))
         .route(
@@ -281,6 +282,15 @@ pub async fn run_server(settings: settings::Settings) -> Result<()> {
         // endpoint is public.
         .merge(auth::exchange::routes::routes())
         .merge(workload_tokens::routes::routes());
+
+    // The generic resource API carries its own authentication and
+    // platform-access layers: they are the platform-wide ones, except that a
+    // workload token exchange at a `/token` subresource reaches its handler
+    // without a Rise credential (ADR-0001 §7).
+    #[cfg(feature = "backend")]
+    {
+        public_routes = public_routes.merge(resources::routes::routes(state.clone()));
+    }
 
     // Auth-only routes (require authentication but NOT platform access)
     let auth_only_routes = Router::new()
@@ -306,9 +316,6 @@ pub async fn run_server(settings: settings::Settings) -> Result<()> {
         .merge(extensions::routes::routes())
         .merge(encryption::routes::routes())
         .merge(quickstart::routes::routes());
-
-    #[cfg(feature = "backend")]
-    let platform_routes = platform_routes.merge(resources::routes::routes());
 
     let platform_routes = platform_routes
         // Apply platform access middleware (runs second, after auth)

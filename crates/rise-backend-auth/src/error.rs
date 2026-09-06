@@ -39,6 +39,10 @@ pub enum JwtSignerError {
     SystemTimeError(#[from] std::time::SystemTimeError),
     #[error("Missing required claim: {0}")]
     MissingClaim(String),
+    /// A delegated identity token would record more delegators than the
+    /// platform allows (ADR-0001 §7).
+    #[error("delegation chain exceeds the platform limit")]
+    DelegationChainTooLong,
     #[error("RSA key generation failed: {0}")]
     RsaKeyError(String),
     #[error("PEM encoding failed: {0}")]

@@ -16,11 +16,12 @@
 //! **Transitional global search.** [`resolve_external`] matches a token
 //! against every live `ControllerTrustPolicy` for its issuer, with no target
 //! Controller known in advance — the same global-search shape the static
-//! config it replaced used. ADR-0001 §7 and `ROADMAP.md` §2 name the durable
-//! design as a target-bound `/token` subresource per Controller, which checks
-//! only that one target's own trust-policy children and never searches
-//! globally; that route is not built yet, so this module is what stands in
-//! until it lands.
+//! config it replaced used. The durable design (ADR-0001 §7) is each
+//! Controller's own target-bound `token` subresource
+//! (`crate::server::resources::token`), which checks only that one target's
+//! trust-policy children and mints an identity token the middleware
+//! re-resolves by UID on every request. This module stands in for controllers
+//! that still present a raw OIDC JWT per request; it retires with that path.
 
 use rise_backend_auth::{match_trust_candidates, TrustCandidate, TrustMatch};
 use rise_resource_api::{Issuer, ResourceApi, StoreError, API_VERSION_V1ALPHA1, CONTROLLER_KIND};

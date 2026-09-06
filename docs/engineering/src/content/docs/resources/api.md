@@ -22,9 +22,11 @@ A path always names the **leaf** collection first as `{group}/{version}/{plural}
 | `{group}/{version}/{plural}/{ancestor}…/{name}/status` (`D+2`) | PUT | Status subresource update |
 | `{group}/{version}/{plural}/{ancestor}…/{name}/finalizers` (`D+2`) | PUT | Finalizer subresource update |
 | `{group}/{version}/{plural}/{ancestor}…/{name}/deletion-blockers` (`D+2`) | GET | Deletion-blocker diagnostics |
+| `{group}/{version}/{plural}/{ancestor}…/{name}/token` (`D+2`) | POST | Token issuance — `ServiceAccount` and `Controller` only |
 | `{group}/{version}/{plural}/uid:{uuid}` | GET, PUT, DELETE | Item by UID |
 | `{group}/{version}/{plural}/uid:{uuid}/{sub}` | PUT | `status` or `finalizers` by UID |
 | `{group}/{version}/{plural}/uid:{uuid}/deletion-blockers` | GET | Deletion-blocker diagnostics by UID |
+| `{group}/{version}/{plural}/uid:{uuid}/token` | POST | Token issuance by UID |
 | `pending-deletion` | GET | List tombstoned resources awaiting GC |
 
 Ancestor segments are bare resource *names*; the ancestor *kinds* are derived from the leaf's `ResourceDefinition` parent chain and never appear in the URL. `pending-deletion` is only valid as the sole path segment, so a resource may be named `pending-deletion` without ambiguity.
@@ -53,13 +55,14 @@ exactly what stored policy grants them.
 |---|---|
 | Operator (`auth.operator_users`, `auth.operator_idp_groups`) | Expands to `system:operators`, whose seeded binding allows every verb on every kind and subresource |
 | Any other authenticated user | Live RBAC: bindings that name them, one of their Groups, `org:<name>`, or `system:authenticated`, plus dynamic ownership bindings resolved from `rise.dev/owner` |
+| A `ServiceAccount` or `Controller` resource, holding an identity token from its [`token` subresource](#token-subresource-serviceaccount-and-controller) | Live RBAC on its own subject (`serviceaccount:<org>/<name>`, `controller:<name>`), intersected with the token's `authorization_details` ceiling. It has no Group ties and is never an operator |
 | Controller (a live `Controller` resource) | Live RBAC like any other principal: bindings naming its `controller:<name>` subject. See [Controller authorization](#controller-authorization) |
 
 The verbs map onto the HTTP surface directly: `list` and `get` for reads,
-`create` for POST, `update` for item PUT and for the `status`/`finalizers`
-subresources, `delete` for DELETE. Subresource permissions are separate from the
-main resource — a statement with no `subresources` field permits the main
-resource only.
+`create` for POST (and for the `token` subresource), `update` for item PUT and
+for the `status`/`finalizers` subresources, `delete` for DELETE. Subresource
+permissions are separate from the main resource — a statement with no
+`subresources` field permits the main resource only.
 
 Two read granularities exist, and they are independent grants:
 
@@ -408,16 +411,101 @@ silently omits blockers is worse than one that says how many it withheld — but
 grant the subresource on that basis, not on the assumption that it reveals
 nothing about a subtree the caller cannot list.
 
+### Token subresource (ServiceAccount and Controller)
+
+```http
+POST /api/v1/resources/rise.dev/v1alpha1/serviceaccounts/acme/ci/token
+Content-Type: application/json
+
+{
+  "grant_type": "urn:ietf:params:oauth:grant-type:token-exchange",
+  "subject_token": "<external OIDC JWT>",
+  "subject_token_type": "urn:ietf:params:oauth:token-type:jwt"
+}
+```
+
+Issues a Rise **identity token** for exactly the resource the URL names, and
+persists nothing — the subresource is create-only, so `GET`, `PUT`, and
+`DELETE` on it are `405`. Only `rise.dev/ServiceAccount` and
+`rise.dev/Controller` register it; `/token` on any other kind is the ordinary
+route-not-found `404`, before authentication. The response is the RFC 8693
+shape: `access_token`, `token_type: Bearer`, `issued_token_type`, and
+`expires_in`.
+
+Two request modes exist, and a request must be exactly one of them:
+
+- **Workload token exchange** — the request carries `subject_token` and **no
+  Rise credential**. The assertion is validated only against the
+  `ServiceAccountTrustPolicy` / `ControllerTrustPolicy` children of the addressed
+  target (issuer, JWKS signature and expiry, then each policy's claim matcher,
+  with `aud` accepting a string or an array) and must match exactly one. There is
+  no RBAC check and no search across identities. Every failure after the route
+  is entered — a target that does not exist, is of another kind, or is being
+  deleted; an issuer no policy names; a signature that does not verify; zero or
+  several matching policies — returns the same `401` body, so the route never
+  confirms whether a given identity or policy exists. A trust policy may not
+  name Rise's own issuer; creating one is a `400`.
+- **Delegated issuance** — the request carries a Rise credential (a user
+  session, or an identity token) and **no** `subject_token`. The caller needs
+  `(create, rise.dev/ServiceAccount, token)` or `(create, rise.dev/Controller,
+  token)` on that exact target under its own capped effective policy; `get` on
+  the target, `create` on the main resource, and `get` on the subresource each
+  grant nothing here. A refused caller who cannot `get` the target is told `404`,
+  like any masked item. The minted token records the caller in a bounded `act`
+  chain (the platform limit is four delegators; a longer chain is `403`), and a
+  minted identity may mint the next only through its own live token-create
+  grant — actor data never grants anything.
+
+Both modes accept three optional fields. `expires_in` is clamped to
+`server.auth_token_max_ttl_seconds`, the platform-global maximum. `audience`
+(RFC 8693) names the verifier the token is for: omitted means Rise's own API;
+any other value mints the same token with that `aud`, which Rise's API refuses
+and the named verifier checks against Rise's JWKS at
+`GET {public_url}/api/v1/auth/jwks` (identity tokens are always RS256-signed
+with that key, whatever their audience). `authorization_details` is an RFC 9396
+list of `rise.dev/rbac` entries that only ever **narrows** the issued token; it
+is a statement about Rise's own RBAC, so it is rejected together with an
+external `audience`:
+
+```json
+{
+  "authorization_details": [
+    {
+      "type": "rise.dev/rbac",
+      "scope": "rise.dev/Organization/acme",
+      "permissions": [
+        {"verbs": ["get", "list"], "kinds": ["rise.dev/ServiceAccount"]},
+        {"verbs": ["update"], "kinds": ["rise.dev/Deployment"], "subresources": ["status"]}
+      ]
+    }
+  ]
+}
+```
+
+Each entry has one qualified `scope` and one or more permission statements in
+Role grammar; entries union, statements union within their entry's scope, and
+omitted `subresources` means the main resource only. An empty list, an unknown
+`type`, an empty axis, or an unqualified kind or scope is a `400` — never a
+fallback to full policy — and a token whose stored claim is malformed fails
+authentication.
+
+The minted token is a bearer for this API. On every request Rise re-resolves
+its `(sub, rise_uid)` pair to one live resource and evaluates the identity's
+**current** policy intersected with the ceiling: narrowing or deleting the
+target affects outstanding tokens immediately, and recreating the same name
+under a new UID does not revive them. Revoking the caller's token-create grant
+stops new issuance only. Identity tokens are not accepted by the typed APIs.
+
 ## Status codes
 
 | Code | Meaning |
 |---|---|
 | 200 / 201 / 202 | Operation succeeded (200 read/update, 201 create, 202 cascade tombstoned) |
 | 400 | Malformed path, body validation, reserved finalizer prefix, wrong version |
-| 401 | No credentials or JWT verification failed |
-| 403 | Authorized to read the resource but not to perform this verb, or refused by the grant gate |
-| 404 | Unknown collection, unknown resource, kind/version mismatch on `uid:`, or a resource the caller may not read |
-| 405 | Method not valid for the addressed path (e.g. GET on `/status`) |
+| 401 | No credentials or JWT verification failed; an assertion the `token` subresource did not accept |
+| 403 | Authorized to read the resource but not to perform this verb, refused by the grant gate, or a delegation chain past the platform limit |
+| 404 | Unknown collection, unknown resource, kind/version mismatch on `uid:`, a resource the caller may not read, or `/token` on a kind that does not register it |
+| 405 | Method not valid for the addressed path (e.g. GET on `/status`, PUT on `/token`) |
 | 409 | Name conflict on create, revision conflict on update |
 | 422 | Write targeting a served non-storage version (no conversion yet) |
 | 503 | Discriminator generator exhausted (10 retries) |

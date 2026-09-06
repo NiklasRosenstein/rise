@@ -1660,3 +1660,124 @@ async fn an_org_binding_replaces_the_platform_ownership_default_for_its_own_org(
         "replacement is confined to the organization that authored the override"
     );
 }
+
+/// ADR-0001 §7, scenarios 49–52: the `authorization_details` claim parses into
+/// the same ceiling the engine evaluates, and every malformed shape fails
+/// closed instead of falling back to full policy.
+#[tokio::test]
+async fn authorization_details_parse_into_a_ceiling_and_fail_closed() {
+    let mut builder = StoreBuilder::new();
+    let acme = builder.resource(ORGANIZATION, "acme", None);
+    let app = builder.resource(PROJECT, "app", Some(acme));
+    let deployment = builder.resource(DEPLOYMENT, "foo", Some(app));
+    let catalog = builder.resource(PROJECT, "catalog", Some(acme));
+    let other_deployment = builder.resource(DEPLOYMENT, "bar", Some(catalog));
+    let store = builder.build();
+
+    // Omitted details are the full live policy.
+    assert_eq!(
+        AuthorizationCap::from_details(None).unwrap(),
+        AuthorizationCap::Unrestricted
+    );
+
+    // Two entries at different Scopes union without a Cartesian product
+    // (scenario 51); a main-resource detail excludes subresources (49); a
+    // subresource detail is separate from the main resource (50).
+    let details = vec![
+        json!({
+            "type": "rise.dev/rbac",
+            "scope": "rise.dev/Project/acme/app",
+            "permissions": [{ "verbs": ["get", "list"], "kinds": ["rise.dev/Deployment"] }]
+        }),
+        json!({
+            "type": "rise.dev/rbac",
+            "scope": "rise.dev/Project/acme/catalog",
+            "permissions": [{
+                "verbs": ["get"],
+                "kinds": ["rise.dev/Deployment"],
+                "subresources": ["status"]
+            }]
+        }),
+    ];
+    let cap = AuthorizationCap::from_details(Some(&details)).unwrap();
+    assert_eq!(
+        cap.to_details().as_deref(),
+        Some(details.as_slice()),
+        "a parsed ceiling round-trips to its canonical wire form"
+    );
+
+    let capped =
+        AuthenticatedPrincipal::new("user:u-root".parse().unwrap(), Uuid::new_v4(), cap).unwrap();
+    let engine = engine(store.clone(), FakeMemberships::operator());
+    let snapshot = engine.snapshot(capped).await.unwrap();
+    let status = |verb| PermissionTuple {
+        verb,
+        kind: "rise.dev/Deployment".parse().unwrap(),
+        subresource: Some("status".parse().unwrap()),
+    };
+
+    let app_target = engine.resource_tree(deployment).await.unwrap();
+    let app_policy = engine
+        .effective_policy(&snapshot, &app_target)
+        .await
+        .unwrap();
+    assert_eq!(
+        app_policy.decide(&tuple(Verb::Get, "rise.dev/Deployment")),
+        Decision::Allow
+    );
+    assert_eq!(
+        app_policy.decide(&status(Verb::Get)),
+        Decision::Deny,
+        "a main-resource detail omits every subresource"
+    );
+
+    let catalog_target = engine.resource_tree(other_deployment).await.unwrap();
+    let catalog_policy = engine
+        .effective_policy(&snapshot, &catalog_target)
+        .await
+        .unwrap();
+    assert_eq!(catalog_policy.decide(&status(Verb::Get)), Decision::Allow);
+    assert_eq!(
+        catalog_policy.decide(&tuple(Verb::Get, "rise.dev/Deployment")),
+        Decision::Deny,
+        "a subresource detail never reaches the main resource"
+    );
+    assert_eq!(
+        catalog_policy.decide(&tuple(Verb::List, "rise.dev/Deployment")),
+        Decision::Deny,
+        "entries union by their own Scope, never across Scopes"
+    );
+
+    // Scenario 52: malformed details fail token validation.
+    let permission = json!({ "verbs": ["get"], "kinds": ["rise.dev/Deployment"] });
+    let rejected: Vec<serde_json::Value> = vec![
+        // A present empty detail set.
+        json!([]),
+        // Unknown type.
+        json!([{ "type": "rise.dev/other", "scope": "rise.dev/Project/acme/app", "permissions": [permission] }]),
+        // Missing type.
+        json!([{ "scope": "rise.dev/Project/acme/app", "permissions": [permission] }]),
+        // Empty permissions.
+        json!([{ "type": "rise.dev/rbac", "scope": "rise.dev/Project/acme/app", "permissions": [] }]),
+        // Empty axes.
+        json!([{ "type": "rise.dev/rbac", "scope": "rise.dev/Project/acme/app", "permissions": [{ "verbs": [], "kinds": ["rise.dev/Deployment"] }] }]),
+        json!([{ "type": "rise.dev/rbac", "scope": "rise.dev/Project/acme/app", "permissions": [{ "verbs": ["get"], "kinds": [] }] }]),
+        json!([{ "type": "rise.dev/rbac", "scope": "rise.dev/Project/acme/app", "permissions": [{ "verbs": ["get"], "kinds": ["rise.dev/Deployment"], "subresources": [] }] }]),
+        json!([{ "type": "rise.dev/rbac", "scope": "rise.dev/Project/acme/app", "permissions": [{ "verbs": ["get"], "kinds": ["rise.dev/Deployment"], "subresources": null }] }]),
+        // Unqualified kind and Scope; empty Scope.
+        json!([{ "type": "rise.dev/rbac", "scope": "rise.dev/Project/acme/app", "permissions": [{ "verbs": ["get"], "kinds": ["Deployment"] }] }]),
+        json!([{ "type": "rise.dev/rbac", "scope": "Project/acme/app", "permissions": [permission] }]),
+        json!([{ "type": "rise.dev/rbac", "scope": "", "permissions": [permission] }]),
+        // Malformed entries.
+        json!([{ "type": "rise.dev/rbac", "scope": "rise.dev/Project/acme/app", "permissions": [permission], "extra": 1 }]),
+        json!(["not-an-object"]),
+        json!([{ "type": "rise.dev/rbac", "scope": "rise.dev/Project/acme/app", "permissions": [{ "verbs": ["get"], "kinds": ["rise.dev/Deployment"], "effect": "Allow" }] }]),
+    ];
+    for details in rejected {
+        let entries = details.as_array().expect("test details are arrays");
+        assert!(
+            AuthorizationCap::from_details(Some(entries)).is_err(),
+            "{details} must fail closed"
+        );
+    }
+}
