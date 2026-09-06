@@ -4234,6 +4234,15 @@ async fn maximum_identity_index_keys_fit_and_projection_queries_use_their_indexe
         .join("\n")
         .contains("user_identities_issuer_subject_unique"));
 
+    // controller_trust_policies_issuer (added alongside the new issuer-only
+    // candidate lookup) is a more kind-selective, if narrower, alternative to
+    // workload_trust_parent_issuer for this exact query at near-zero row
+    // counts — drop it so this assertion keeps exercising the composite index
+    // CONTROLLER_TRUST_POLICIES_SQL was written for. Mirrors the reverse drop
+    // in controller_candidates_by_issuer_filters_live_controllers_and_ignores_other_kinds.
+    connection
+        .execute("DROP INDEX resource_store.controller_trust_policies_issuer")
+        .await?;
     let trust_plan: Vec<String> = sqlx::query_scalar(&format!(
         "EXPLAIN (COSTS OFF) {}",
         rise_resource_store_postgres::CONTROLLER_TRUST_POLICIES_SQL
