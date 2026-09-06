@@ -1,11 +1,19 @@
 -- Support controller authentication resolving live ControllerTrustPolicy
 -- candidates by issuer alone (the controller identity is what authentication
 -- is trying to determine, so this cannot be scoped to one Controller uid the
--- way `workload_trust_parent_issuer` is for a target-bound lookup).
-CREATE INDEX controller_trust_policies_issuer
-    ON resource_store.resources (((spec->>'issuer') COLLATE "C"))
+-- way the existing `workload_trust_parent_issuer` index is for a target-bound
+-- lookup). Rather than add a second, narrower issuer-only index that would
+-- compete with it for the planner's choice on the same rows, reorder its
+-- columns: a pure-equality composite index serves a target-bound lookup
+-- (parent_uid + issuer) exactly as well with either column leading, and
+-- leading with `issuer` additionally serves an issuer-only lookup via that
+-- leading column alone — one index for both query shapes.
+DROP INDEX resource_store.workload_trust_parent_issuer;
+
+CREATE INDEX workload_trust_issuer_parent
+    ON resource_store.resources (((spec->>'issuer') COLLATE "C"), parent_uid)
     WHERE split_part(api_version, '/', 1) = 'rise.dev'
-      AND kind = 'ControllerTrustPolicy'
+      AND kind IN ('ControllerTrustPolicy', 'ServiceAccountTrustPolicy')
       AND deletion_timestamp IS NULL;
 
 -- Controllers are now ordinary RBAC principals: ResourceDefinition.spec no

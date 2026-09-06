@@ -3970,16 +3970,14 @@ async fn controller_candidates_by_issuer_filters_live_controllers_and_ignores_ot
 
     // The candidates query has no leading-column condition on `policy`, so at
     // this table's tiny test-scale row count the planner can satisfy it via a
-    // controller-first nested loop through unrelated indexes instead of the
-    // dedicated partial index this migration adds. Drop those alternate paths
-    // so the assertion actually exercises whether the SQL text still matches
-    // `controller_trust_policies_issuer`'s predicate — the real regression this
-    // guards, since the predicate must be repeated verbatim (see
-    // `maximum_identity_index_keys_fit_and_projection_queries_use_their_indexes`).
+    // controller-first nested loop through the unrelated child-name-uniqueness
+    // index instead of the dedicated `workload_trust_issuer_parent` index this
+    // migration reorders into place. Drop that alternate path so the assertion
+    // actually exercises whether the SQL text still matches the index's
+    // predicate verbatim (see
+    // `maximum_identity_index_keys_fit_and_projection_queries_use_their_indexes`,
+    // which exercises the same index from its target-bound-lookup side).
     let mut connection = pool.acquire().await?;
-    connection
-        .execute("DROP INDEX resource_store.workload_trust_parent_issuer")
-        .await?;
     connection
         .execute("DROP INDEX resource_store.resources_child_kind_name_unique")
         .await?;
@@ -3992,9 +3990,24 @@ async fn controller_candidates_by_issuer_filters_live_controllers_and_ignores_ot
     .fetch_all(&mut *connection)
     .await?;
     assert!(
-        plan.join("\n").contains("controller_trust_policies_issuer"),
+        plan.join("\n").contains("workload_trust_issuer_parent"),
         "{}",
         plan.join("\n")
+    );
+
+    let exists_plan: Vec<String> = sqlx::query_scalar(&format!(
+        "EXPLAIN (COSTS OFF) {}",
+        rise_resource_store_postgres::CONTROLLER_ISSUER_EXISTS_SQL
+    ))
+    .bind("https://token.example")
+    .fetch_all(&mut *connection)
+    .await?;
+    assert!(
+        exists_plan
+            .join("\n")
+            .contains("workload_trust_issuer_parent"),
+        "{}",
+        exists_plan.join("\n")
     );
     Ok(())
 }
@@ -4202,7 +4215,7 @@ async fn maximum_identity_index_keys_fit_and_projection_queries_use_their_indexe
         WHERE schemaname = 'resource_store'
           AND indexname IN (
               'user_identities_issuer_subject_unique',
-              'workload_trust_parent_issuer',
+              'workload_trust_issuer_parent',
               'group_memberships_user_name'
           )
         ORDER BY indexname
@@ -4234,15 +4247,6 @@ async fn maximum_identity_index_keys_fit_and_projection_queries_use_their_indexe
         .join("\n")
         .contains("user_identities_issuer_subject_unique"));
 
-    // controller_trust_policies_issuer (added alongside the new issuer-only
-    // candidate lookup) is a more kind-selective, if narrower, alternative to
-    // workload_trust_parent_issuer for this exact query at near-zero row
-    // counts — drop it so this assertion keeps exercising the composite index
-    // CONTROLLER_TRUST_POLICIES_SQL was written for. Mirrors the reverse drop
-    // in controller_candidates_by_issuer_filters_live_controllers_and_ignores_other_kinds.
-    connection
-        .execute("DROP INDEX resource_store.controller_trust_policies_issuer")
-        .await?;
     let trust_plan: Vec<String> = sqlx::query_scalar(&format!(
         "EXPLAIN (COSTS OFF) {}",
         rise_resource_store_postgres::CONTROLLER_TRUST_POLICIES_SQL
@@ -4253,7 +4257,7 @@ async fn maximum_identity_index_keys_fit_and_projection_queries_use_their_indexe
     .await?;
     assert!(trust_plan
         .join("\n")
-        .contains("workload_trust_parent_issuer"));
+        .contains("workload_trust_issuer_parent"));
 
     let membership_plan: Vec<String> = sqlx::query_scalar(&format!(
         "EXPLAIN (COSTS OFF) {}",

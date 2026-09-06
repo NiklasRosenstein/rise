@@ -104,7 +104,7 @@ ORDER BY policy.name, policy.uid
 /// token belongs to, which is exactly what this resolves.
 ///
 /// The predicate on `policy` must match the partial index
-/// `controller_trust_policies_issuer` byte-for-byte (the `split_part` check
+/// `workload_trust_issuer_parent` byte-for-byte (the `split_part` check
 /// included, even though `api_version` is also compared as a literal) for the
 /// planner to use it.
 #[doc(hidden)]
@@ -132,6 +132,10 @@ ORDER BY controller.name, controller.uid, policy.name, policy.uid
 /// Whether any live `ControllerTrustPolicy` under a live Controller declares
 /// this issuer — the cheap existence check the auth middleware uses to decide
 /// whether an unrecognized issuer is worth a JWKS fetch at all.
+///
+/// Shares [`CONTROLLER_CANDIDATES_BY_ISSUER_SQL`]'s predicate on `policy`
+/// verbatim, so it is served by the same `workload_trust_issuer_parent`
+/// index.
 #[doc(hidden)]
 pub const CONTROLLER_ISSUER_EXISTS_SQL: &str = r#"
 SELECT EXISTS (

@@ -12,6 +12,15 @@
 //! turns a resolved [`ControllerPrincipal`] into an ordinary
 //! `controller:<name>` principal for the generic resource API
 //! (`src/server/authz/mod.rs`), which evaluates it exactly like a User.
+//!
+//! **Transitional global search.** [`resolve_external`] matches a token
+//! against every live `ControllerTrustPolicy` for its issuer, with no target
+//! Controller known in advance — the same global-search shape the static
+//! config it replaced used. ADR-0001 §7 and `ROADMAP.md` §2 name the durable
+//! design as a target-bound `/token` subresource per Controller, which checks
+//! only that one target's own trust-policy children and never searches
+//! globally; that route is not built yet, so this module is what stands in
+//! until it lands.
 
 use rise_backend_auth::{match_trust_candidates, TrustCandidate, TrustMatch};
 use rise_resource_api::{Issuer, ResourceApi, StoreError, API_VERSION_V1ALPHA1, CONTROLLER_KIND};
@@ -127,7 +136,19 @@ pub async fn resolve_external(
                 }
             }
         }
-        TrustMatch::Unmatched(_) => Ok(ControllerResolution::NotAController),
+        TrustMatch::Unmatched(detail) => {
+            // Candidates existed for this issuer but none matched the token's
+            // claims — worth a debug line for diagnosing a misconfigured
+            // ControllerTrustPolicy, but not a warning: this issuer may be
+            // legitimately shared with non-controller (e.g. service-account)
+            // traffic, for which an unmatched controller policy is routine.
+            tracing::debug!(
+                issuer = %issuer.as_str(),
+                detail = %detail,
+                "no live ControllerTrustPolicy for this issuer matched the token's claims"
+            );
+            Ok(ControllerResolution::NotAController)
+        }
     }
 }
 
