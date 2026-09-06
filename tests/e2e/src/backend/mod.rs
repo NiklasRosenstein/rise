@@ -124,7 +124,33 @@ pub trait Backend {
 
     /// Authenticated GET against the Rise API (`path` starts with `/`).
     fn api_get(&self, path: &str) -> Result<HttpResponse> {
-        crate::http::get_auth(&format!("{}{}", self.api_base(), path), self.ci_bearer())
+        self.api_get_as(path, self.ci_bearer())
+    }
+
+    /// GET against the Rise API with an explicit bearer — for exercising a token
+    /// the scenario itself obtained.
+    fn api_get_as(&self, path: &str, bearer: &str) -> Result<HttpResponse> {
+        crate::http::get_auth(&format!("{}{}", self.api_base(), path), bearer)
+    }
+
+    /// Authenticated JSON POST against the Rise API, as the admin CI bearer.
+    fn api_post(&self, path: &str, body: &serde_json::Value) -> Result<HttpResponse> {
+        self.api_post_as(path, Some(self.ci_bearer()), body)
+    }
+
+    /// Authenticated DELETE against the Rise API, as the admin CI bearer.
+    fn api_delete(&self, path: &str) -> Result<HttpResponse> {
+        crate::http::delete_auth(&format!("{}{}", self.api_base(), path), self.ci_bearer())
+    }
+
+    /// JSON POST against the Rise API with an explicit bearer, or none at all.
+    fn api_post_as(
+        &self,
+        path: &str,
+        bearer: Option<&str>,
+        body: &serde_json::Value,
+    ) -> Result<HttpResponse> {
+        crate::http::post_json(&format!("{}{}", self.api_base(), path), bearer, body)
     }
 
     /// Poll the deployments API until the project's latest deployment reports

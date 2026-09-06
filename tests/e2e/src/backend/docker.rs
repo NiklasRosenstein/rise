@@ -165,6 +165,10 @@ impl DockerBackend {
         c.current_dir(&self.repo_root)
             .env("RISE_IMAGE_REPOSITORY", &self.image_repository)
             .env("RISE_IMAGE_TAG", &self.image_tag)
+            // The CI bearer is the stack's admin; operator standing on top is
+            // what lets scenarios author resources through the generic
+            // resource API (the `resource-token-exchange` scenario needs it).
+            .env("RISE_OPERATOR_EMAIL", "admin@example.com")
             .args([
                 "compose",
                 "-f",
