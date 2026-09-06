@@ -309,7 +309,8 @@ fn mint(
             act,
         })
         .map_err(|error| {
-            ServerError::internal(format!("failed to sign identity token: {error:?}"))
+            tracing::error!("failed to sign identity token: {error:?}");
+            ServerError::internal("failed to sign identity token")
         })?;
     Ok(Json(ExchangeResponse {
         access_token: token,

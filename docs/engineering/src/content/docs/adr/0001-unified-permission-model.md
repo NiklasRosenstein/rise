@@ -873,7 +873,16 @@ audience, and `authorization_details` — a ceiling over Rise's RBAC that means
 nothing to another verifier — is refused together with an external audience.
 The same `(create, ResourceKind, token)` grant governs delegated issuance for
 every audience: minting a token in the target's name for a third party is the
-same authority as minting one for Rise.
+same authority as minting one for Rise. This mirrors Kubernetes'
+`TokenRequest` API, where a single `create` on `serviceaccounts/token`
+authorizes minting for any `spec.audiences` value, internal or external, with
+no separate grant per audience. Kubernetes has no per-token ceiling at all —
+RBAC is always re-evaluated live against the caller's current bindings, never
+baked into the token — so it has no analogue of `authorization_details`
+either. Rise's asymmetry, where a ceiling narrows a Rise-audience token but
+cannot apply to an external one, follows from `authorization_details` only
+ever meaning something against Rise's own RBAC, not from a difference in how
+the audience itself is authorized.
 
 Tokens carry identity and a ceiling, never a snapshot of grants. Every request
 re-resolves the target identity, Groups, Roles, bindings, and Denies. Narrowing

@@ -126,7 +126,7 @@ pub async fn resolve_identity(
         Some(organization) => {
             let contained = chain.len() == 2
                 && chain[0].kind == ORGANIZATION_KIND
-                && chain[0].api_version.starts_with(API_GROUP)
+                && chain[0].api_version.split('/').next().unwrap_or_default() == API_GROUP
                 && chain[0].name == organization;
             if !contained {
                 return Err(IdentityRejection::NoLiveResource);
