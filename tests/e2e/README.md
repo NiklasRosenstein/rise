@@ -117,6 +117,10 @@ CI to it. Per run the harness applies `run/` — Traefik, Dex, Postgres and the
 control plane — so every run starts on a fresh database, a fresh proxy and the
 image under test, and destroys the lot afterwards.
 
+Rise and Traefik use the same [`runtime`](../../modules/rise-ecs/modules/runtime)
+module as production. The run workspace supplies scoped networking and the
+Postgres and Dex fixtures; the bootstrap supplies shared infrastructure and IAM.
+
 ### Caller permissions
 
 Applying the bootstrap needs IAM write, which is why it is done by hand. Running

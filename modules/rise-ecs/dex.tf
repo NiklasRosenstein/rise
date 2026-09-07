@@ -118,5 +118,5 @@ resource "aws_ecs_service" "dex" {
     replace_triggered_by = [aws_service_discovery_service.dex[count.index]]
   }
 
-  depends_on = [aws_ecs_service.traefik]
+  depends_on = [module.runtime]
 }

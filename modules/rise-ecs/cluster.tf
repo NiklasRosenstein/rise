@@ -50,43 +50,7 @@ resource "aws_service_discovery_private_dns_namespace" "this" {
   tags        = local.tags
 }
 
-resource "aws_service_discovery_service" "rise" {
-  name = local.control_plane_discovery_name
 
-  dns_config {
-    namespace_id   = local.namespace_id
-    routing_policy = "MULTIVALUE"
-
-    dns_records {
-      type = "A"
-      ttl  = 10
-    }
-  }
-
-  # Instances must be deregistered before a Cloud Map service will delete, and
-  # ECS deregisters them only as its own tasks drain. `terraform destroy` hits
-  # the same wall and may need a retry; that is AWS's ordering, not a bug here.
-  force_destroy = true
-
-  tags = local.tags
-}
-
-resource "aws_service_discovery_service" "traefik" {
-  name = local.traefik_discovery_name
-
-  dns_config {
-    namespace_id   = local.namespace_id
-    routing_policy = "MULTIVALUE"
-
-    dns_records {
-      type = "A"
-      ttl  = 10
-    }
-  }
-
-  force_destroy = true
-  tags          = local.tags
-}
 
 resource "aws_service_discovery_service" "dex" {
   count = var.deploy_dex ? 1 : 0

@@ -57,6 +57,22 @@ run "rejects_gitlab_and_jfrog_registries" {
   expect_failures = [var.registry_type]
 }
 
+run "rejects_an_image_with_both_tag_and_digest" {
+  command = plan
+  variables {
+    rise_image_ref = "ghcr.io/rise-deploy/rise@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+  }
+  expect_failures = [var.rise_image_ref]
+}
+
+run "rejects_an_image_without_tag_or_digest" {
+  command = plan
+  variables {
+    rise_image_tag = null
+  }
+  expect_failures = [var.rise_image_ref]
+}
+
 # The backend normalises common spellings, but the module should not be the
 # thing that hands it something to normalise.
 run "rejects_a_non_fargate_cpu_architecture" {

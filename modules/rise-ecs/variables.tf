@@ -428,6 +428,11 @@ variable "rise_image_ref" {
   default     = null
 
   validation {
+    condition     = (var.rise_image_ref == null) != (var.rise_image_tag == null)
+    error_message = "Set exactly one of rise_image_ref or rise_image_tag."
+  }
+
+  validation {
     condition     = var.rise_image_ref == null || strcontains(var.rise_image_ref, "@sha256:")
     error_message = "rise_image_ref must be an OCI digest reference containing @sha256:."
   }

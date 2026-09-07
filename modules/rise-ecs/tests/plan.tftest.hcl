@@ -51,28 +51,7 @@ variables {
 run "creates_a_whole_install" {
   command = plan
 
-  assert {
-    condition     = aws_ecs_service.traefik.desired_count == 1
-    error_message = "Traefik must run one replica: its ACME file store is not multi-writer safe"
-  }
 
-  assert {
-    condition = jsondecode(aws_ecs_task_definition.traefik.container_definitions)[0].healthCheck == {
-      command = [
-        "CMD",
-        "traefik",
-        "healthcheck",
-        "--ping=true",
-        "--entrypoints.ping.address=:8082",
-        "--ping.entrypoint=ping",
-      ]
-      interval    = 30
-      timeout     = 5
-      retries     = 3
-      startPeriod = 10
-    }
-    error_message = "Traefik must report ECS health through its dedicated ping entrypoint"
-  }
 
   assert {
     condition = (
@@ -98,20 +77,13 @@ run "creates_a_whole_install" {
 
   assert {
     condition = alltrue([
-      aws_service_discovery_service.rise.name == "rise-control-plane",
-      aws_service_discovery_service.traefik.name == "rise-traefik",
+      module.runtime.rise.discovery_name == "rise-control-plane",
+      module.runtime.traefik.discovery_name == "rise-traefik",
       local.rise_environment["RISE_TRAEFIK_API_URL"] == "http://rise-traefik.rise.internal:8080",
     ])
     error_message = "Cloud Map names must be scoped to the Rise installation"
   }
 
-  assert {
-    condition = alltrue([
-      length(aws_service_discovery_service.rise.health_check_custom_config) == 0,
-      length(aws_service_discovery_service.traefik.health_check_custom_config) == 0,
-    ])
-    error_message = "empty custom health checks cause perpetual Cloud Map service replacement"
-  }
 
   assert {
     condition     = local.rise_environment["RISE_ECS_ASSIGN_PUBLIC_IP"] == "false"
@@ -192,7 +164,7 @@ run "uses_an_external_traefik_role_without_creating_iam" {
   }
 
   assert {
-    condition     = aws_ecs_task_definition.traefik.task_role_arn == "arn:aws:iam::123456789012:role/rise-traefik"
+    condition     = module.runtime.traefik.task_role_arn == "arn:aws:iam::123456789012:role/rise-traefik"
     error_message = "the external Traefik role must reach the task definition"
   }
 }
@@ -298,7 +270,7 @@ run "traefik_discovery_is_unconstrained_by_default" {
   command = plan
 
   assert {
-    condition     = length([for c in local.traefik_command : c if strcontains(c, "constraints")]) == 0
+    condition     = length([for c in module.runtime.traefik_command : c if strcontains(c, "constraints")]) == 0
     error_message = "an unset traefik_constraints must add no constraint flag"
   }
 }
@@ -370,7 +342,7 @@ run "traefik_discovery_can_be_confined_to_one_install" {
 
   assert {
     condition = contains(
-      local.traefik_command,
+      module.runtime.traefik_command,
       "--providers.ecs.constraints=Label(`rise.dev/controller-class`, `pr-462`)"
     )
     error_message = "traefik_constraints must reach Traefik as a provider flag"

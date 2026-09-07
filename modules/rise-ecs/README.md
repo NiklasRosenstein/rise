@@ -8,6 +8,11 @@ control-plane store, and ECR for images.
 
 It pairs with [`rise-aws`](../rise-aws), which owns the IAM. Apply that first.
 
+Rise and Traefik run through the shared [`runtime`](modules/runtime) submodule,
+which owns their task definitions, ECS services, Cloud Map registrations, and
+routing configuration. This module supplies production infrastructure around
+that runtime. The ECS E2E workspace uses the same runtime with per-run fixtures.
+
 ## Usage
 
 ```hcl

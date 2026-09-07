@@ -53,12 +53,12 @@ output "log_group_name" {
 
 output "rise_service_name" {
   description = "ECS service running the control plane."
-  value       = aws_ecs_service.rise.name
+  value       = module.runtime.rise.service_name
 }
 
 output "traefik_service_name" {
   description = "ECS service running the ingress router."
-  value       = aws_ecs_service.traefik.name
+  value       = module.runtime.traefik.service_name
 }
 
 # -----------------------------------------------------------------------------

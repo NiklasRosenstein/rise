@@ -92,9 +92,7 @@ locals {
   )
 
   # --- Control-plane environment -------------------------------------------
-  # Built by modules/control-plane-env, which the e2e test root also consumes so
-  # the two cannot drift on the one contract that matters: what the control
-  # plane's environment and Traefik labels look like on ECS.
+  # Both runtime callers compose the environment and labels through this module.
   rise_environment = module.control_plane_env.environment
 
   control_plane_builtin_secret_environment = merge({

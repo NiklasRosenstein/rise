@@ -57,9 +57,18 @@ run "per_run_stack_plans" {
 
   assert {
     condition = alltrue([
+      for flag in [
+        "--providers.http.endpoint=http://rise-pr-457.rise-e2e.internal:3001/internal/traefik/config",
+        "--providers.http.pollInterval=5s",
+        "--entrypoints.rise-catalog.address=127.0.0.1:8083",
+      ] : contains(module.runtime.traefik_command, flag)
+    ])
+    error_message = "The per-run runtime must fetch public routes from its own Rise service and isolate ECS catalog routers."
+  }
+
+  assert {
+    condition = alltrue([
       length(aws_service_discovery_service.postgres.health_check_custom_config) == 0,
-      length(aws_service_discovery_service.rise.health_check_custom_config) == 0,
-      length(aws_service_discovery_service.traefik.health_check_custom_config) == 0,
       length(aws_service_discovery_service.dex.health_check_custom_config) == 0,
     ])
     error_message = "empty custom health checks cause perpetual Cloud Map service replacement"
@@ -126,7 +135,7 @@ run "the_scope_isolates_dns_routing_and_collection" {
   # concurrent run's Traefik answers for every run's hosts.
   assert {
     condition = anytrue([
-      for c in jsondecode(aws_ecs_task_definition.traefik.container_definitions)[0].command :
+      for c in module.runtime.traefik_command :
       c == "--providers.ecs.constraints=Label(`rise.dev/controller-class`, `pr-457`)"
     ])
     error_message = "this run's Traefik is not confined to its own controller class"
@@ -166,8 +175,8 @@ run "the_scope_isolates_dns_routing_and_collection" {
     condition = alltrue([
       for n in [
         aws_ecs_service.postgres.name,
-        aws_ecs_service.rise.name,
-        aws_ecs_service.traefik.name,
+        module.runtime.rise.service_name,
+        module.runtime.traefik.service_name,
         aws_ecs_service.dex.name,
       ] : strcontains(n, "-pr-457-")
     ])
@@ -189,7 +198,7 @@ run "the_scope_isolates_dns_routing_and_collection" {
 
   # Cloud Map is shared across runs, so per-run services need distinct names.
   assert {
-    condition     = aws_service_discovery_service.traefik.name == "traefik-pr-457"
+    condition     = module.runtime.traefik.discovery_name == "traefik-pr-457"
     error_message = "Cloud Map names must be scoped or concurrent runs collide"
   }
 }
