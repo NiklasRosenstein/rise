@@ -149,14 +149,6 @@ run "direct_http_uses_no_certificate_store_or_load_balancer" {
   }
 }
 
-run "rejects_conflicting_environment_sources" {
-  command = plan
-  variables {
-    environment = { DATABASE_URL = "postgres://example" }
-  }
-  expect_failures = [var.secret_environment]
-}
-
 run "rejects_incomplete_acme" {
   command = plan
   variables {

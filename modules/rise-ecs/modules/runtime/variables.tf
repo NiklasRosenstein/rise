@@ -87,10 +87,6 @@ variable "secret_environment" {
   type        = map(string)
   default     = {}
 
-  validation {
-    condition     = length(setintersection(toset(keys(var.environment)), toset(keys(var.secret_environment)))) == 0
-    error_message = "An environment variable must have either a plain value or a secret reference."
-  }
 }
 
 variable "traefik" {

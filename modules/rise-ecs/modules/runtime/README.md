@@ -15,8 +15,7 @@ roles, logging, and each service's settings. Service names also name task
 families; discovery names and log stream prefixes are explicit so callers can
 scope installations independently. Callers must mark credential inputs as
 sensitive; that sensitivity propagates into the task definition.
-`secret_environment` contains ECS `valueFrom` references. A variable cannot
-appear in both maps.
+`secret_environment` contains ECS `valueFrom` references.
 
 `load_balancer_targets` maps port strings (`80` or `443`) to target group ARNs.
 Its keys must be known during planning. `acme.enabled` must also be known during
