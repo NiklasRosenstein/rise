@@ -2,8 +2,8 @@
 """Verify supported ECS state layouts using isolated, mocked Terraform upgrades.
 
 Requires the baseline Git object and Terraform on PATH. The production module's
-initialized provider lock and binaries are reused. No AWS
-credentials or real infrastructure are used.
+initialized provider lock and binaries are reused. No AWS credentials or real
+infrastructure are used.
 """
 
 import argparse
@@ -23,7 +23,10 @@ mock_provider "aws" {
   mock_data "aws_region" { defaults = { id = "eu-central-1", region = "eu-central-1" } }
   mock_data "aws_partition" { defaults = { partition = "aws" } }
   mock_data "aws_availability_zones" { defaults = { names = ["eu-central-1a", "eu-central-1b"] } }
+  mock_data "aws_subnet" { defaults = { vpc_id = "vpc-0123456789abcdef0" } }
+  mock_data "aws_ecs_cluster" { defaults = { arn = "arn:aws:ecs:eu-central-1:123456789012:cluster/existing", status = "ACTIVE" } }
   mock_data "aws_iam_policy_document" { defaults = { json = "{}" } }
+  mock_resource "aws_eip" { defaults = { public_ip = "192.0.2.10" } }
   mock_resource "aws_ecs_cluster" { defaults = { arn = "arn:aws:ecs:eu-central-1:123456789012:cluster/rise" } }
   mock_resource "aws_iam_role" { defaults = { arn = "arn:aws:iam::123456789012:role/rise-traefik" } }
   mock_resource "aws_secretsmanager_secret" { defaults = { arn = "arn:aws:secretsmanager:eu-central-1:123456789012:secret:rise/example-abc123" } }
@@ -77,7 +80,10 @@ def prepare(repo, work, baseline):
         module / ".terraform/providers", work / ".terraform/providers", symlinks=True
     )
     (work / "tests").mkdir()
-    for case, relative in [("nlb", PATHS[0]), ("alb", PATHS[0]), ("e2e", PATHS[1])]:
+    for case, relative in [
+        (case, PATHS[1] if case == "e2e" else PATHS[0])
+        for case in ["nlb", "alb", "brought", "dex", "endpoints", "e2e"]
+    ]:
         source = (work / "baseline" / relative / "tests/plan.tftest.hcl").read_text()
         variables = re.search(
             r"^variables \{.*?^\}", source, re.MULTILINE | re.DOTALL
@@ -89,13 +95,44 @@ def prepare(repo, work, baseline):
                 source,
                 re.MULTILINE | re.DOTALL,
             ).group()
-        if case == "alb":
+        if case in {"alb", "endpoints"}:
             variables = re.sub(
                 r'acme_email\s*= "ops@example.com"',
                 '''acme_email = null
   edge_mode = "alb-acm"
   acm_certificate_arn = "arn:aws:acm:eu-central-1:123456789012:certificate/12345678-1234-1234-1234-123456789012"''',
                 variables,
+            )
+        if case == "brought":
+            variables = (
+                variables[:-1]
+                + """
+  vpc = { id = "vpc-0123456789abcdef0", public_subnet_ids = ["subnet-a", "subnet-b"], private_subnet_ids = ["subnet-c", "subnet-d"] }
+  cluster = { name = "existing" }
+  cloud_map_namespace_id = "ns-existing"
+  cloud_map_namespace_name = "existing.internal"
+  database_url_secret_arn = "arn:aws:secretsmanager:eu-central-1:123456789012:secret:existing-db-abc123"
+  create_traefik_task_role = false
+  traefik_task_role_arn = "arn:aws:iam::123456789012:role/existing-traefik"
+}"""
+            )
+        if case == "dex":
+            variables = (
+                variables[:-1]
+                + """
+  deploy_dex = true
+  dex_admin_password_bcrypt = "$2y$10$aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+  nat_gateway_mode = "per_az"
+  route53_zone_id = "Z0123456789"
+}"""
+            )
+        if case == "endpoints":
+            variables = (
+                variables[:-1]
+                + """
+  nat_gateway_mode = "none"
+  enable_vpc_endpoints = true
+}"""
             )
         runs = ""
         for phase, command in [("baseline", "apply"), ("current", "plan")]:
@@ -110,17 +147,18 @@ def prepare(repo, work, baseline):
         )
 
 
-def verify(log):
+def verify(log, repo):
     checked = set()
-    expected_moves = {
-        f"module.runtime.{kind}.{name}": f"{kind}.{name}"
-        for kind in [
-            "aws_ecs_task_definition",
-            "aws_ecs_service",
-            "aws_service_discovery_service",
-        ]
-        for name in ["rise", "traefik"]
+    destinations_by_path = {
+        path: dict(
+            re.findall(
+                r"from\s*=\s*(\S+)\s+to\s*=\s*(\S+)",
+                (repo / path / "moved.tf").read_text(),
+            )
+        )
+        for path in PATHS[:2]
     }
+    baseline_resources = {}
     e2e_fields = {
         "module.runtime.aws_ecs_task_definition.rise": {"container_definitions"},
         "module.runtime.aws_ecs_task_definition.traefik": {"container_definitions"},
@@ -138,16 +176,44 @@ def verify(log):
             and item["diagnostic"]["severity"] == "error"
         ):
             raise AssertionError(item["diagnostic"])
+        case = Path(item.get("@testfile", "")).name.split(".")[0]
+        if item.get("type") == "test_state" and item.get("@testrun") == "baseline":
+
+            def resources(module):
+                return [
+                    r for r in module.get("resources", []) if r["mode"] == "managed"
+                ] + [
+                    r
+                    for child in module.get("child_modules", [])
+                    for r in resources(child)
+                ]
+
+            baseline_resources[case] = resources(item["test_state"]["root_module"])
         if item.get("type") != "test_plan" or item.get("@testrun") != "current":
             continue
-        case = Path(item["@testfile"]).name.split(".")[0]
         changes = item["test_plan"]["resource_changes"]
         moves = {
             c["address"]: c["previous_address"]
             for c in changes
             if "previous_address" in c
         }
-        assert moves == expected_moves, (case, "incomplete state moves", moves)
+        destinations = destinations_by_path[PATHS[1] if case == "e2e" else PATHS[0]]
+        expected_moves = {}
+        for resource in baseline_resources[case]:
+            address = resource["address"]
+            base = address.split("[", 1)[0]
+            assert (
+                case == "e2e" or base in destinations or base.startswith("module.")
+            ), (case, "unmapped resource", address)
+            if base in destinations:
+                target = destinations[base] + address[len(base) :]
+                expected_moves[target] = address
+        assert moves == expected_moves, (
+            case,
+            "incomplete state moves",
+            moves,
+            expected_moves,
+        )
         for change in changes:
             address, delta = change["address"], change["change"]
             if delta["actions"] == ["no-op"]:
@@ -165,16 +231,21 @@ def verify(log):
                 if before.get(key) != after.get(key)
             }
             assert fields <= e2e_fields[address], (case, address, fields)
+        for name, delta in item["test_plan"].get("output_changes", {}).items():
+            assert delta["actions"] == ["no-op"], (case, "changed output", name)
         checked.add(case)
         print(
-            f"{case}: six state moves; "
+            f"{case}: {len(moves)} state moves; "
             + (
                 "only expected E2E task/service updates"
                 if case == "e2e"
                 else "no resource actions"
             )
         )
-    assert checked == {"nlb", "alb", "e2e"}, ("missing upgrade plans", checked)
+    assert checked == {"nlb", "alb", "brought", "dex", "endpoints", "e2e"}, (
+        "missing upgrade plans",
+        checked,
+    )
 
 
 def main():
@@ -185,7 +256,7 @@ def main():
     terraform = shutil.which("terraform")
     if not terraform:
         parser.error("terraform must be on PATH")
-    with tempfile.TemporaryDirectory(prefix="rise-runtime-upgrade-") as directory:
+    with tempfile.TemporaryDirectory(prefix="rise-ecs-upgrade-") as directory:
         work = Path(directory)
         prepare(repo, work, args.baseline_ref)
         run(
@@ -203,7 +274,15 @@ def main():
                 timeout=240,
                 check=False,
             )
-        verify(log)
+        try:
+            verify(log, repo)
+        except (AssertionError, KeyError):
+            with tempfile.NamedTemporaryFile(
+                prefix="rise-ecs-upgrade-failure-", suffix=".jsonl", delete=False
+            ) as saved:
+                saved.write(log.read_bytes())
+            print(f"Terraform diagnostics: {saved.name}")
+            raise
         assert result.returncode == 0, "Terraform upgrade test failed"
 
 

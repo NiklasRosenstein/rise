@@ -86,7 +86,6 @@ variable "secret_environment" {
   description = "ECS secret valueFrom references, keyed by environment-variable name."
   type        = map(string)
   default     = {}
-
 }
 
 variable "traefik" {

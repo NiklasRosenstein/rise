@@ -1,14 +1,14 @@
 resource "aws_ecs_cluster" "this" {
   count = local.create_cluster ? 1 : 0
 
-  name = local.name
+  name = var.name
 
   setting {
     name  = "containerInsights"
     value = var.enable_container_insights ? "enabled" : "disabled"
   }
 
-  tags = merge(local.tags, { Name = local.name })
+  tags = merge(var.tags, { Name = var.name })
 }
 
 resource "aws_ecs_cluster_capacity_providers" "this" {
@@ -28,45 +28,19 @@ resource "aws_ecs_cluster_capacity_providers" "this" {
 # group name onto every task definition it registers, so its absence is a
 # cluster-wide failure to start anything.
 resource "aws_cloudwatch_log_group" "this" {
-  name              = local.log_group_name
-  retention_in_days = var.log_retention_days
-  tags              = local.tags
+  name              = var.logging.name
+  retention_in_days = var.logging.retention_days
+  tags              = var.tags
 }
 
-# --- Cloud Map ---------------------------------------------------------------
-#
-# Used for the services *this module* runs, not by the reconciler: Cloud Map
-# registration for deployed workloads (ADR-0005 D10, cross-container discovery)
-# is not implemented, and multi-container deployments fail closed at deploy
-# time. It exists here because two internal URLs depend on stable names —
-# without it there is no address Traefik can call Rise at for forwardAuth.
+# Private discovery names connect the control plane, Traefik and optional Dex.
+# Workload discovery is owned by the deployment backend.
 
 resource "aws_service_discovery_private_dns_namespace" "this" {
   count = local.create_namespace ? 1 : 0
 
   name        = local.namespace_name
   description = "Internal service discovery for the Rise control plane"
-  vpc         = local.vpc_id
-  tags        = local.tags
-}
-
-
-
-resource "aws_service_discovery_service" "dex" {
-  count = var.deploy_dex ? 1 : 0
-
-  name = local.dex_discovery_name
-
-  dns_config {
-    namespace_id   = local.namespace_id
-    routing_policy = "MULTIVALUE"
-
-    dns_records {
-      type = "A"
-      ttl  = 10
-    }
-  }
-
-  force_destroy = true
-  tags          = local.tags
+  vpc         = var.vpc_id
+  tags        = var.tags
 }

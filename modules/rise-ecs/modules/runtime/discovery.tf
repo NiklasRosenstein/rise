@@ -35,4 +35,3 @@ resource "aws_service_discovery_service" "traefik" {
   force_destroy = true
   tags          = var.tags
 }
-

@@ -58,7 +58,6 @@ resource "aws_ecs_task_definition" "rise" {
   ])
 
   tags = var.tags
-
 }
 
 resource "aws_ecs_service" "rise" {

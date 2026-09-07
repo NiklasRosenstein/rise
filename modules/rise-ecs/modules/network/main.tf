@@ -5,18 +5,18 @@
 resource "aws_vpc" "this" {
   count = local.create_vpc ? 1 : 0
 
-  cidr_block           = var.vpc_cidr
+  cidr_block           = var.topology.cidr
   enable_dns_support   = true
   enable_dns_hostnames = true # Cloud Map private DNS needs both.
 
-  tags = merge(local.tags, { Name = local.name })
+  tags = merge(var.tags, { Name = var.name })
 }
 
 resource "aws_internet_gateway" "this" {
   count = local.create_vpc ? 1 : 0
 
   vpc_id = aws_vpc.this[0].id
-  tags   = merge(local.tags, { Name = local.name })
+  tags   = merge(var.tags, { Name = var.name })
 }
 
 # Keyed by AZ rather than counted by index: with count, adding or reordering an
@@ -27,9 +27,9 @@ resource "aws_subnet" "public" {
 
   vpc_id            = aws_vpc.this[0].id
   availability_zone = each.value
-  cidr_block        = cidrsubnet(var.vpc_cidr, 8, index(local.azs, each.value))
+  cidr_block        = cidrsubnet(var.topology.cidr, 8, index(local.azs, each.value))
 
-  tags = merge(local.tags, { Name = "${local.name}-public-${each.value}" })
+  tags = merge(var.tags, { Name = "${var.name}-public-${each.value}" })
 }
 
 # Deliberately large. Every Fargate task takes an ENI, and the cutover model
@@ -40,9 +40,9 @@ resource "aws_subnet" "private" {
 
   vpc_id            = aws_vpc.this[0].id
   availability_zone = each.value
-  cidr_block        = cidrsubnet(var.vpc_cidr, 4, index(local.azs, each.value) + 1)
+  cidr_block        = cidrsubnet(var.topology.cidr, 4, index(local.azs, each.value) + 1)
 
-  tags = merge(local.tags, { Name = "${local.name}-private-${each.value}" })
+  tags = merge(var.tags, { Name = "${var.name}-private-${each.value}" })
 }
 
 resource "aws_subnet" "database" {
@@ -55,9 +55,9 @@ resource "aws_subnet" "database" {
   # netnums 64..79 in /24 terms — a database /24 at netnum 64 would fall inside
   # it and `apply` would reject the overlap. Starting at 128 clears the private
   # range (which tops out at /24-equivalent 79) with room to spare.
-  cidr_block = cidrsubnet(var.vpc_cidr, 8, index(local.azs, each.value) + 128)
+  cidr_block = cidrsubnet(var.topology.cidr, 8, index(local.azs, each.value) + 128)
 
-  tags = merge(local.tags, { Name = "${local.name}-database-${each.value}" })
+  tags = merge(var.tags, { Name = "${var.name}-database-${each.value}" })
 }
 
 # --- Routing -----------------------------------------------------------------
@@ -66,7 +66,7 @@ resource "aws_route_table" "public" {
   count = local.create_vpc ? 1 : 0
 
   vpc_id = aws_vpc.this[0].id
-  tags   = merge(local.tags, { Name = "${local.name}-public" })
+  tags   = merge(var.tags, { Name = "${var.name}-public" })
 }
 
 resource "aws_route" "public_internet" {
@@ -87,7 +87,7 @@ resource "aws_route_table_association" "public" {
 resource "aws_eip" "nat" {
   count  = local.nat_gateway_count
   domain = "vpc"
-  tags   = merge(local.tags, { Name = "${local.name}-nat-${count.index}" })
+  tags   = merge(var.tags, { Name = "${var.name}-nat-${count.index}" })
 }
 
 resource "aws_nat_gateway" "this" {
@@ -95,7 +95,7 @@ resource "aws_nat_gateway" "this" {
 
   allocation_id = aws_eip.nat[count.index].id
   subnet_id     = aws_subnet.public[local.azs[count.index]].id
-  tags          = merge(local.tags, { Name = "${local.name}-${count.index}" })
+  tags          = merge(var.tags, { Name = "${var.name}-${count.index}" })
 
   depends_on = [aws_internet_gateway.this]
 }
@@ -106,7 +106,7 @@ resource "aws_route_table" "private" {
   for_each = local.create_vpc ? toset(local.azs) : toset([])
 
   vpc_id = aws_vpc.this[0].id
-  tags   = merge(local.tags, { Name = "${local.name}-private-${each.value}" })
+  tags   = merge(var.tags, { Name = "${var.name}-private-${each.value}" })
 }
 
 resource "aws_route" "private_nat" {
@@ -115,7 +115,7 @@ resource "aws_route" "private_nat" {
   route_table_id         = aws_route_table.private[each.value].id
   destination_cidr_block = "0.0.0.0/0"
   nat_gateway_id = aws_nat_gateway.this[
-    var.nat_gateway_mode == "per_az" ? index(local.azs, each.value) : 0
+    var.topology.nat_gateway_mode == "per_az" ? index(local.azs, each.value) : 0
   ].id
 }
 
@@ -130,7 +130,7 @@ resource "aws_route_table" "database" {
   count = local.create_vpc ? 1 : 0
 
   vpc_id = aws_vpc.this[0].id
-  tags   = merge(local.tags, { Name = "${local.name}-database" })
+  tags   = merge(var.tags, { Name = "${var.name}-database" })
 }
 
 resource "aws_route_table_association" "database" {
@@ -151,27 +151,27 @@ resource "aws_vpc_endpoint" "s3" {
   count = local.create_vpc ? 1 : 0
 
   vpc_id            = aws_vpc.this[0].id
-  service_name      = "com.amazonaws.${local.region}.s3"
+  service_name      = "com.amazonaws.${var.region}.s3"
   vpc_endpoint_type = "Gateway"
   route_table_ids = concat(
     [for rt in aws_route_table.private : rt.id],
     [aws_route_table.database[0].id]
   )
 
-  tags = merge(local.tags, { Name = "${local.name}-s3" })
+  tags = merge(var.tags, { Name = "${var.name}-s3" })
 }
 
 resource "aws_vpc_endpoint" "interface" {
-  for_each = local.create_vpc && var.enable_vpc_endpoints ? toset([
+  for_each = local.create_vpc && var.topology.enable_vpc_endpoints ? toset([
     "ecr.api", "ecr.dkr", "logs", "ssm", "secretsmanager", "sts", "kms", "elasticfilesystem"
   ]) : toset([])
 
   vpc_id              = aws_vpc.this[0].id
-  service_name        = "com.amazonaws.${local.region}.${each.value}"
+  service_name        = "com.amazonaws.${var.region}.${each.value}"
   vpc_endpoint_type   = "Interface"
   subnet_ids          = [for s in aws_subnet.private : s.id]
-  security_group_ids  = [aws_security_group.vpc_endpoints[0].id]
+  security_group_ids  = [var.endpoint_security_group_id]
   private_dns_enabled = true
 
-  tags = merge(local.tags, { Name = "${local.name}-${each.value}" })
+  tags = merge(var.tags, { Name = "${var.name}-${each.value}" })
 }

@@ -12,11 +12,11 @@ module "runtime" {
   network = {
     control_plane = {
       subnet_ids         = local.private_subnet_ids
-      security_group_ids = [aws_security_group.control_plane.id]
+      security_group_ids = [module.security.groups.control_plane]
     }
     traefik = {
       subnet_ids         = local.private_subnet_ids
-      security_group_ids = [aws_security_group.traefik.id]
+      security_group_ids = [module.security.groups.traefik]
     }
   }
   roles = {
@@ -25,7 +25,7 @@ module "runtime" {
     traefik       = local.traefik_task_role_arn
   }
   logging = {
-    group_name = aws_cloudwatch_log_group.this.name
+    group_name = module.cluster.logging.name
     region     = local.region
   }
   control_plane = {
@@ -50,22 +50,10 @@ module "runtime" {
   acme = {
     enabled         = local.acme_enabled
     email           = var.acme_email
-    file_system_id  = try(aws_efs_file_system.acme[0].id, null)
-    access_point_id = try(aws_efs_access_point.acme[0].id, null)
+    file_system_id  = module.ingress.acme.file_system_id
+    access_point_id = module.ingress.acme.access_point_id
   }
-  load_balancer_targets = { for port, group in aws_lb_target_group.traefik : port => group.arn }
+  load_balancer_targets = module.ingress.target_groups
   cpu_architecture      = var.cpu_architecture
   tags                  = local.tags
-
-  # Tasks need populated secrets, mounted storage, and attached target groups.
-  depends_on = [
-    aws_secretsmanager_secret_version.database_url,
-    aws_secretsmanager_secret_version.jwt_signing_secret,
-    aws_secretsmanager_secret_version.encryption_key,
-    aws_secretsmanager_secret_version.oidc_client_secret,
-    aws_lb_listener.http,
-    aws_lb_listener.https,
-    aws_lb_listener.alb_https,
-    aws_efs_mount_target.acme,
-  ]
 }

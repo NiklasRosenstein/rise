@@ -4,7 +4,7 @@
 # behind an unauthenticated dashboard.
 
 data "aws_iam_policy_document" "traefik_assume" {
-  count = local.create_traefik_task_role ? 1 : 0
+  count = var.traefik_role.create ? 1 : 0
 
   statement {
     effect = "Allow"
@@ -16,18 +16,18 @@ data "aws_iam_policy_document" "traefik_assume" {
     condition {
       test     = "StringEquals"
       variable = "aws:SourceAccount"
-      values   = [local.account_id]
+      values   = [var.traefik_role.account_id]
     }
   }
 }
 
 resource "aws_iam_role" "traefik" {
-  count = local.create_traefik_task_role ? 1 : 0
+  count = var.traefik_role.create ? 1 : 0
 
-  name               = "${local.name}-traefik"
+  name               = "${var.name}-traefik"
   description        = "Traefik ECS provider discovery"
   assume_role_policy = data.aws_iam_policy_document.traefik_assume[0].json
-  tags               = local.tags
+  tags               = var.tags
 }
 
 locals {
@@ -49,7 +49,7 @@ locals {
 }
 
 data "aws_iam_policy_document" "traefik" {
-  count = local.create_traefik_task_role ? 1 : 0
+  count = var.traefik_role.create ? 1 : 0
 
   statement {
     sid       = "DiscoverTasks"
@@ -73,7 +73,7 @@ data "aws_iam_policy_document" "traefik" {
 }
 
 resource "aws_iam_role_policy" "traefik" {
-  count = local.create_traefik_task_role ? 1 : 0
+  count = var.traefik_role.create ? 1 : 0
 
   name   = "discovery"
   role   = aws_iam_role.traefik[0].id

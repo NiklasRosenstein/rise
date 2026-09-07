@@ -177,5 +177,4 @@ resource "aws_ecs_service" "traefik" {
     # remains stable. A fresh ECS service registers its tasks again.
     replace_triggered_by = [aws_service_discovery_service.traefik]
   }
-
 }

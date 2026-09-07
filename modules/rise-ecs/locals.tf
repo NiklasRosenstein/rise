@@ -1,8 +1,3 @@
-# Every create-or-bring decision resolves here, and nowhere else. No resource in
-# this module refers to aws_vpc.this[0] or aws_ecs_cluster.this[0] directly —
-# they all go through these locals, which is what keeps "create it" and "use
-# mine" from forking the rest of the module.
-
 locals {
   region     = data.aws_region.current.region
   account_id = data.aws_caller_identity.current.account_id
@@ -14,42 +9,15 @@ locals {
     "rise.dev/module"              = "rise-ecs"
   }, var.tags)
 
-  azs = slice(data.aws_availability_zones.available.names, 0, var.availability_zone_count)
-
-  # --- VPC ------------------------------------------------------------------
-  create_vpc = var.vpc == null
-  vpc_id     = local.create_vpc ? aws_vpc.this[0].id : var.vpc.id
-
-  public_subnet_ids  = local.create_vpc ? [for s in aws_subnet.public : s.id] : var.vpc.public_subnet_ids
-  private_subnet_ids = local.create_vpc ? [for s in aws_subnet.private : s.id] : var.vpc.private_subnet_ids
-  database_subnet_ids = local.create_vpc ? [for s in aws_subnet.database : s.id] : (
-    length(var.vpc.database_subnet_ids) > 0 ? var.vpc.database_subnet_ids : var.vpc.private_subnet_ids
-  )
-
-  # Keyed by something statically known in both modes -- AZ name when the module
-  # creates the subnets, subnet id when they are brought. for_each cannot take
-  # keys that are only known after apply, and in create mode the ids are exactly
-  # that.
-  private_subnets_by_key = local.create_vpc ? {
-    for az in local.azs : az => aws_subnet.private[az].id
-    } : {
-    for id in var.vpc.private_subnet_ids : id => id
-  }
-
-  nat_gateway_count = local.create_vpc ? (
-    var.nat_gateway_mode == "per_az" ? var.availability_zone_count :
-    var.nat_gateway_mode == "single" ? 1 : 0
-  ) : 0
-
-  # --- Cluster --------------------------------------------------------------
-  create_cluster = var.cluster == null
-  cluster_name   = local.create_cluster ? aws_ecs_cluster.this[0].name : var.cluster.name
-  cluster_arn    = local.create_cluster ? aws_ecs_cluster.this[0].arn : data.aws_ecs_cluster.brought[0].arn
-
-  # --- Cloud Map ------------------------------------------------------------
-  create_namespace = var.cloud_map_namespace_id == null
-  namespace_name   = coalesce(var.cloud_map_namespace_name, "${local.name}.internal")
-  namespace_id     = local.create_namespace ? aws_service_discovery_private_dns_namespace.this[0].id : var.cloud_map_namespace_id
+  create_vpc          = var.vpc == null
+  vpc_id              = module.network.vpc.id
+  public_subnet_ids   = module.network.vpc.public_subnet_ids
+  private_subnet_ids  = module.network.vpc.private_subnet_ids
+  database_subnet_ids = module.network.vpc.database_subnet_ids
+  cluster_name        = module.cluster.cluster.name
+  cluster_arn         = module.cluster.cluster.arn
+  namespace_name      = coalesce(var.cloud_map_namespace_name, "${local.name}.internal")
+  namespace_id        = module.cluster.discovery.namespace_id
 
   control_plane_discovery_name = "${local.name}-control-plane"
   traefik_discovery_name       = "${local.name}-traefik"
@@ -73,8 +41,10 @@ locals {
   # --- Database -------------------------------------------------------------
   create_database = var.database_url_secret_arn == null
   database_url_secret_arn = local.create_database ? (
-    aws_secretsmanager_secret.database_url[0].arn
+    module.database.url_secret_arn
   ) : var.database_url_secret_arn
+
+  oidc_client_secret = coalesce(var.oidc_client_secret, "rise-backend-secret")
 
   # --- Identity -------------------------------------------------------------
   oidc_issuer = var.deploy_dex ? "https://dex.${var.ingress_domain}/dex" : var.oidc_issuer
@@ -84,7 +54,7 @@ locals {
     var.create_traefik_task_role,
     var.traefik_task_role_arn == null,
   )
-  traefik_task_role_arn = coalesce(var.traefik_task_role_arn, try(aws_iam_role.traefik[0].arn, null))
+  traefik_task_role_arn = module.ingress.traefik_role_arn
 
   log_group_name = coalesce(var.log_group_name, "/${local.name}")
   rise_image_ref = var.rise_image_ref != null ? var.rise_image_ref : (
@@ -97,9 +67,9 @@ locals {
 
   control_plane_builtin_secret_environment = merge({
     DATABASE_URL            = local.database_url_secret_arn
-    RISE_JWT_SIGNING_SECRET = aws_secretsmanager_secret.jwt_signing_secret.arn
-    RISE_ENCRYPTION_KEY     = aws_secretsmanager_secret.encryption_key.arn
-    OIDC_CLIENT_SECRET      = aws_secretsmanager_secret.oidc_client_secret.arn
+    RISE_JWT_SIGNING_SECRET = module.secrets.environment.RISE_JWT_SIGNING_SECRET
+    RISE_ENCRYPTION_KEY     = module.secrets.environment.RISE_ENCRYPTION_KEY
+    OIDC_CLIENT_SECRET      = module.secrets.environment.OIDC_CLIENT_SECRET
     }, var.control_plane_local_config_secret_arn == null ? {} : {
     RISE_LOCAL_CONFIG_YAML = var.control_plane_local_config_secret_arn
   })
@@ -130,11 +100,11 @@ module "control_plane_env" {
 
   cluster_name           = local.cluster_name
   subnet_ids             = local.private_subnet_ids
-  security_group_ids     = [aws_security_group.apps.id]
+  security_group_ids     = [module.security.groups.apps]
   assign_public_ip       = false
   execution_role_arn     = var.execution_role_arn
   workload_task_role_arn = local.workload_task_role_arn
-  log_group_name         = aws_cloudwatch_log_group.this.name
+  log_group_name         = module.cluster.logging.name
   log_retention_days     = var.log_retention_days
 
   auth_backend_url     = local.auth_backend_url

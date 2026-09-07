@@ -246,12 +246,27 @@ apply collides on the still-scheduled secret names).
 
 ## Layout
 
-`rise-aws` is a single `main.tf`; this module has roughly six times the resource
-count, so it is split by concern: `network.tf`, `security-groups.tf`,
-`cluster.tf`, `secrets.tf`, `database.tf`, `edge.tf`, `traefik.tf`, `rise.tf`,
-`dex.tf`. Every create-or-bring decision resolves in `locals.tf` and nowhere
-else — no resource refers to a counted resource directly, which is what keeps
-the two topologies from forking the module.
+`main.tf`, `runtime.tf` and `locals.tf` compose the install. The top level owns
+public inputs, installation-wide validation, configuration and outputs. Child
+modules receive typed dependencies and inherit the caller's providers.
 
-`tests/` holds `terraform test` suites covering both topologies and each
-guardrail. Run them with `mise run terraform:check`.
+| Child module | Responsibility |
+|---|---|
+| [`network`](modules/network) | VPC, subnets, routing, NAT and VPC endpoints |
+| [`cluster`](modules/cluster) | ECS cluster, private DNS namespace and logging |
+| [`security`](modules/security) | Service security groups and communication rules |
+| [`ingress`](modules/ingress) | Load balancer, listeners, target groups, DNS, ACME storage and Traefik IAM |
+| [`database`](modules/database) | PostgreSQL, credentials and database URL secret |
+| [`secrets`](modules/secrets) | Signing key, encryption key and OIDC secret |
+| [`dex`](modules/dex) | Optional demo identity provider |
+| [`runtime`](modules/runtime) | Rise and Traefik task definitions, services and discovery |
+| [`control-plane-env`](modules/control-plane-env) | Backend environment and routing labels |
+
+The security module keeps communication rules together. Network outputs expose
+VPC and subnet identities independently of endpoint creation, so security groups
+and endpoints can be composed without a dependency cycle. Ingress and secret
+outputs carry the readiness dependencies required before ECS starts tasks.
+
+`tests/` covers the public interface and installation guardrails; child tests
+cover component behavior. Run `mise run terraform:check` for formatting,
+validation, unit tests and isolated state-upgrade checks.

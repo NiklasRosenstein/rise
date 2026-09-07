@@ -4,10 +4,10 @@
 # Traefik would have to admit the ingress CIDRs directly.
 
 resource "aws_security_group" "edge" {
-  name        = "${local.name}-edge"
+  name        = "${var.name}-edge"
   description = "Rise edge load balancer"
-  vpc_id      = local.vpc_id
-  tags        = merge(local.tags, { Name = "${local.name}-edge" })
+  vpc_id      = var.network.vpc_id
+  tags        = merge(var.tags, { Name = "${var.name}-edge" })
 }
 
 resource "aws_vpc_security_group_ingress_rule" "edge_http" {
@@ -44,10 +44,10 @@ resource "aws_vpc_security_group_egress_rule" "edge_to_traefik" {
 }
 
 resource "aws_security_group" "traefik" {
-  name        = "${local.name}-traefik"
+  name        = "${var.name}-traefik"
   description = "Rise ingress router"
-  vpc_id      = local.vpc_id
-  tags        = merge(local.tags, { Name = "${local.name}-traefik" })
+  vpc_id      = var.network.vpc_id
+  tags        = merge(var.tags, { Name = "${var.name}-traefik" })
 }
 
 resource "aws_vpc_security_group_ingress_rule" "traefik_from_edge" {
@@ -81,10 +81,10 @@ resource "aws_vpc_security_group_egress_rule" "traefik_all" {
 }
 
 resource "aws_security_group" "control_plane" {
-  name        = "${local.name}-control-plane"
+  name        = "${var.name}-control-plane"
   description = "Rise control plane"
-  vpc_id      = local.vpc_id
-  tags        = merge(local.tags, { Name = "${local.name}-control-plane" })
+  vpc_id      = var.network.vpc_id
+  tags        = merge(var.tags, { Name = "${var.name}-control-plane" })
 }
 
 # Public control-plane traffic and forwardAuth use 3000. Traefik pulls the
@@ -109,10 +109,10 @@ resource "aws_vpc_security_group_egress_rule" "control_plane_all" {
 # RISE_ECS_SECURITY_GROUPS names. Per-group network isolation, tracked as a gap
 # on the ECS backend, is the feature that would subdivide it.
 resource "aws_security_group" "apps" {
-  name        = "${local.name}-apps"
+  name        = "${var.name}-apps"
   description = "Rise deployed workloads"
-  vpc_id      = local.vpc_id
-  tags        = merge(local.tags, { Name = "${local.name}-apps" })
+  vpc_id      = var.network.vpc_id
+  tags        = merge(var.tags, { Name = "${var.name}-apps" })
 }
 
 resource "aws_vpc_security_group_ingress_rule" "apps_from_traefik" {
@@ -132,10 +132,10 @@ resource "aws_vpc_security_group_egress_rule" "apps_all" {
 }
 
 resource "aws_security_group" "database" {
-  name        = "${local.name}-database"
+  name        = "${var.name}-database"
   description = "Rise control-plane database"
-  vpc_id      = local.vpc_id
-  tags        = merge(local.tags, { Name = "${local.name}-database" })
+  vpc_id      = var.network.vpc_id
+  tags        = merge(var.tags, { Name = "${var.name}-database" })
 }
 
 # Only the control plane. Deployed workloads get their own databases through the
@@ -150,16 +150,16 @@ resource "aws_vpc_security_group_ingress_rule" "database_from_control_plane" {
 }
 
 resource "aws_security_group" "efs" {
-  count = local.acme_enabled ? 1 : 0
+  count = var.acme_enabled ? 1 : 0
 
-  name        = "${local.name}-efs"
+  name        = "${var.name}-efs"
   description = "Traefik ACME certificate store"
-  vpc_id      = local.vpc_id
-  tags        = merge(local.tags, { Name = "${local.name}-efs" })
+  vpc_id      = var.network.vpc_id
+  tags        = merge(var.tags, { Name = "${var.name}-efs" })
 }
 
 resource "aws_vpc_security_group_ingress_rule" "efs_from_traefik" {
-  count = local.acme_enabled ? 1 : 0
+  count = var.acme_enabled ? 1 : 0
 
   security_group_id            = aws_security_group.efs[0].id
   referenced_security_group_id = aws_security_group.traefik.id
@@ -170,16 +170,16 @@ resource "aws_vpc_security_group_ingress_rule" "efs_from_traefik" {
 }
 
 resource "aws_security_group" "vpc_endpoints" {
-  count = local.create_vpc && var.enable_vpc_endpoints ? 1 : 0
+  count = var.network.create_endpoints ? 1 : 0
 
-  name        = "${local.name}-vpc-endpoints"
+  name        = "${var.name}-vpc-endpoints"
   description = "Interface endpoints for AWS services"
-  vpc_id      = local.vpc_id
-  tags        = merge(local.tags, { Name = "${local.name}-vpc-endpoints" })
+  vpc_id      = var.network.vpc_id
+  tags        = merge(var.tags, { Name = "${var.name}-vpc-endpoints" })
 }
 
 resource "aws_vpc_security_group_ingress_rule" "vpc_endpoints_from_tasks" {
-  for_each = local.create_vpc && var.enable_vpc_endpoints ? {
+  for_each = var.network.create_endpoints ? {
     traefik       = aws_security_group.traefik.id
     control_plane = aws_security_group.control_plane.id
     apps          = aws_security_group.apps.id
@@ -196,10 +196,10 @@ resource "aws_vpc_security_group_ingress_rule" "vpc_endpoints_from_tasks" {
 resource "aws_security_group" "dex" {
   count = var.deploy_dex ? 1 : 0
 
-  name        = "${local.name}-dex"
+  name        = "${var.name}-dex"
   description = "Demo identity provider"
-  vpc_id      = local.vpc_id
-  tags        = merge(local.tags, { Name = "${local.name}-dex" })
+  vpc_id      = var.network.vpc_id
+  tags        = merge(var.tags, { Name = "${var.name}-dex" })
 }
 
 resource "aws_vpc_security_group_ingress_rule" "dex_from_traefik" {
@@ -228,11 +228,11 @@ resource "aws_vpc_security_group_egress_rule" "dex_all" {
 # the NAT addresses explicitly.
 resource "aws_vpc_security_group_ingress_rule" "edge_from_nat" {
   for_each = var.deploy_dex ? {
-    for idx, eip in aws_eip.nat : idx => eip
+    for idx, ip in var.network.nat_public_ips : idx => ip
   } : {}
 
   security_group_id = aws_security_group.edge.id
-  cidr_ipv4         = "${each.value.public_ip}/32"
+  cidr_ipv4         = "${each.value}/32"
   from_port         = 443
   to_port           = 443
   ip_protocol       = "tcp"

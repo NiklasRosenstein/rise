@@ -24,7 +24,7 @@ output "database_subnet_ids" {
 
 output "apps_security_group_id" {
   description = "Security group deployed workloads run in — the value of deployment_controller.security_groups."
-  value       = aws_security_group.apps.id
+  value       = module.security.groups.apps
 }
 
 # -----------------------------------------------------------------------------
@@ -48,7 +48,7 @@ output "cloud_map_namespace_name" {
 
 output "log_group_name" {
   description = "CloudWatch log group carrying control-plane and workload logs."
-  value       = aws_cloudwatch_log_group.this.name
+  value       = module.cluster.logging.name
 }
 
 output "rise_service_name" {
@@ -67,7 +67,7 @@ output "traefik_service_name" {
 
 output "load_balancer_dns_name" {
   description = "DNS name of the edge load balancer."
-  value       = aws_lb.this.dns_name
+  value       = module.ingress.load_balancer.dns_name
 }
 
 output "public_url" {
@@ -82,8 +82,8 @@ output "dns_records_required" {
     <project>.<domain>, and groups and environments add another label.
   EOT
   value = var.route53_zone_id != null ? [] : [
-    "${var.ingress_domain}    ALIAS/CNAME -> ${aws_lb.this.dns_name}",
-    "*.${var.ingress_domain}  ALIAS/CNAME -> ${aws_lb.this.dns_name}",
+    "${var.ingress_domain}    ALIAS/CNAME -> ${module.ingress.load_balancer.dns_name}",
+    "*.${var.ingress_domain}  ALIAS/CNAME -> ${module.ingress.load_balancer.dns_name}",
   ]
 }
 
@@ -114,9 +114,9 @@ output "secret_arns_for_execution_role" {
   EOT
   value = concat([
     local.database_url_secret_arn,
-    aws_secretsmanager_secret.jwt_signing_secret.arn,
-    aws_secretsmanager_secret.encryption_key.arn,
-    aws_secretsmanager_secret.oidc_client_secret.arn,
+    module.secrets.environment.RISE_JWT_SIGNING_SECRET,
+    module.secrets.environment.RISE_ENCRYPTION_KEY,
+    module.secrets.environment.OIDC_CLIENT_SECRET,
     ], var.repository_credentials_secret_arn == null ? [] : [
     var.repository_credentials_secret_arn,
     ], var.control_plane_local_config_secret_arn == null ? [] : [
@@ -126,7 +126,7 @@ output "secret_arns_for_execution_role" {
 
 output "database_endpoint" {
   description = "Control-plane database endpoint, when the module created one."
-  value       = local.create_database ? aws_db_instance.this[0].endpoint : null
+  value       = local.create_database ? module.database.endpoint : null
 }
 
 output "rise_config" {
@@ -137,11 +137,11 @@ output "rise_config" {
       region                  = local.region
       cluster                 = local.cluster_name
       subnets                 = local.private_subnet_ids
-      security_groups         = [aws_security_group.apps.id]
+      security_groups         = [module.security.groups.apps]
       assign_public_ip        = false
       execution_role_arn      = var.execution_role_arn
       task_role_arn           = local.workload_task_role_arn
-      log_group               = aws_cloudwatch_log_group.this.name
+      log_group               = module.cluster.logging.name
       resource_prefix         = var.resource_prefix
       ssm_parameter_prefix    = var.ssm_parameter_prefix
       ssm_kms_key_id          = var.ssm_kms_key_arn
