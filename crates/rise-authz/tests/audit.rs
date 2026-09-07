@@ -542,6 +542,22 @@ async fn selector_matches_nothing_positive_and_negative() {
         }),
     );
 
+    // Scenario F: a dynamic-subject binding selecting on a key nobody sets.
+    // The seeded ownership binding has exactly this shape on a fresh install,
+    // so it is reported at `Info`, not `Warning`.
+    builder.binding(
+        PLATFORM_ROLE_BINDING,
+        "template-unmatched",
+        None,
+        json!({
+            "subject": "${ref.subject}",
+            "subjectMembership": "ResourceOrganization",
+            "scope": "*",
+            "labelSelector": { "key": "rise.dev/owner" },
+            "roleRef": { "kind": "PlatformRole", "name": "everything" }
+        }),
+    );
+
     let store = builder.build();
     let engine = engine(store, FakeMemberships::none());
 
@@ -550,10 +566,23 @@ async fn selector_matches_nothing_positive_and_negative() {
     flagged.sort_unstable();
     assert_eq!(
         flagged,
-        vec!["outside-scope", "value-mismatch"],
+        vec!["outside-scope", "template-unmatched", "value-mismatch"],
         "{:#?}",
         report.findings
     );
+    let severity_of = |name: &str| {
+        report
+            .findings
+            .iter()
+            .find(|finding| {
+                finding.category == FindingCategory::SelectorMatchesNothing
+                    && finding.subject.name == name
+            })
+            .map(|finding| finding.severity)
+            .unwrap()
+    };
+    assert_eq!(severity_of("outside-scope"), Severity::Warning);
+    assert_eq!(severity_of("template-unmatched"), Severity::Info);
 }
 
 #[tokio::test]
