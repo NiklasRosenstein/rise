@@ -92,6 +92,14 @@ pub struct AppState {
     /// users/teams/projects with the configured default Organization.
     #[cfg(feature = "backend")]
     pub default_organization_uid: uuid::Uuid,
+    /// Configured name of the default Organization (`default_organization.name`
+    /// in settings). The generic resource API's policy-audit listing uses this
+    /// to downgrade that Organization's `OrganizationWithoutAdmin` finding to
+    /// `info`: it is administered by operators through the seeded
+    /// `system-admin` binding, not a per-organization admin (ADR-0001 audit
+    /// decision D4).
+    #[cfg(feature = "backend")]
+    pub default_organization_name: String,
     /// `controller_class_name` for the configured Kubernetes deployment
     /// controller. The webhook only reconciles projects whose Organization's
     /// `spec.deploymentControllerClass` matches this value. `None` when no
@@ -863,6 +871,8 @@ impl AppState {
                 .context("Default-Organization bootstrap failed")?;
         #[cfg(feature = "backend")]
         let default_organization_uid = bootstrap_outcome.default_organization_uid;
+        #[cfg(feature = "backend")]
+        let default_organization_name = settings.default_organization.name.clone();
 
         // Initialize JWT validator (JWKS is fetched on-demand)
         let jwt_validator = Arc::new(JwtValidator::new(settings.server.ssrf.clone()));
@@ -2013,6 +2023,8 @@ impl AppState {
             resource_authorizer,
             #[cfg(feature = "backend")]
             default_organization_uid,
+            #[cfg(feature = "backend")]
+            default_organization_name,
             #[cfg(feature = "backend")]
             deployment_controller_class_name,
             #[cfg(feature = "backend")]
