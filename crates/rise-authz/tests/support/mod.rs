@@ -311,8 +311,36 @@ impl ResourceStore for FakeStore {
     async fn list_deletion_blockers(&self, _: Uuid) -> Result<DeletionBlockerReport, StoreError> {
         unimplemented!("unused by the engine")
     }
-    async fn resolve_path(&self, _: &[PathSegment]) -> Result<Vec<ResourceRow>, StoreError> {
-        unimplemented!("unused by the engine")
+    /// Mirrors the Postgres store's per-segment walk: each segment is matched
+    /// by kind, name, and the previous segment's UID as parent. Tombstoned
+    /// rows are returned rather than skipped, exactly like the real store —
+    /// interpreting them is the caller's job.
+    async fn resolve_path(&self, segments: &[PathSegment]) -> Result<Vec<ResourceRow>, StoreError> {
+        if segments.is_empty() {
+            return Err(StoreError::EmptyPath);
+        }
+        let mut chain = Vec::with_capacity(segments.len());
+        let mut parent_uid: Option<Uuid> = None;
+        for (idx, segment) in segments.iter().enumerate() {
+            let row = match segment {
+                PathSegment::Name { kind, name, .. } => self.rows.iter().find(|row| {
+                    row.kind == *kind && row.name == *name && row.parent_uid == parent_uid
+                }),
+                PathSegment::Uid { kind, uid, .. } => self.rows.iter().find(|row| {
+                    row.uid == *uid && row.kind == *kind && row.parent_uid == parent_uid
+                }),
+            };
+            let Some(row) = row else {
+                return Err(if idx + 1 == segments.len() {
+                    StoreError::NotFound
+                } else {
+                    StoreError::ParentNotFound
+                });
+            };
+            parent_uid = Some(row.uid);
+            chain.push(row.clone());
+        }
+        Ok(chain)
     }
     async fn operator_update_status(
         &self,

@@ -1337,6 +1337,15 @@ async fn tombstoned_bindings_and_dangling_role_refs_contribute_nothing() {
         policy.contributions().is_empty(),
         "a dangling reference resolves to no statements rather than an error"
     );
+    assert_eq!(
+        policy.inert_bindings().len(),
+        1,
+        "only the live, dangling binding is reported; the tombstoned one is never loaded"
+    );
+    assert_eq!(
+        policy.inert_bindings()[0].reason,
+        InertReason::DanglingRoleRef
+    );
 }
 
 #[tokio::test]
