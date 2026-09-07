@@ -929,13 +929,23 @@ pub async fn detect_selector_matches_nothing(
             Some(value) => format!("value '{value}'"),
             None => "any value".to_owned(),
         };
+        // A dynamic-subject binding exists to wait for labels: the seeded
+        // `resource-owner` binding matches nothing on a fresh install by
+        // design, and starts mattering the moment a resource is labelled. A
+        // literal subject selecting on a key nobody sets is the shape worth a
+        // warning.
+        let severity = if binding.subject.is_dynamic() {
+            Severity::Info
+        } else {
+            Severity::Warning
+        };
         findings.push(AuditFinding {
             subject: binding_subject(binding),
             category: FindingCategory::SelectorMatchesNothing,
-            severity: Severity::Warning,
+            severity,
             related: Vec::new(),
             detail: format!(
-                "labelSelector key '{}' ({value_clause}) matches no resource in scope '{}'; the binding grants nothing.",
+                "labelSelector key '{}' ({value_clause}) matches no resource in scope '{}'; the binding currently grants nothing.",
                 selector.key, binding.scope,
             ),
         });
