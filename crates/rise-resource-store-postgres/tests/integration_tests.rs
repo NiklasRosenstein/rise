@@ -1,7 +1,7 @@
 use rise_resource_api::{
-    CreateResourceParams, DeleteOutcome, ExternalSubject, Issuer, NoOpValidator, OwnerReference,
-    PathSegment, ResourceApi, ResourceRow, ResourceStore, StoreError, UpdateResourceParams,
-    API_VERSION_V1ALPHA1, CASCADE_DELETION_FINALIZER, CONTROLLER_KIND,
+    CreateResourceParams, DeleteOutcome, ExternalSubject, Issuer, LabelKey, NoOpValidator,
+    OwnerReference, PathSegment, ResourceApi, ResourceRow, ResourceStore, StoreError,
+    UpdateResourceParams, API_VERSION_V1ALPHA1, CASCADE_DELETION_FINALIZER, CONTROLLER_KIND,
     CONTROLLER_TRUST_POLICY_KIND, GROUP_KIND, GROUP_MEMBERSHIP_KIND, IDENTITY_KIND_DEFINITIONS,
     ORGANIZATION_KIND, PLATFORM_ROLE_BINDING_KIND, PLATFORM_ROLE_KIND, POLICY_KIND_DEFINITIONS,
     RESOURCE_DEFINITION_KIND, ROLE_BINDING_KIND, ROLE_KIND, SERVICE_ACCOUNT_KIND,
@@ -5806,6 +5806,133 @@ async fn label_inheriting_descendants_of_an_unknown_uid_are_empty(
         .await
         .unwrap()
         .is_empty());
+    Ok(())
+}
+
+// -----------------------------------------------------------------------------
+// The audit's label-backed detectors — `list_label_setters`
+// -----------------------------------------------------------------------------
+
+/// The complement of `label_inheriting_descendants`: every live resource that
+/// sets a key itself, any kind, unaffected by a value it does not carry, a
+/// tombstone, or a different key.
+#[sqlx::test]
+async fn list_label_setters_finds_every_live_setter_of_the_key(
+    pool: sqlx::PgPool,
+) -> sqlx::Result<()> {
+    let store = PgResourceStore::new(pool);
+    register_org_widget_rd(&store).await;
+    let key: LabelKey = "rise.dev/owner".parse().unwrap();
+
+    // A root kind (Organization) and a child kind (OrgWidget) both count: the
+    // primitive is kind-agnostic.
+    let acme = create_labeled(
+        &store,
+        ORGANIZATION_KIND,
+        "acme",
+        None,
+        &[("rise.dev/owner", "user:alice")],
+    )
+    .await;
+    let widget = create_labeled(
+        &store,
+        "OrgWidget",
+        "with-owner",
+        Some(acme.uid),
+        &[("rise.dev/owner", "user:bob")],
+    )
+    .await;
+    // Neither is a setter: one carries no labels, the other carries a
+    // different key.
+    let _no_labels = create_labeled(&store, "OrgWidget", "bare", Some(acme.uid), &[]).await;
+    let _other_key = create_labeled(
+        &store,
+        "OrgWidget",
+        "unrelated",
+        Some(acme.uid),
+        &[("rise.dev/team", "group:x")],
+    )
+    .await;
+
+    let found = store.list_label_setters(&key, 100).await.unwrap();
+    let uids: Vec<Uuid> = found.iter().map(|row| row.uid).collect();
+    assert_eq!(uids.len(), 2);
+    assert!(uids.contains(&acme.uid));
+    assert!(uids.contains(&widget.uid));
+
+    Ok(())
+}
+
+/// A tombstoned setter is excluded — unlike `label_inheriting_descendants`,
+/// which deliberately keeps a draining resource's inherited authority visible,
+/// a tombstoned row is no longer a live grant of anything and must not name
+/// anybody as an owner or satisfy a selector.
+#[sqlx::test]
+async fn list_label_setters_excludes_tombstoned_rows(pool: sqlx::PgPool) -> sqlx::Result<()> {
+    let store = PgResourceStore::new(pool);
+    register_org_widget_rd(&store).await;
+    let key: LabelKey = "rise.dev/owner".parse().unwrap();
+
+    let acme = create_labeled(&store, ORGANIZATION_KIND, "acme", None, &[]).await;
+    let draining = create_labeled(
+        &store,
+        "OrgWidget",
+        "draining",
+        Some(acme.uid),
+        &[("rise.dev/owner", "user:alice")],
+    )
+    .await;
+    // A finalizer keeps the row present as a tombstone rather than hard-deleting.
+    store
+        .operator_update_finalizers(draining.uid, "test", &["example.dev/hold".to_string()], &[])
+        .await
+        .unwrap();
+    store.delete(draining.uid).await.unwrap();
+    let tombstoned = store.get(draining.uid).await.unwrap().unwrap();
+    assert!(tombstoned.deletion_timestamp.is_some());
+
+    let found = store.list_label_setters(&key, 100).await.unwrap();
+    assert!(!found.iter().any(|row| row.uid == draining.uid));
+
+    Ok(())
+}
+
+/// `limit` bounds the read, and a caller that pages with an increasing limit
+/// sees a stable, growing prefix — the oldest-first contract, checked without
+/// depending on exact timestamp resolution between two `create` calls.
+#[sqlx::test]
+async fn list_label_setters_respects_the_limit(pool: sqlx::PgPool) -> sqlx::Result<()> {
+    let store = PgResourceStore::new(pool);
+    let key: LabelKey = "rise.dev/owner".parse().unwrap();
+
+    let mut created = Vec::new();
+    for i in 0..5 {
+        created.push(
+            create_labeled(
+                &store,
+                ORGANIZATION_KIND,
+                &format!("org-{i}"),
+                None,
+                &[("rise.dev/owner", "user:alice")],
+            )
+            .await
+            .uid,
+        );
+    }
+
+    let capped = store.list_label_setters(&key, 2).await.unwrap();
+    assert_eq!(capped.len(), 2);
+    let full = store.list_label_setters(&key, 100).await.unwrap();
+    assert_eq!(full.len(), 5);
+
+    let capped_uids: Vec<Uuid> = capped.iter().map(|row| row.uid).collect();
+    let full_uids: Vec<Uuid> = full.iter().map(|row| row.uid).collect();
+    assert_eq!(
+        capped_uids,
+        full_uids[..2],
+        "a smaller limit returns a prefix of the unlimited result"
+    );
+
     Ok(())
 }
 
