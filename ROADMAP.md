@@ -107,7 +107,7 @@ Status legend: `[x]` shipped · `[~]` in progress · `[ ]` planned.
   paths run it inside the `SERIALIZABLE` transaction that performs the mutation,
   replaying the whole operation on a serialization failure. A cascading delete's
   effect on policy resources beneath the deleted resource is not yet diffed.
-- [~] Seed immutable/healable `system-admin` and platform `resource-owner`
+- [x] Seed immutable/healable `system-admin` and platform `resource-owner`
   Roles, plus an operator-editable global `PlatformRole/org-admin` baseline.
   Organization creation atomically creates an exact org-root, scope-only
   `RoleBinding` from that role to an operator-selected existing User. That
@@ -115,7 +115,8 @@ Status legend: `[x]` shipped · `[~]` in progress · `[ ]` planned.
   Group is required and no Group name has implicit authorization meaning. The
   five baseline resources are seeded at startup and the operator pair is
   immutable through the store; atomic Organization-plus-admin-binding creation
-  remains open.
+  is available on an Organization create via `bootstrap.admin`, in the same
+  transaction and rolled back together on failure.
 - [ ] Add conformance coverage for every applicable ADR-0001 acceptance
   scenario, including multi-org admins, membership removal, UID-bound token
   invalidation, token caps, and grant/revocation races.
