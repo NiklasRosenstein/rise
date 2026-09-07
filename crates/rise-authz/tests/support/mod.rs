@@ -19,8 +19,8 @@ use rise_authz::engine::{
 };
 use rise_resource_api::{
     CollectionInfo, CreateResourceParams, DeleteOutcome, DeletionBlockerReport, NoOpValidator,
-    PathSegment, ResourceApi, ResourceParentRef, ResourceRow, ResourceStore, StoreError, SubjectId,
-    UpdateResourceParams, API_VERSION_V1ALPHA1,
+    PathSegment, PathWalk, ResourceApi, ResourceParentRef, ResourceRow, ResourceStore, StoreError,
+    SubjectId, UpdateResourceParams, API_VERSION_V1ALPHA1,
 };
 use uuid::Uuid;
 
@@ -311,36 +311,22 @@ impl ResourceStore for FakeStore {
     async fn list_deletion_blockers(&self, _: Uuid) -> Result<DeletionBlockerReport, StoreError> {
         unimplemented!("unused by the engine")
     }
-    /// Mirrors the Postgres store's per-segment walk: each segment is matched
-    /// by kind, name, and the previous segment's UID as parent. Tombstoned
-    /// rows are returned rather than skipped, exactly like the real store —
-    /// interpreting them is the caller's job.
     async fn resolve_path(&self, segments: &[PathSegment]) -> Result<Vec<ResourceRow>, StoreError> {
-        if segments.is_empty() {
-            return Err(StoreError::EmptyPath);
-        }
-        let mut chain = Vec::with_capacity(segments.len());
-        let mut parent_uid: Option<Uuid> = None;
-        for (idx, segment) in segments.iter().enumerate() {
+        let mut walk = PathWalk::new(segments)?;
+        while let Some((segment, parent)) = walk.pending() {
             let row = match segment {
-                PathSegment::Name { kind, name, .. } => self.rows.iter().find(|row| {
-                    row.kind == *kind && row.name == *name && row.parent_uid == parent_uid
-                }),
-                PathSegment::Uid { kind, uid, .. } => self.rows.iter().find(|row| {
-                    row.uid == *uid && row.kind == *kind && row.parent_uid == parent_uid
-                }),
+                PathSegment::Name { kind, name, .. } => self
+                    .rows
+                    .iter()
+                    .find(|row| row.kind == *kind && row.name == *name && row.parent_uid == parent)
+                    .cloned(),
+                PathSegment::Uid { uid, .. } => {
+                    self.rows.iter().find(|row| row.uid == *uid).cloned()
+                }
             };
-            let Some(row) = row else {
-                return Err(if idx + 1 == segments.len() {
-                    StoreError::NotFound
-                } else {
-                    StoreError::ParentNotFound
-                });
-            };
-            parent_uid = Some(row.uid);
-            chain.push(row.clone());
+            walk.advance(row)?;
         }
-        Ok(chain)
+        Ok(walk.finish())
     }
     async fn operator_update_status(
         &self,
