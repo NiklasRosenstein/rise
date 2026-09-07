@@ -34,7 +34,8 @@ use crate::policy::{
 };
 
 pub use audit::{
-    AuditFinding, AuditReport, AuditScope, FindingCategory, FindingSubject, Severity, Shadow,
+    AuditFinding, AuditReport, AuditScanned, AuditScope, FindingCategory, FindingSubject, Severity,
+    Shadow,
 };
 pub use bindings::{BindingKind, BindingProvenance, RoleReference};
 pub use gate::{
