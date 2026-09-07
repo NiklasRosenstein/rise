@@ -25,9 +25,10 @@ use rise_authz::engine::{ListCandidate, ListDecision, ResourceTree};
 use rise_resource_api::NoOpValidator;
 use rise_resource_api::{
     CollectionInfo, CreateResourceParams, CreateResourceRequest, DeleteOutcome, PathSegment,
-    ResourceRow, ResourceStore, RoleRefKind, SubresourceName, UpdateResourceParams,
-    UpdateResourceRequest, Verb, CASCADE_DELETION_FINALIZER, MAX_PARENT_CHAIN_DEPTH,
-    PLATFORM_ROLE_BINDING_KIND, ROLE_BINDING_KIND,
+    ResourceRow, ResourceStore, RoleRefKind, StoreError, SubresourceName, UpdateResourceParams,
+    UpdateResourceRequest, Verb, API_VERSION_V1ALPHA1, CASCADE_DELETION_FINALIZER,
+    MAX_PARENT_CHAIN_DEPTH, ORGANIZATION_KIND, ORG_ADMIN_PLATFORM_ROLE, PLATFORM_ROLE_BINDING_KIND,
+    ROLE_BINDING_KIND,
 };
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -1842,6 +1843,24 @@ async fn create_resource(
         )));
     }
 
+    // `bootstrap` reads only the request too: whether it is even meaningful
+    // here, and whether the admin it names is shaped like one, are both facts
+    // about the request alone, not about anything already stored.
+    if let Some(bootstrap) = &body.bootstrap {
+        if resolved.info.kind != ORGANIZATION_KIND || body.api_version != API_VERSION_V1ALPHA1 {
+            return Err(ServerError::bad_request(
+                "bootstrap is only supported when creating a rise.dev/v1alpha1 Organization",
+            ));
+        }
+        if bootstrap.admin.kind() != "user" {
+            return Err(ServerError::bad_request(format!(
+                "bootstrap.admin must be a 'user:<name>' subject, got '{}'",
+                bootstrap.admin
+            )));
+        }
+    }
+    let bootstrap = body.bootstrap.clone();
+
     // A create is authorized against the resource it would produce, labels
     // included: nothing in evaluation distinguishes a resource that exists from
     // one being written (ADR-0001 §4).
@@ -1923,6 +1942,11 @@ async fn create_resource(
 
     audit_write(authz, &row, "resource.created", None);
     let _ = ctx;
+
+    if let Some(bootstrap) = bootstrap {
+        bootstrap_org_admin(authz, &row, &bootstrap.admin).await?;
+    }
+
     // Projected like every other write: a `create` grant is not a read grant,
     // and the stored row carries more than the caller sent — the server-assigned
     // UID, and for a policy kind the contextual normalization admission applied
@@ -1931,6 +1955,93 @@ async fn create_resource(
     let mut response = (StatusCode::CREATED, Json(body)).into_response();
     attach_binding_write_warnings(authz, &row, &mut response).await;
     Ok(response)
+}
+
+/// Bootstrap a new Organization's first administrator, in the same
+/// transaction as the Organization create.
+///
+/// Builds an exact org-root, scope-only `RoleBinding` naming
+/// `PlatformRole/org-admin` for `admin` (ADR-0001 §5's structural admin
+/// predicate) and runs it through the same authorization pipeline an ordinary
+/// `RoleBinding` create would: `require_create`, the grant gate, admission,
+/// and the audit trail. A refusal or a validation failure (the admin names no
+/// live User, or `org-admin` has been deleted) propagates out of
+/// `create_resource` and rolls the whole attempt back — the Organization is
+/// never left without the admin the caller asked to bootstrap alongside it.
+async fn bootstrap_org_admin(
+    authz: &AuthorizationContext,
+    org: &ResourceRow,
+    admin: &rise_resource_api::SubjectId,
+) -> Result<(), ServerError> {
+    let binding_collection = authz
+        .store()
+        .resolve_collection_by_kind(rise_resource_api::API_GROUP, ROLE_BINDING_KIND)
+        .await
+        .map_err(store_error_to_server_error)?
+        .ok_or_else(|| {
+            ServerError::internal("RoleBinding collection is not registered".to_owned())
+        })?;
+
+    let binding_name = format!("org-admin-{}", admin.name());
+    let spec = serde_json::json!({
+        "subject": admin.to_string(),
+        "scope": format!("rise.dev/Organization/{}", org.name),
+        "roleRef": { "kind": "PlatformRole", "name": ORG_ADMIN_PLATFORM_ROLE },
+    });
+
+    let leaf = node_for_new(
+        &binding_collection.storage_api_version,
+        ROLE_BINDING_KIND,
+        &binding_name,
+        &BTreeMap::new(),
+    )?;
+    let org_tree = authz.tree(org.uid).await.map_err(mask_not_found)?;
+    let target = ResourceTree::with_leaf(org_tree.nodes(), leaf);
+    authz.require_create(&target, Some(&org_tree)).await?;
+
+    let changes = change_for_create(
+        authz,
+        &binding_collection.storage_api_version,
+        ROLE_BINDING_KIND,
+        &binding_name,
+        Some(org),
+        &spec,
+    )
+    .await?;
+    run_gate(authz, changes).await?;
+
+    let params = CreateResourceParams {
+        labels: BTreeMap::new(),
+        api_version: binding_collection.storage_api_version.clone(),
+        kind: ROLE_BINDING_KIND.to_string(),
+        name: binding_name,
+        parent_uid: Some(org.uid),
+        annotations: BTreeMap::new(),
+        finalizers: Vec::new(),
+        owner_references: Vec::new(),
+        spec,
+        validator: Some(binding_collection.spec_validator.clone()),
+    };
+    let binding_row = authz
+        .store()
+        .create(params)
+        .await
+        .map_err(|error| match error {
+            // Admission resolves the `user:` subject and the `PlatformRole/org-admin`
+            // reference against live rows; either missing means the request asked
+            // to bootstrap an admin that cannot exist yet. That is a fact about the
+            // request, not a malformed body, so it is reported as 422 rather than
+            // folded into the ordinary 400 a validation failure gets elsewhere —
+            // and because this is not committed, the Organization itself never
+            // persists either.
+            StoreError::Validation(message) => {
+                ServerError::new(StatusCode::UNPROCESSABLE_ENTITY, message)
+            }
+            other => store_error_to_server_error(other),
+        })?;
+
+    audit_write(authz, &binding_row, "resource.created", None);
+    Ok(())
 }
 
 async fn update_resource(
@@ -2589,6 +2700,37 @@ mod dispatch_tests {
             }),
         )
         .await;
+    }
+
+    /// Create a live root `User` resource whose name is a fresh UUID, and an
+    /// `AnyAuth` for a session that authenticates as that same identity.
+    ///
+    /// `AnyAuth::User` derives its subject as `user:<db user id>` (see
+    /// `ResourceAuthorizer::principal`), so the resource-store `User`'s name
+    /// has to be that same UUID for the two to name one subject — the shape a
+    /// real login would produce once Users are JIT-provisioned by UID.
+    /// Returns the subject string (`user:<uuid>`) alongside the auth.
+    async fn create_user_principal(ctx: &ResourceApiCtx) -> (String, AnyAuth) {
+        let id = Uuid::new_v4();
+        let name = id.to_string();
+        create_at(
+            ctx,
+            "rise.dev/v1alpha1/users",
+            json!({
+                "apiVersion": "rise.dev/v1alpha1",
+                "kind": "User",
+                "metadata": {"name": name},
+                "spec": {},
+            }),
+        )
+        .await;
+        let auth = AnyAuth::User(AuthContext::User(User {
+            id,
+            email: format!("{name}@example.com"),
+            created_at: chrono::Utc::now(),
+            updated_at: chrono::Utc::now(),
+        }));
+        (format!("user:{name}"), auth)
     }
 
     /// Grant every authenticated caller `statements`, platform-wide.
@@ -4130,6 +4272,253 @@ mod dispatch_tests {
                 .contains("would grant authority you do not hold"),
             "{}",
             scheduled.message
+        );
+    }
+
+    /// An operator bootstrapping an Organization gets both rows atomically: the
+    /// Organization, and an exact org-root, scope-only `RoleBinding` naming
+    /// `PlatformRole/org-admin` for the requested admin — the structural shape
+    /// that confers org-admin standing (ADR-0001 §5).
+    #[sqlx::test]
+    async fn bootstrap_admin_creates_org_and_binding_atomically(pool: sqlx::PgPool) {
+        let ctx = ctx(pool).await;
+        let (admin_subject, admin_auth) = create_user_principal(&ctx).await;
+
+        let created = create_at(
+            &ctx,
+            "rise.dev/v1alpha1/organizations",
+            json!({
+                "apiVersion": "rise.dev/v1alpha1",
+                "kind": "Organization",
+                "metadata": {"name": "acme"},
+                "spec": {"displayName": "Acme"},
+                "bootstrap": {"admin": admin_subject},
+            }),
+        )
+        .await;
+        assert_eq!(created["metadata"]["name"], "acme");
+        let org_uid = uid_of(&created);
+
+        let admin_name = admin_subject.strip_prefix("user:").expect("user subject");
+        let binding_name = format!("org-admin-{admin_name}");
+        let (status, binding) = read(
+            dispatch_get_inner(
+                &ctx,
+                format!("rise.dev/v1alpha1/rolebindings/acme/{binding_name}"),
+                auth(OPERATOR),
+                PendingDeletionQuery::default(),
+            )
+            .await
+            .expect("bootstrapped binding must exist"),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(binding["spec"]["subject"], admin_subject);
+        assert_eq!(binding["spec"]["scope"], "rise.dev/Organization/acme");
+        assert!(binding["spec"]["labelSelector"].is_null());
+        assert_eq!(binding["spec"]["roleRef"]["kind"], "PlatformRole");
+        assert_eq!(binding["spec"]["roleRef"]["name"], "org-admin");
+
+        // Admin standing, asserted the way ADR-0001 §5 defines it: the
+        // bootstrapped user's own effective policy, computed by the engine
+        // through the ordinary evaluation path, already covers the org-admin
+        // baseline on a fresh resource under the org — no pre-existing Group
+        // or second grant required.
+        let admin_ctx = ctx
+            .authz
+            .read_context(&admin_auth)
+            .await
+            .expect("admin read context");
+        let org_tree = admin_ctx.tree(org_uid).await.expect("org tree");
+        let probe = node_for_new("example.dev/v1", "Widget", "probe", &BTreeMap::new())
+            .expect("probe node");
+        let target = ResourceTree::with_leaf(org_tree.nodes(), probe);
+        assert!(
+            admin_ctx
+                .allows(&target, Verb::Create, None)
+                .await
+                .expect("allows"),
+            "the bootstrapped admin should already hold the org-admin baseline"
+        );
+    }
+
+    /// `bootstrap.admin` naming no live User fails admission inside the same
+    /// transaction as the Organization create, so the Organization itself
+    /// never persists either.
+    #[sqlx::test]
+    async fn bootstrap_admin_missing_user_yields_422_and_no_organization(pool: sqlx::PgPool) {
+        let ctx = ctx(pool).await;
+
+        let err = dispatch_post_inner(
+            &ctx,
+            "rise.dev/v1alpha1/organizations".to_string(),
+            auth(OPERATOR),
+            json!({
+                "apiVersion": "rise.dev/v1alpha1",
+                "kind": "Organization",
+                "metadata": {"name": "acme"},
+                "spec": {"displayName": "Acme"},
+                "bootstrap": {"admin": "user:ghost"},
+            }),
+        )
+        .await
+        .expect_err("bootstrap admin must resolve to a live User");
+        assert_eq!(
+            err.status,
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "{}",
+            err.message
+        );
+
+        let resp = dispatch_get_inner(
+            &ctx,
+            "rise.dev/v1alpha1/organizations/acme".to_string(),
+            auth(OPERATOR),
+            PendingDeletionQuery::default(),
+        )
+        .await;
+        assert_eq!(
+            resp.expect_err("the Organization must not have been persisted")
+                .status,
+            StatusCode::NOT_FOUND
+        );
+    }
+
+    /// `bootstrap` is an Organization-only feature; naming it on any other
+    /// kind is rejected before anything is written.
+    #[sqlx::test]
+    async fn bootstrap_on_a_non_organization_kind_is_400(pool: sqlx::PgPool) {
+        let ctx = ctx(pool).await;
+        register_widget_rd(&ctx).await;
+        let (admin_subject, _admin_auth) = create_user_principal(&ctx).await;
+
+        let err = dispatch_post_inner(
+            &ctx,
+            "example.dev/v1/widgets".to_string(),
+            auth(OPERATOR),
+            json!({
+                "apiVersion": "example.dev/v1",
+                "kind": "Widget",
+                "metadata": {"name": "my-widget"},
+                "spec": {"size": "large"},
+                "bootstrap": {"admin": admin_subject},
+            }),
+        )
+        .await
+        .expect_err("bootstrap is Organization-only");
+        assert_eq!(err.status, StatusCode::BAD_REQUEST, "{}", err.message);
+
+        let resp = dispatch_get_inner(
+            &ctx,
+            "example.dev/v1/widgets/my-widget".to_string(),
+            auth(OPERATOR),
+            PendingDeletionQuery::default(),
+        )
+        .await;
+        assert_eq!(
+            resp.expect_err("the Widget must not have been persisted")
+                .status,
+            StatusCode::NOT_FOUND
+        );
+    }
+
+    /// A caller who may create both an Organization and a RoleBinding, but
+    /// holds nothing like the org-admin baseline, still cannot bootstrap one
+    /// in: the grant gate refuses to let the binding delegate authority the
+    /// writer does not hold, and the whole attempt — Organization included —
+    /// rolls back with it.
+    #[sqlx::test]
+    async fn bootstrap_admin_is_gated_like_any_other_binding(pool: sqlx::PgPool) {
+        let ctx = ctx(pool).await;
+        let (admin_subject, _admin_auth) = create_user_principal(&ctx).await;
+
+        // Ordinary authority to create an Organization and a RoleBinding under
+        // it — nothing close to the org-admin baseline those confer.
+        grant_authenticated(
+            &ctx,
+            "org-creator",
+            json!([{
+                "effect": "Allow",
+                "kinds": ["rise.dev/Organization", "rise.dev/RoleBinding"],
+                "verbs": ["get", "list", "create"],
+            }]),
+        )
+        .await;
+
+        let err = dispatch_post_inner(
+            &ctx,
+            "rise.dev/v1alpha1/organizations".to_string(),
+            auth(PLAIN_USER),
+            json!({
+                "apiVersion": "rise.dev/v1alpha1",
+                "kind": "Organization",
+                "metadata": {"name": "acme"},
+                "spec": {"displayName": "Acme"},
+                "bootstrap": {"admin": admin_subject},
+            }),
+        )
+        .await
+        .expect_err("the gate must refuse the escalation");
+        assert_eq!(err.status, StatusCode::FORBIDDEN, "{}", err.message);
+        assert!(
+            err.message
+                .contains("would grant authority you do not hold"),
+            "unexpected message: {}",
+            err.message
+        );
+
+        // Nothing was stored — the refusal rolled the whole attempt back.
+        let resp = dispatch_get_inner(
+            &ctx,
+            "rise.dev/v1alpha1/organizations/acme".to_string(),
+            auth(OPERATOR),
+            PendingDeletionQuery::default(),
+        )
+        .await;
+        assert_eq!(
+            resp.expect_err("the Organization must not have been persisted")
+                .status,
+            StatusCode::NOT_FOUND
+        );
+    }
+
+    /// A name conflict on the Organization itself is reported before the
+    /// admin binding is ever attempted, and leaves the existing Organization
+    /// (and its lack of a second binding) untouched.
+    #[sqlx::test]
+    async fn bootstrap_admin_name_conflict_on_organization_yields_409(pool: sqlx::PgPool) {
+        let ctx = ctx(pool).await;
+        create_org(&ctx, "acme").await;
+        let (admin_subject, _admin_auth) = create_user_principal(&ctx).await;
+
+        let err = dispatch_post_inner(
+            &ctx,
+            "rise.dev/v1alpha1/organizations".to_string(),
+            auth(OPERATOR),
+            json!({
+                "apiVersion": "rise.dev/v1alpha1",
+                "kind": "Organization",
+                "metadata": {"name": "acme"},
+                "spec": {"displayName": "Acme, again"},
+                "bootstrap": {"admin": admin_subject},
+            }),
+        )
+        .await
+        .expect_err("the name is already taken");
+        assert_eq!(err.status, StatusCode::CONFLICT, "{}", err.message);
+
+        let admin_name = admin_subject.strip_prefix("user:").expect("user subject");
+        let resp = dispatch_get_inner(
+            &ctx,
+            format!("rise.dev/v1alpha1/rolebindings/acme/org-admin-{admin_name}"),
+            auth(OPERATOR),
+            PendingDeletionQuery::default(),
+        )
+        .await;
+        assert_eq!(
+            resp.expect_err("no binding is created when the Organization create fails")
+                .status,
+            StatusCode::NOT_FOUND
         );
     }
 
