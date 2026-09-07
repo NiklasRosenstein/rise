@@ -6,7 +6,7 @@ use std::sync::Arc;
 use chrono::{DateTime, Utc};
 use uuid::Uuid;
 
-use crate::{OwnerReference, ResourceParentRef, ResourceRow, ValidationError};
+use crate::{LabelKey, OwnerReference, ResourceParentRef, ResourceRow, ValidationError};
 
 /// Reserved finalizer prefix for store-managed finalizers. Controllers cannot
 /// add or remove finalizers in this namespace.
@@ -468,6 +468,23 @@ pub trait ResourceStore: ResourceApi {
         &self,
         uid: Uuid,
         label_key: &str,
+    ) -> Result<Vec<ResourceRow>, StoreError>;
+    /// Live rows whose own `labels` carry `key`, of any kind, ordered oldest
+    /// first, capped at `limit`.
+    ///
+    /// The complement of [`Self::label_inheriting_descendants`]: that walks
+    /// one resource's subtree for what inherits a value, this finds every
+    /// resource in the store that sets a key itself — the seed set the audit's
+    /// label-backed detectors need to reason about who `rise.dev/owner` names,
+    /// or whether a `labelSelector` can ever match anything, without a subtree
+    /// walk from every binding's scope. `limit` keeps a single call bounded
+    /// regardless of install size; a result of exactly `limit` rows means the
+    /// answer may be incomplete and the caller should treat it as such rather
+    /// than assume it has seen every setter.
+    async fn list_label_setters(
+        &self,
+        key: &LabelKey,
+        limit: i64,
     ) -> Result<Vec<ResourceRow>, StoreError>;
     /// Force-update status as an operator, storing the value under
     /// `status.controllers.operator:<operator>`.
