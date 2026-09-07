@@ -38,9 +38,9 @@ pub use resource_row::ResourceRow;
 pub use scope::Scope;
 pub use store::{
     CollectionInfo, CreateResourceParams, DeleteOutcome, DeletionBlocker,
-    DeletionBlockerRelationship, DeletionBlockerReport, NoOpValidator, PathSegment, ResourceApi,
-    ResourceStore, SpecValidator, StoreError, UpdateResourceParams, CASCADE_DELETION_FINALIZER,
-    MAX_PARENT_CHAIN_DEPTH, SYSTEM_FINALIZER_PREFIX,
+    DeletionBlockerRelationship, DeletionBlockerReport, NoOpValidator, PathSegment, PathWalk,
+    ResourceApi, ResourceStore, SpecValidator, StoreError, UpdateResourceParams,
+    CASCADE_DELETION_FINALIZER, MAX_PARENT_CHAIN_DEPTH, SYSTEM_FINALIZER_PREFIX,
 };
 pub use subject_id::SubjectId;
 pub use subject_ref::SubjectRef;
