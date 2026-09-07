@@ -9,11 +9,14 @@
 //! thing [`AuthorizationEngine::audit`] adds is loading the binding facts
 //! once per tier and running them in a fixed order.
 
+use std::collections::BTreeMap;
+
 use rise_resource_api::{
-    PathSegment, ResourceRow, ResourceStore, RoleRefKind, StoreError, SubjectId, SubjectMembership,
-    UserSpec, API_GROUP, API_VERSION_V1ALPHA1, CONTROLLER_KIND, GROUP_KIND, GROUP_MEMBERSHIP_KIND,
-    MAX_PARENT_CHAIN_DEPTH, ORGANIZATION_KIND, ORG_ADMIN_PLATFORM_ROLE, SERVICE_ACCOUNT_KIND,
-    USER_KIND,
+    resource_owner_binding_spec, LabelKey, LabelSelector, PathSegment, ResourceRow, ResourceStore,
+    RoleRefKind, Scope, StoreError, SubjectId, SubjectMembership, UserSpec, API_GROUP,
+    API_VERSION_V1ALPHA1, CONTROLLER_KIND, GROUP_KIND, GROUP_MEMBERSHIP_KIND,
+    MAX_PARENT_CHAIN_DEPTH, ORGANIZATION_KIND, ORG_ADMIN_PLATFORM_ROLE, OWNER_LABEL_KEY,
+    SERVICE_ACCOUNT_KIND, USER_KIND,
 };
 use uuid::Uuid;
 
@@ -22,8 +25,9 @@ use crate::engine::bindings::{
 };
 use crate::engine::{
     qualifies_as_org_admin, AuthorizationEngine, AuthorizationError, MembershipResolver,
+    ResourceTree,
 };
-use crate::policy::BindingTier;
+use crate::policy::{resolve_subject, BindingTier};
 
 /// What to audit, and how much work to do.
 ///
@@ -171,6 +175,33 @@ impl AuthorizationEngine {
             scope.max_findings,
             detect_no_op_membership_constraint(&platform),
         );
+
+        // Every live `rise.dev/owner` setter, resolved to its own organization
+        // once so the per-organization loop below can filter without a second
+        // store round trip per row. Root-scoped setters (no organization) are
+        // only in scope when the whole install is being audited: a named-org
+        // scope can never contain one.
+        let owner_setters = owner_label_setters_by_organization(store).await?;
+        if scope.organization.is_none() {
+            let root_scoped: Vec<ResourceRow> = owner_setters
+                .iter()
+                .filter(|(_, organization)| organization.is_none())
+                .map(|(row, _)| row.clone())
+                .collect();
+            append_capped(
+                &mut findings,
+                &mut truncated,
+                scope.max_findings,
+                detect_inert_owner_label(store, memberships, None, &[], &root_scoped).await?,
+            );
+        }
+        append_capped(
+            &mut findings,
+            &mut truncated,
+            scope.max_findings,
+            detect_selector_matches_nothing(store, &platform).await?,
+        );
+
         append_capped(
             &mut findings,
             &mut truncated,
@@ -211,6 +242,32 @@ impl AuthorizationEngine {
                 scope.max_findings,
                 detect_recipient_boundary_no_op(memberships, &organization.name, &org_bindings)
                     .await?,
+            );
+            let org_setters: Vec<ResourceRow> = owner_setters
+                .iter()
+                .filter(|(_, setter_organization)| {
+                    setter_organization.as_deref() == Some(organization.name.as_str())
+                })
+                .map(|(row, _)| row.clone())
+                .collect();
+            append_capped(
+                &mut findings,
+                &mut truncated,
+                scope.max_findings,
+                detect_inert_owner_label(
+                    store,
+                    memberships,
+                    Some(&organization.name),
+                    &org_bindings,
+                    &org_setters,
+                )
+                .await?,
+            );
+            append_capped(
+                &mut findings,
+                &mut truncated,
+                scope.max_findings,
+                detect_selector_matches_nothing(store, &org_bindings).await?,
             );
             append_capped(
                 &mut findings,
@@ -704,6 +761,276 @@ async fn user_belongs_to_organization(
     Ok(org_bindings.iter().any(|candidate| {
         qualifies_as_org_admin(candidate, organization) && candidate.subject.literal() == Some(user)
     }))
+}
+
+// ---------------------------------------------------------------------------
+// Row 7: InertOwnerLabel
+// ---------------------------------------------------------------------------
+
+/// Every live `rise.dev/owner` setter in the store, paired with the
+/// organization its own ancestry resolves to (`None` for a root-scoped
+/// resource).
+///
+/// Resolved once regardless of [`AuditScope`]: `list_label_setters` has no
+/// per-organization form, so the audit reads it once and filters in memory
+/// rather than repeat the same bounded scan per organization in scope.
+async fn owner_label_setters_by_organization(
+    store: &dyn ResourceStore,
+) -> Result<Vec<(ResourceRow, Option<String>)>, AuthorizationError> {
+    let key: LabelKey = OWNER_LABEL_KEY
+        .parse()
+        .expect("shipped owner label key parses");
+    let setters = store
+        .list_label_setters(&key, LABEL_SETTER_SCAN_LIMIT)
+        .await?;
+    let mut resolved = Vec::with_capacity(setters.len());
+    for row in setters {
+        let ancestry = store.ancestors(row.uid).await?;
+        let organization = ResourceTree::from_rows(&ancestry)?
+            .organization()
+            .map(str::to_owned);
+        resolved.push((row, organization));
+    }
+    Ok(resolved)
+}
+
+/// A `rise.dev/owner` value that the seeded `${ref.subject}` ownership binding
+/// (ADR-0001 §6.2) cannot turn into a live grant.
+///
+/// Resolution mirrors exactly what the live binding does: parse the value as
+/// the seeded binding's dynamic subject against the resource's own
+/// organization. A value that fails to parse is always `Warning` — nothing
+/// about it self-heals. A Group or ServiceAccount it names is org-native, so a
+/// missing live row is also permanent and `Warning`. A User it names is only
+/// `Info`: the seeded binding's `ResourceOrganization` clamp means the grant is
+/// live exactly while that User is affiliated with the resource's
+/// organization, which can change without anyone touching the label.
+/// Root-scoped resources (no organization) are skipped for the User case only
+/// — the clamp has nothing to compare against there — but a malformed value on
+/// a root-scoped resource is still reported.
+pub async fn detect_inert_owner_label(
+    store: &dyn ResourceStore,
+    memberships: &dyn MembershipResolver,
+    organization: Option<&str>,
+    org_bindings: &[BindingFact],
+    setters: &[ResourceRow],
+) -> Result<Vec<AuditFinding>, AuthorizationError> {
+    let seeded_subject = resource_owner_binding_spec().subject;
+    let mut findings = Vec::new();
+    for row in setters {
+        let Some(value) = row.labels.get(OWNER_LABEL_KEY) else {
+            // Cannot happen for a row `list_label_setters(OWNER_LABEL_KEY, _)`
+            // returned, but a detector must not panic on a store's promise.
+            continue;
+        };
+        let subject = || FindingSubject {
+            uid: row.uid,
+            kind: row.kind.clone(),
+            name: row.name.clone(),
+            organization: organization.map(str::to_owned),
+        };
+
+        let resolved = match resolve_subject(&seeded_subject, Some(value.as_str()), organization) {
+            Ok(resolved) => resolved,
+            Err(_) => {
+                findings.push(AuditFinding {
+                    subject: subject(),
+                    category: FindingCategory::InertOwnerLabel,
+                    severity: Severity::Warning,
+                    related: Vec::new(),
+                    detail: format!(
+                        "label '{OWNER_LABEL_KEY}' is set to '{value}', which does not resolve to a valid subject; the seeded ownership binding grants nobody."
+                    ),
+                });
+                continue;
+            }
+        };
+
+        match resolved.kind() {
+            "group" | "serviceaccount" => {
+                let kind = if resolved.kind() == "group" {
+                    GROUP_KIND
+                } else {
+                    SERVICE_ACCOUNT_KIND
+                };
+                if stale_org_native(store, kind, &resolved).await? {
+                    findings.push(AuditFinding {
+                        subject: subject(),
+                        category: FindingCategory::InertOwnerLabel,
+                        severity: Severity::Warning,
+                        related: Vec::new(),
+                        detail: format!(
+                            "label '{OWNER_LABEL_KEY}' is set to '{value}', which resolves to '{resolved}'; that subject names no live resource, so ownership grants nobody."
+                        ),
+                    });
+                }
+            }
+            "user" => {
+                let Some(organization) = organization else {
+                    continue;
+                };
+                if user_belongs_to_organization(memberships, org_bindings, &resolved, organization)
+                    .await?
+                {
+                    continue;
+                }
+                findings.push(AuditFinding {
+                    subject: subject(),
+                    category: FindingCategory::InertOwnerLabel,
+                    severity: Severity::Info,
+                    related: Vec::new(),
+                    detail: format!(
+                        "label '{OWNER_LABEL_KEY}' is set to '{value}', naming subject '{resolved}', which has no live Group tie in Organization '{organization}' and is not a qualifying admin there; ownership currently grants nothing."
+                    ),
+                });
+            }
+            _ => {}
+        }
+    }
+    Ok(findings)
+}
+
+// ---------------------------------------------------------------------------
+// Row 8: SelectorMatchesNothing
+// ---------------------------------------------------------------------------
+
+/// How many live setters [`detect_selector_matches_nothing`] reads before
+/// giving up on proving a selector matches nothing. Also the bound
+/// [`owner_label_setters_by_organization`] applies to its single global scan.
+///
+/// Both detectors need this to stay exact rather than heuristic: reporting
+/// "matches nothing" past this point would risk a false positive on a large
+/// install, so a scan that hits the limit without a match is treated as
+/// unknown and produces no finding instead.
+const LABEL_SETTER_SCAN_LIMIT: i64 = 1000;
+
+/// A binding's `labelSelector` that no resource in its scope can ever satisfy.
+///
+/// Exact and cheap without a subtree walk: a non-wildcard scope is first
+/// checked through its own effective labels (nearest-wins inheritance already
+/// covers every resource that inherits, rather than sets, the key), and only a
+/// scope whose own root does not carry it falls back to
+/// [`ResourceStore::list_label_setters`] to look for a setter at or below that
+/// root. A wildcard scope has no root to check first, so only the setter scan
+/// applies.
+pub async fn detect_selector_matches_nothing(
+    store: &dyn ResourceStore,
+    bindings: &[BindingFact],
+) -> Result<Vec<AuditFinding>, AuthorizationError> {
+    let mut findings = Vec::new();
+    for binding in bindings {
+        let Some(selector) = &binding.selector else {
+            continue;
+        };
+        if selector_matches_something(store, &binding.scope, selector).await? != Some(false) {
+            continue;
+        }
+        let value_clause = match &selector.value {
+            Some(value) => format!("value '{value}'"),
+            None => "any value".to_owned(),
+        };
+        findings.push(AuditFinding {
+            subject: binding_subject(binding),
+            category: FindingCategory::SelectorMatchesNothing,
+            severity: Severity::Warning,
+            related: Vec::new(),
+            detail: format!(
+                "labelSelector key '{}' ({value_clause}) matches no resource in scope '{}'; the binding grants nothing.",
+                selector.key, binding.scope,
+            ),
+        });
+    }
+    Ok(findings)
+}
+
+/// `Some(true)`/`Some(false)` when whether `selector` matches anything in
+/// `scope` is decided; `None` when the scope does not resolve (row 3 already
+/// reports that separately) or the setter scan hit [`LABEL_SETTER_SCAN_LIMIT`]
+/// before a match turned up, leaving the true answer unknown.
+async fn selector_matches_something(
+    store: &dyn ResourceStore,
+    scope: &Scope,
+    selector: &LabelSelector,
+) -> Result<Option<bool>, AuthorizationError> {
+    let Some(resource_kind) = scope.resource_kind() else {
+        return matches_via_setters(store, selector, None).await;
+    };
+    let Some(chain) = kind_chain(store, resource_kind.group(), resource_kind.kind()).await? else {
+        // Unregistered kind: nothing to validate the scope against, matching
+        // `detect_stale_scope`'s own skip for the same shape.
+        return Ok(None);
+    };
+    let names: Vec<&str> = scope.names().collect();
+    if names.len() != chain.len() {
+        // Malformed scope: never this detector's concern either.
+        return Ok(None);
+    }
+    let segments: Vec<PathSegment> = chain
+        .into_iter()
+        .zip(names)
+        .map(|((kind, api_versions), name)| PathSegment::Name {
+            api_versions,
+            kind,
+            name: name.to_owned(),
+        })
+        .collect();
+    let root = match store.resolve_path(&segments).await {
+        Ok(rows) if rows.iter().any(|row| row.deletion_timestamp.is_some()) => return Ok(None),
+        Ok(rows) => rows
+            .into_iter()
+            .last()
+            .expect("a non-empty scope resolves to a leaf row"),
+        Err(StoreError::NotFound | StoreError::ParentNotFound) => return Ok(None),
+        Err(other) => return Err(other.into()),
+    };
+
+    let ancestry = store.ancestors(root.uid).await?;
+    let effective = ResourceTree::from_rows(&ancestry)?.effective_labels();
+    if selector_matches_labels(&effective, selector) {
+        return Ok(Some(true));
+    }
+    matches_via_setters(store, selector, Some(root.uid)).await
+}
+
+/// Whether some live resource that sets `selector.key` (and `selector.value`,
+/// when given) lies at or below `scope_root` — or anywhere, for a wildcard
+/// scope's `None`.
+async fn matches_via_setters(
+    store: &dyn ResourceStore,
+    selector: &LabelSelector,
+    scope_root: Option<Uuid>,
+) -> Result<Option<bool>, AuthorizationError> {
+    let setters = store
+        .list_label_setters(&selector.key, LABEL_SETTER_SCAN_LIMIT)
+        .await?;
+    let exhausted = setters.len() as i64 == LABEL_SETTER_SCAN_LIMIT;
+    for setter in &setters {
+        if !selector_matches_labels(&setter.labels, selector) {
+            continue;
+        }
+        let in_scope = match scope_root {
+            None => true,
+            Some(root_uid) => store
+                .ancestors(setter.uid)
+                .await?
+                .iter()
+                .any(|ancestor| ancestor.uid == root_uid),
+        };
+        if in_scope {
+            return Ok(Some(true));
+        }
+    }
+    Ok(if exhausted { None } else { Some(false) })
+}
+
+fn selector_matches_labels(labels: &BTreeMap<String, String>, selector: &LabelSelector) -> bool {
+    match labels.get(selector.key.as_ref()) {
+        Some(value) => selector
+            .value
+            .as_deref()
+            .is_none_or(|expected| expected == value),
+        None => false,
+    }
 }
 
 // ---------------------------------------------------------------------------
