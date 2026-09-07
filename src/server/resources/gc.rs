@@ -1013,6 +1013,14 @@ mod tests {
                 .await
         }
 
+        async fn list_label_setters(
+            &self,
+            key: &rise_resource_api::LabelKey,
+            limit: i64,
+        ) -> Result<Vec<ResourceRow>, StoreError> {
+            self.inner.list_label_setters(key, limit).await
+        }
+
         async fn try_collect(&self, uid: Uuid) -> Result<DeleteOutcome, StoreError> {
             if uid == self.fail_for {
                 return Err(StoreError::Validation("injected".to_string()));
@@ -1207,6 +1215,14 @@ mod tests {
             self.inner
                 .label_inheriting_descendants(uid, label_key)
                 .await
+        }
+
+        async fn list_label_setters(
+            &self,
+            key: &rise_resource_api::LabelKey,
+            limit: i64,
+        ) -> Result<Vec<ResourceRow>, StoreError> {
+            self.inner.list_label_setters(key, limit).await
         }
 
         async fn try_collect(&self, _uid: Uuid) -> Result<DeleteOutcome, StoreError> {
