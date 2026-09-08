@@ -42,7 +42,7 @@ output "ecr_repo_prefix" {
 
 output "traefik_service_name" {
   description = "The harness resolves this service's task address to point DNS at it."
-  value       = aws_ecs_service.traefik.name
+  value       = module.runtime.traefik.service_name
 }
 
 output "dex_service_name" {
@@ -51,5 +51,5 @@ output "dex_service_name" {
 }
 
 output "rise_service_name" {
-  value = aws_ecs_service.rise.name
+  value = module.runtime.rise.service_name
 }

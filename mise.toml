@@ -149,12 +149,13 @@ run = """
 terraform fmt -check -recursive modules/ tests/e2e/bootstrap tests/e2e/run
 # -backend=false so the e2e workspaces, which declare an S3 backend, check
 # without credentials or a bucket.
-for dir in modules/*/ tests/e2e/bootstrap tests/e2e/run; do
+for dir in modules/*/ modules/rise-ecs/modules/*/ tests/e2e/bootstrap tests/e2e/run; do
   echo "==> $dir"
   terraform -chdir="$dir" init -backend=false -input=false >/dev/null
   terraform -chdir="$dir" validate
   terraform -chdir="$dir" test
 done
+python3 scripts/check-ecs-runtime-upgrade.py
 """
 
 [tasks."terraform:fmt"]

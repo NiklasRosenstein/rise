@@ -101,6 +101,11 @@ variable "ecr_push_role_arn" {
   description = "modules/rise-aws `push_role_arn`. Required when registry_type is \"ecr\"."
   type        = string
   default     = null
+
+  validation {
+    condition     = var.registry_type != "ecr" || var.ecr_push_role_arn != null
+    error_message = "registry_type \"ecr\" requires ecr_push_role_arn (modules/rise-aws `push_role_arn`)."
+  }
 }
 
 variable "ecr_repo_prefix" {
@@ -174,6 +179,11 @@ variable "vpc" {
     condition     = var.vpc == null || length(coalesce(try(var.vpc.private_subnet_ids, null), [])) <= 16
     error_message = "At most 16 private subnets: an awsvpc network configuration accepts no more, and the backend rejects the config at startup."
   }
+
+  validation {
+    condition     = var.vpc == null || length(try(var.vpc.public_subnet_ids, [])) > 0
+    error_message = "The edge load balancer needs public subnets. Provide vpc.public_subnet_ids, or let the module create the VPC."
+  }
 }
 
 variable "vpc_cidr" {
@@ -208,6 +218,11 @@ variable "nat_gateway_mode" {
   validation {
     condition     = contains(["single", "per_az", "none"], var.nat_gateway_mode)
     error_message = "nat_gateway_mode must be one of: single, per_az, none."
+  }
+
+  validation {
+    condition     = !local.acme_enabled || var.nat_gateway_mode != "none"
+    error_message = "ACME needs internet egress: nat_gateway_mode \"none\" cannot reach Let's Encrypt. Use a NAT gateway, or edge_mode \"alb-acm\"."
   }
 }
 
@@ -330,12 +345,22 @@ variable "edge_mode" {
     condition     = contains(["nlb-traefik-acme", "alb-acm"], var.edge_mode)
     error_message = "edge_mode must be \"nlb-traefik-acme\" or \"alb-acm\"."
   }
+
+  validation {
+    condition     = var.edge_mode != "alb-acm" || var.acm_certificate_arn != null
+    error_message = "edge_mode \"alb-acm\" requires acm_certificate_arn."
+  }
 }
 
 variable "acme_email" {
   description = "Registration address for Let's Encrypt. Required when edge_mode is \"nlb-traefik-acme\"."
   type        = string
   default     = null
+
+  validation {
+    condition     = !local.acme_enabled || var.acme_email != null
+    error_message = "edge_mode \"nlb-traefik-acme\" requires acme_email for Let's Encrypt registration."
+  }
 }
 
 variable "acm_certificate_arn" {
@@ -426,6 +451,11 @@ variable "rise_image_ref" {
   description = "Complete immutable control-plane image reference, such as ghcr.io/rise-deploy/rise@sha256:…. Set this or rise_image_tag, but not both."
   type        = string
   default     = null
+
+  validation {
+    condition     = (var.rise_image_ref == null) != (var.rise_image_tag == null)
+    error_message = "Set exactly one of rise_image_ref or rise_image_tag."
+  }
 
   validation {
     condition     = var.rise_image_ref == null || strcontains(var.rise_image_ref, "@sha256:")
@@ -609,6 +639,11 @@ variable "oidc_issuer" {
   description = "OIDC issuer URL. Required unless deploy_dex is true."
   type        = string
   default     = null
+
+  validation {
+    condition     = var.deploy_dex || var.oidc_issuer != null
+    error_message = "Set oidc_issuer to an existing identity provider, or deploy_dex = true for a self-contained demo."
+  }
 }
 
 variable "oidc_client_id" {
@@ -622,6 +657,11 @@ variable "oidc_client_secret" {
   type        = string
   default     = null
   sensitive   = true
+
+  validation {
+    condition     = var.deploy_dex || var.oidc_client_secret != null
+    error_message = "oidc_client_secret is required when deploy_dex = false; without it the module would store the well-known default 'rise-backend-secret' as the OIDC client secret."
+  }
 }
 
 variable "deploy_dex" {

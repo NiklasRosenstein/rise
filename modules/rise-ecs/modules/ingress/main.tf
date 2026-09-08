@@ -4,65 +4,30 @@
 # and each domain would gain a DNS validation step the user has to complete.
 
 locals {
-  is_nlb = var.edge_mode == "nlb-traefik-acme"
+  is_nlb = var.edge.mode == "nlb-traefik-acme"
 }
 
 resource "aws_lb" "this" {
-  name               = local.name
+  name               = var.name
   load_balancer_type = local.is_nlb ? "network" : "application"
   internal           = false
-  subnets            = local.public_subnet_ids
-  security_groups    = [aws_security_group.edge.id]
+  subnets            = var.network.public_subnet_ids
+  security_groups    = [var.security_groups.edge]
 
   enable_cross_zone_load_balancing = local.is_nlb ? true : null
-  enable_deletion_protection       = var.deletion_protection
+  enable_deletion_protection       = var.edge.deletion_protection
 
-  tags = merge(local.tags, { Name = local.name })
-
-  lifecycle {
-    precondition {
-      condition     = length(local.public_subnet_ids) > 0
-      error_message = "The edge load balancer needs public subnets. Provide vpc.public_subnet_ids, or let the module create the VPC."
-    }
-
-    precondition {
-      condition     = var.edge_mode != "alb-acm" || var.acm_certificate_arn != null
-      error_message = "edge_mode \"alb-acm\" requires acm_certificate_arn."
-    }
-
-    precondition {
-      condition     = !local.acme_enabled || var.acme_email != null
-      error_message = "edge_mode \"nlb-traefik-acme\" requires acme_email for Let's Encrypt registration."
-    }
-
-    # VPC endpoints reach AWS services only. ACME HTTP-01 needs Traefik to talk
-    # to Let's Encrypt, so an egress-free VPC does not merely make issuance slow
-    # -- the certificate never arrives, and nothing reports an error.
-    precondition {
-      condition     = !local.acme_enabled || var.nat_gateway_mode != "none"
-      error_message = "ACME needs internet egress: nat_gateway_mode \"none\" cannot reach Let's Encrypt. Use a NAT gateway, or edge_mode \"alb-acm\"."
-    }
-
-    precondition {
-      condition     = var.deploy_dex || var.oidc_issuer != null
-      error_message = "Set oidc_issuer to an existing identity provider, or deploy_dex = true for a self-contained demo."
-    }
-
-    precondition {
-      condition     = var.registry_type != "ecr" || var.ecr_push_role_arn != null
-      error_message = "registry_type \"ecr\" requires ecr_push_role_arn (modules/rise-aws `push_role_arn`)."
-    }
-  }
+  tags = merge(var.tags, { Name = var.name })
 }
 
 resource "aws_lb_target_group" "traefik" {
   for_each = local.is_nlb ? toset(["80", "443"]) : toset(["80"])
 
-  name        = "${local.name}-${each.value}"
+  name        = "${var.name}-${each.value}"
   port        = tonumber(each.value)
   protocol    = local.is_nlb ? "TCP" : "HTTP"
   target_type = "ip" # awsvpc tasks have no instance to register.
-  vpc_id      = local.vpc_id
+  vpc_id      = var.network.vpc_id
 
   # Traefik's own ping entrypoint, so a task that is up but not yet routing does
   # not receive traffic.
@@ -74,7 +39,7 @@ resource "aws_lb_target_group" "traefik" {
 
   deregistration_delay = 30
 
-  tags = local.tags
+  tags = var.tags
 }
 
 resource "aws_lb_listener" "http" {
@@ -120,7 +85,7 @@ resource "aws_lb_listener" "alb_https" {
   port              = 443
   protocol          = "HTTPS"
   ssl_policy        = "ELBSecurityPolicy-TLS13-1-2-2021-06"
-  certificate_arn   = var.acm_certificate_arn
+  certificate_arn   = var.edge.acm_certificate_arn
 
   default_action {
     type             = "forward"
@@ -134,21 +99,21 @@ resource "aws_efs_file_system" "acme" {
   count = local.acme_enabled ? 1 : 0
 
   encrypted      = true
-  creation_token = "${local.name}-acme"
+  creation_token = "${var.name}-acme"
 
   lifecycle_policy {
     transition_to_ia = "AFTER_30_DAYS"
   }
 
-  tags = merge(local.tags, { Name = "${local.name}-acme" })
+  tags = merge(var.tags, { Name = "${var.name}-acme" })
 }
 
 resource "aws_efs_mount_target" "acme" {
-  for_each = local.acme_enabled ? local.private_subnets_by_key : {}
+  for_each = local.acme_enabled ? var.network.private_subnets_by_key : {}
 
   file_system_id  = aws_efs_file_system.acme[0].id
   subnet_id       = each.value
-  security_groups = [aws_security_group.efs[0].id]
+  security_groups = [var.security_groups.efs]
 }
 
 # Traefik refuses an acme.json that is not 0600, and the official image runs as
@@ -173,7 +138,7 @@ resource "aws_efs_access_point" "acme" {
     }
   }
 
-  tags = local.tags
+  tags = var.tags
 }
 
 # --- DNS ---------------------------------------------------------------------
@@ -182,10 +147,10 @@ resource "aws_efs_access_point" "acme" {
 # <project>.<domain>, and groups and environments add another label.
 
 resource "aws_route53_record" "apex" {
-  count = var.route53_zone_id != null ? 1 : 0
+  count = var.dns.zone_id != null ? 1 : 0
 
-  zone_id = var.route53_zone_id
-  name    = var.ingress_domain
+  zone_id = var.dns.zone_id
+  name    = var.dns.domain
   type    = "A"
 
   alias {
@@ -196,10 +161,10 @@ resource "aws_route53_record" "apex" {
 }
 
 resource "aws_route53_record" "wildcard" {
-  count = var.route53_zone_id != null ? 1 : 0
+  count = var.dns.zone_id != null ? 1 : 0
 
-  zone_id = var.route53_zone_id
-  name    = "*.${var.ingress_domain}"
+  zone_id = var.dns.zone_id
+  name    = "*.${var.dns.domain}"
   type    = "A"
 
   alias {

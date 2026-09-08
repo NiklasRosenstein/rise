@@ -344,6 +344,9 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v6
+        with:
+          # Upgrade tests load the supported Terraform state layout from Git.
+          fetch-depth: 0
 
       - name: Setup mise
         uses: jdx/mise-action@v4

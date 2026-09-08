@@ -4,11 +4,11 @@
 //! it owns only half of it. The AWS side is split:
 //!
 //! - **`tests/e2e/bootstrap`** is applied once, by hand, and never touched
-//!   here: VPC, cluster, Cloud Map, Traefik, Dex, a Route 53 zone, and all the
+//!   here: VPC, cluster, Cloud Map namespace, log group, a Route 53 zone, and
 //!   IAM. It is separate because CI runs under a role with no IAM-write.
 //! - **`tests/e2e/run`** is applied and destroyed around every suite:
-//!   Postgres and the Rise control plane, so each run starts on a fresh database
-//!   and the image under test.
+//!   Postgres, Dex, and the shared Rise/Traefik runtime, so each run starts on a
+//!   fresh database and the image under test.
 //!
 //! The whole Rise stack runs *inside* the cluster, which is what lets Traefik
 //! reach Rise for the forwardAuth subrequest and therefore what lets the

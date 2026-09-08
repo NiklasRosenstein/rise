@@ -1,16 +1,5 @@
-# The per-run half of the ECS e2e environment, applied and destroyed by the
-# harness around each suite.
-#
-# Deliberately NOT modules/rise-ecs. That module builds ADR-0005 D15's
-# production topology -- NLB, private subnets, RDS, ACME -- and bending it to
-# this shape would take a set of test-only knobs that would leave it with two
-# personalities while still not exercising what operators run. The one contract
-# that genuinely must not drift is shared instead, as
-# modules/rise-ecs/modules/control-plane-env.
-#
-# Postgres and Rise are per-run rather than persistent so every run starts on a
-# fresh database (which exercises bootstrap, as the Docker harness also relies
-# on) and runs the image under test.
+# Per-run fixtures and networking compose the shared Rise and Traefik runtime.
+# The bootstrap supplies the VPC, cluster, namespace, IAM, and log group.
 
 provider "aws" {
   region = var.region

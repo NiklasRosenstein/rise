@@ -6,51 +6,51 @@
 # separate migration task to schedule.
 
 resource "aws_db_subnet_group" "this" {
-  count = local.create_database ? 1 : 0
+  count = var.enabled ? 1 : 0
 
-  name       = "${local.name}-control-plane"
-  subnet_ids = local.database_subnet_ids
-  tags       = merge(local.tags, { Name = "${local.name}-control-plane" })
+  name       = "${var.name}-control-plane"
+  subnet_ids = var.network.subnet_ids
+  tags       = merge(var.tags, { Name = "${var.name}-control-plane" })
 }
 
 resource "aws_db_instance" "this" {
-  count = local.create_database ? 1 : 0
+  count = var.enabled ? 1 : 0
 
-  identifier     = "${local.name}-control-plane"
+  identifier     = "${var.name}-control-plane"
   engine         = "postgres"
-  engine_version = var.db_engine_version
-  instance_class = var.db_instance_class
+  engine_version = var.postgres.engine_version
+  instance_class = var.postgres.instance_class
 
   db_name  = "rise"
   username = "rise"
   password = random_password.database[0].result
 
-  allocated_storage     = var.db_allocated_storage
-  max_allocated_storage = var.db_allocated_storage * 4
+  allocated_storage     = var.postgres.allocated_storage
+  max_allocated_storage = var.postgres.allocated_storage * 4
   storage_type          = "gp3"
   storage_encrypted     = true
 
   db_subnet_group_name   = aws_db_subnet_group.this[0].name
-  vpc_security_group_ids = [aws_security_group.database.id]
-  multi_az               = var.db_multi_az
+  vpc_security_group_ids = [var.network.security_group_id]
+  multi_az               = var.postgres.multi_az
   publicly_accessible    = false
 
-  backup_retention_period = var.db_backup_retention_days
-  deletion_protection     = var.deletion_protection
-  skip_final_snapshot     = !var.deletion_protection
-  final_snapshot_identifier = var.deletion_protection ? (
-    "${local.name}-control-plane-final"
+  backup_retention_period = var.postgres.backup_retention_days
+  deletion_protection     = var.postgres.deletion_protection
+  skip_final_snapshot     = !var.postgres.deletion_protection
+  final_snapshot_identifier = var.postgres.deletion_protection ? (
+    "${var.name}-control-plane-final"
   ) : null
 
   auto_minor_version_upgrade = true
   apply_immediately          = false
 
-  tags = merge(local.tags, { Name = "${local.name}-control-plane" })
+  tags = merge(var.tags, { Name = "${var.name}-control-plane" })
 
   lifecycle {
     # Rotating the password out of band should not read as drift Terraform wants
     # to undo. Rotating it *properly* means updating the secret too — see the
-    # module README.
+    # rise-ecs README.
     ignore_changes = [password]
   }
 }
