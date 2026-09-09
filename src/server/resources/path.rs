@@ -48,10 +48,13 @@ pub enum Subresource {
     /// Token issuance for a ServiceAccount or Controller (ADR-0001 §7):
     /// create-only, and registered on those two kinds alone.
     Token,
+    /// The caller's own access explanation for a requested tuple: read-only,
+    /// authorized like `deletion-blockers` via `(get, Kind, explain)`.
+    Explain,
 }
 
 impl Subresource {
-    pub const KEYWORDS: &str = "status, finalizers, deletion-blockers, token";
+    pub const KEYWORDS: &str = "status, finalizers, deletion-blockers, token, explain";
 
     /// The canonical keyword for this subresource — the same name policy
     /// statements and authorization details use (ADR-0001 §2).
@@ -61,6 +64,7 @@ impl Subresource {
             Self::Finalizers => "finalizers",
             Self::DeletionBlockers => "deletion-blockers",
             Self::Token => "token",
+            Self::Explain => "explain",
         }
     }
 
@@ -71,6 +75,7 @@ impl Subresource {
             "finalizers" => Some(Self::Finalizers),
             "deletion-blockers" => Some(Self::DeletionBlockers),
             "token" => Some(Self::Token),
+            "explain" => Some(Self::Explain),
             _ => None,
         }
     }
@@ -85,6 +90,8 @@ impl Subresource {
 pub enum RawResourcePath {
     /// The literal path `pending-deletion`: resources tombstoned and awaiting GC.
     PendingDeletion,
+    /// The literal path `policy-audit`: install-wide policy diagnostics.
+    PolicyAudit,
     /// A `{group}/{version}/{plural}` collection followed by zero or more
     /// ancestor-name / leaf-name / subresource segments, taken verbatim.
     Collection {
@@ -102,6 +109,7 @@ pub enum RawResourcePath {
 ///
 /// ```text
 /// path        ::= "pending-deletion"
+///               | "policy-audit"
 ///               | group "/" version "/" plural ( "/" segment )*
 /// ```
 ///
@@ -109,7 +117,8 @@ pub enum RawResourcePath {
 /// trailing `segment`s are ancestor names, the leaf identifier, and an optional
 /// subresource keyword — but distinguishing them requires the leaf kind's
 /// parent-chain depth, so that is left to store-aware classification.
-/// `pending-deletion` is valid only as the sole path segment.
+/// `pending-deletion` and `policy-audit` are valid only as the sole path
+/// segment.
 pub fn parse_resource_path(raw: &str) -> Result<RawResourcePath, ServerError> {
     let segments: Vec<&str> = raw.split('/').collect();
 
@@ -117,10 +126,14 @@ pub fn parse_resource_path(raw: &str) -> Result<RawResourcePath, ServerError> {
         return Err(ServerError::bad_request("empty resource path segment"));
     }
 
-    // `pending-deletion` is the sole-segment diagnostics path. It is never an
-    // identifier, so a resource may legitimately be named `pending-deletion`.
+    // `pending-deletion` and `policy-audit` are sole-segment diagnostics
+    // paths. Neither is ever an identifier, so a resource may legitimately be
+    // named either.
     if segments.len() == 1 && segments[0] == "pending-deletion" {
         return Ok(RawResourcePath::PendingDeletion);
+    }
+    if segments.len() == 1 && segments[0] == "policy-audit" {
+        return Ok(RawResourcePath::PolicyAudit);
     }
 
     let [group, version, plural, rest @ ..] = segments.as_slice() else {
@@ -178,6 +191,10 @@ mod tests {
             Some(Subresource::DeletionBlockers)
         );
         assert_eq!(Subresource::from_keyword("token"), Some(Subresource::Token));
+        assert_eq!(
+            Subresource::from_keyword("explain"),
+            Some(Subresource::Explain)
+        );
         assert_eq!(Subresource::from_keyword("reparent"), None);
         assert_eq!(Subresource::from_keyword("widgets"), None);
     }
@@ -195,6 +212,14 @@ mod tests {
         assert_eq!(
             parse_resource_path("pending-deletion").unwrap(),
             RawResourcePath::PendingDeletion
+        );
+    }
+
+    #[test]
+    fn resource_path_policy_audit() {
+        assert_eq!(
+            parse_resource_path("policy-audit").unwrap(),
+            RawResourcePath::PolicyAudit
         );
     }
 

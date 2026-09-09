@@ -49,6 +49,23 @@ pub struct AuditReport {
     pub findings: Vec<AuditFinding>,
     /// Whether more findings existed than `max_findings` allowed through.
     pub truncated: bool,
+    /// What the run actually looked at, so an empty `findings` list reads as
+    /// "scanned and healthy" rather than "scanned nothing".
+    pub scanned: AuditScanned,
+}
+
+/// What one [`AuthorizationEngine::audit`] call read, independent of what it
+/// found. A caller with zero findings and an empty `scanned` block skipped
+/// the install rather than confirming it healthy — this is what tells the two
+/// apart.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct AuditScanned {
+    /// Every Organization the run loaded bindings for, in scan order.
+    pub organizations: Vec<String>,
+    /// Live root-parented `PlatformRoleBinding` rows the run loaded.
+    pub platform_bindings: usize,
+    /// Live `RoleBinding` rows loaded across every scanned Organization.
+    pub organization_bindings: usize,
 }
 
 /// How urgently a finding deserves attention.
@@ -152,8 +169,10 @@ impl AuthorizationEngine {
         let memberships = self.memberships.as_ref();
         let mut findings = Vec::new();
         let mut truncated = false;
+        let mut scanned = AuditScanned::default();
 
         let platform = load_platform_bindings(store).await?;
+        scanned.platform_bindings = platform.len();
         append_capped(
             &mut findings,
             &mut truncated,
@@ -226,6 +245,8 @@ impl AuthorizationEngine {
 
         for organization in self.audit_organizations(scope).await? {
             let org_bindings = load_organization_bindings(store, &organization.name).await?;
+            scanned.organizations.push(organization.name.clone());
+            scanned.organization_bindings += org_bindings.len();
             append_capped(
                 &mut findings,
                 &mut truncated,
@@ -313,6 +334,7 @@ impl AuthorizationEngine {
         Ok(AuditReport {
             findings,
             truncated,
+            scanned,
         })
     }
 
@@ -337,6 +359,52 @@ impl AuthorizationEngine {
                 .filter(is_live)
                 .collect()),
         }
+    }
+
+    /// Write-time diagnostics for exactly one binding row (ADR-0001 §5:
+    /// "diagnostics never reject writes").
+    ///
+    /// Runs the row-level detectors (dangling `roleRef`, stale subject, stale
+    /// scope, the no-op membership constraint, the recipient-boundary no-op,
+    /// an unmatched selector, and a non-qualifying org-admin reference) over
+    /// the one tier the binding is placed in — platform for a root-parented
+    /// row, that Organization for an org-parented one — never the whole
+    /// install, so this is cheap enough to run after every binding write.
+    /// `uid` naming a row that no longer exists, or an org-parented row whose
+    /// parent has already drained, answers with no findings rather than an
+    /// error: there is nothing left to diagnose.
+    pub async fn audit_binding(&self, uid: Uuid) -> Result<Vec<AuditFinding>, AuthorizationError> {
+        let store = self.store.as_ref();
+        let Some(row) = store.get(uid).await? else {
+            return Ok(Vec::new());
+        };
+        let (bindings, organization) = match row.parent_uid {
+            None => (load_platform_bindings(store).await?, None),
+            Some(parent_uid) => {
+                let Some(parent) = store.get(parent_uid).await?.filter(is_live) else {
+                    return Ok(Vec::new());
+                };
+                let org_bindings = load_organization_bindings(store, &parent.name).await?;
+                (org_bindings, Some(parent.name))
+            }
+        };
+
+        let mut findings = Vec::new();
+        findings.extend(detect_dangling_role_ref(&bindings));
+        findings.extend(detect_stale_subject(store, &bindings).await?);
+        findings.extend(detect_stale_scope(store, &bindings).await?);
+        findings.extend(detect_no_op_membership_constraint(&bindings));
+        if let Some(organization) = &organization {
+            findings.extend(
+                detect_recipient_boundary_no_op(self.memberships.as_ref(), organization, &bindings)
+                    .await?,
+            );
+        }
+        findings.extend(detect_selector_matches_nothing(store, &bindings).await?);
+        findings.extend(detect_non_qualifying_org_admin_reference(&bindings));
+
+        findings.retain(|finding| finding.subject.uid == uid);
+        Ok(findings)
     }
 }
 

@@ -683,7 +683,7 @@ pub(super) fn may_be_token_route(raw_path: &RawResourcePath) -> bool {
         RawResourcePath::Collection { segments, .. } => {
             segments.last().map(String::as_str) == Some(Subresource::Token.keyword())
         }
-        RawResourcePath::PendingDeletion => false,
+        RawResourcePath::PendingDeletion | RawResourcePath::PolicyAudit => false,
     }
 }
 

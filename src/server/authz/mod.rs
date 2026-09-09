@@ -497,6 +497,53 @@ impl AuthorizationContext {
         self.require(target, Verb::Create, None).await
     }
 
+    /// The caller's own access explanation for one tuple on `target`: every
+    /// collected statement bearing on it, with its retention, plus every
+    /// binding that matched but contributed nothing (`rise-authz::engine::audit`
+    /// and the `explain` subresource in `resources/handlers.rs`).
+    pub async fn explain(
+        &self,
+        target: &ResourceTree,
+        verb: Verb,
+        subresource: Option<&SubresourceName>,
+    ) -> Result<rise_authz::engine::Explanation, ServerError> {
+        let tuple = PermissionTuple {
+            verb,
+            kind: target.leaf().kind.clone(),
+            subresource: subresource.cloned(),
+        };
+        self.engine
+            .explain(&self.snapshot, target, &tuple)
+            .await
+            .map_err(authorization_error_to_server_error)
+    }
+
+    /// Run the install-wide policy audit (`rise-authz::engine::audit`) over
+    /// this context's store. No principal is involved — the audit evaluates
+    /// nothing and decides nothing, it only reports shapes admission accepted
+    /// that grant nothing durable.
+    pub async fn policy_audit(
+        &self,
+        scope: &rise_authz::engine::AuditScope,
+    ) -> Result<rise_authz::engine::AuditReport, ServerError> {
+        self.engine
+            .audit(scope)
+            .await
+            .map_err(authorization_error_to_server_error)
+    }
+
+    /// Write-time diagnostics for one binding row, scoped to `uid` alone
+    /// (ADR-0001 §5: diagnostics never reject a write). Errors are the
+    /// caller's to decide whether to surface — a write-time warning must never
+    /// fail the write it rides along with, so this returns the engine's own
+    /// error rather than a `ServerError`.
+    pub async fn audit_binding(
+        &self,
+        uid: Uuid,
+    ) -> Result<Vec<rise_authz::engine::AuditFinding>, AuthorizationError> {
+        self.engine.audit_binding(uid).await
+    }
+
     /// Per-item `list`/`get` granularity for a collection (ADR-0001 §4).
     pub async fn filter_list(
         &self,

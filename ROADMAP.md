@@ -75,11 +75,16 @@ Status legend: `[x]` shipped · `[~]` in progress · `[ ]` planned.
   they authenticate with a JWT matched against their trust policies or with
   an identity token from their `/token` subresource; the
   `ResourceDefinition.allowedStatusControllerIds` allowlist is removed.
-- [~] Add Role/policy audit and explain diagnostics for semantically inert
-  configuration: no-op recipient or membership constraints, owners with no
+- [x] Add Role/policy audit and explain diagnostics for semantically inert
+  configuration — no-op recipient or membership constraints, owners with no
   current grant, selectors matching nothing, stale references, and shadowed
-  Allows. Keep these out of synchronous write rejection when the grant delta is
-  safely empty.
+  Allows — as `engine::audit` (`rise-authz`) and its HTTP surface: the
+  `GET /api/v1/resources/policy-audit` listing and the read-only `explain`
+  subresource, both filtered per finding on the caller's own `list`/`get`
+  grants. Diagnostics never reject a write: a create or update of a
+  `RoleBinding`/`PlatformRoleBinding` runs the same detectors against the row
+  just written and surfaces any finding as an HTTP `Warning` header, never as
+  a failure.
 - [x] Add request-local `AuthorizationSnapshot` memoization for membership,
   admin classification, and effective policies. Defer cross-request caching
   until it can be invalidated transactionally through an authorization epoch.

@@ -22,14 +22,17 @@ A path always names the **leaf** collection first as `{group}/{version}/{plural}
 | `{group}/{version}/{plural}/{ancestor}…/{name}/status` (`D+2`) | PUT | Status subresource update |
 | `{group}/{version}/{plural}/{ancestor}…/{name}/finalizers` (`D+2`) | PUT | Finalizer subresource update |
 | `{group}/{version}/{plural}/{ancestor}…/{name}/deletion-blockers` (`D+2`) | GET | Deletion-blocker diagnostics |
+| `{group}/{version}/{plural}/{ancestor}…/{name}/explain` (`D+2`) | GET | The caller's own access explanation |
 | `{group}/{version}/{plural}/{ancestor}…/{name}/token` (`D+2`) | POST | Token issuance — `ServiceAccount` and `Controller` only |
 | `{group}/{version}/{plural}/uid:{uuid}` | GET, PUT, DELETE | Item by UID |
 | `{group}/{version}/{plural}/uid:{uuid}/{sub}` | PUT | `status` or `finalizers` by UID |
 | `{group}/{version}/{plural}/uid:{uuid}/deletion-blockers` | GET | Deletion-blocker diagnostics by UID |
+| `{group}/{version}/{plural}/uid:{uuid}/explain` | GET | The caller's own access explanation by UID |
 | `{group}/{version}/{plural}/uid:{uuid}/token` | POST | Token issuance by UID |
 | `pending-deletion` | GET | List tombstoned resources awaiting GC |
+| `policy-audit` | GET | Install-wide policy diagnostics |
 
-Ancestor segments are bare resource *names*; the ancestor *kinds* are derived from the leaf's `ResourceDefinition` parent chain and never appear in the URL. `pending-deletion` is only valid as the sole path segment, so a resource may be named `pending-deletion` without ambiguity.
+Ancestor segments are bare resource *names*; the ancestor *kinds* are derived from the leaf's `ResourceDefinition` parent chain and never appear in the URL. `pending-deletion` and `policy-audit` are only valid as the sole path segment, so a resource may be named either without ambiguity.
 
 Unversioned paths are not supported — `{group}/{version}` always names the leaf collection.
 
@@ -201,7 +204,7 @@ Because the Organization is implied by placement, that subject also accepts the 
 
 under `acme` stores `group:acme/platform`. `PlatformRoleBinding` has no parent Organization and so takes absolute subjects only.
 
-Resource lifecycle operations are audit-logged on the `rise::audit` target. Records include `resource.created`, `resource.updated`, `resource.deleted`, `resource.deletion_cascaded`, `resource.controller_status_updated`, `resource.controller_finalizers_updated`, `resource.user_status_updated`, `resource.user_finalizers_updated`, `resource.pending_deletion_listed`, `resource.deletion_blockers_listed`, `resource.access_denied` (a refused authorization decision), and `resource.grant_gate` (what the grant gate compared, including the operator short-circuit that produces no claims). Cascade records are best-effort after commit; durable delivery would require a transactional outbox or Event resource.
+Resource lifecycle operations are audit-logged on the `rise::audit` target. Records include `resource.created`, `resource.updated`, `resource.deleted`, `resource.deletion_cascaded`, `resource.controller_status_updated`, `resource.controller_finalizers_updated`, `resource.user_status_updated`, `resource.user_finalizers_updated`, `resource.pending_deletion_listed`, `resource.deletion_blockers_listed`, `resource.policy_audited`, `resource.explained`, `resource.access_denied` (a refused authorization decision), and `resource.grant_gate` (what the grant gate compared, including the operator short-circuit that produces no claims). Cascade records are best-effort after commit; durable delivery would require a transactional outbox or Event resource.
 
 ### Controller authorization
 
@@ -334,6 +337,24 @@ Authorization: Bearer <operator-jwt>
 - `status` is rejected on update (use the `status` subresource).
 - Reads (GET/LIST) work for any *served* version. Writes (POST/PUT) must use the *storage* version — a write targeting a served non-storage version is rejected with `422 Unprocessable Entity` (version conversion is not yet implemented).
 
+### Write-time policy-audit warnings
+
+A successful create or update of a `RoleBinding` or `PlatformRoleBinding`
+re-runs the row-level policy-audit detectors against the row just written,
+scoped to that row alone, on the same transaction the write used. Every
+resulting finding is attached as an HTTP [`Warning`](https://www.rfc-editor.org/rfc/rfc7234#section-5.5)
+response header, one per finding, in the form Kubernetes uses for admission
+warnings:
+
+```
+Warning: 299 - "roleRef names Role 'viewer' in Organization 'acme', which no longer exists; the binding grants nothing."
+```
+
+This never blocks or fails the write — diagnostics never reject a write
+(ADR-0001 §5) — and the response body is unchanged; a client that ignores
+`Warning` headers sees nothing different. See [Policy audit](#policy-audit)
+for what the detectors catch.
+
 ### Status subresource (controllers and users)
 
 ```http
@@ -410,6 +431,131 @@ children. That is accepted rather than overlooked — a blocker report that
 silently omits blockers is worse than one that says how many it withheld — but
 grant the subresource on that basis, not on the assumption that it reveals
 nothing about a subtree the caller cannot list.
+
+### Policy audit
+
+```http
+GET /api/v1/resources/policy-audit?organization=acme&limit=200
+Authorization: Bearer <operator-jwt>
+```
+
+Diagnoses shapes admission accepts but that grant nothing, or nothing durable
+— a dangling `roleRef`, a stale subject, a `subjectMembership` constraint that
+can never bite, an Organization with no live admin, and the rest of the
+detector table below. It never rejects a write; admission stays exactly as it
+is (ADR-0001 §5, "diagnostics never reject writes").
+
+Query parameters:
+
+- `organization` (optional): scope the audit to one Organization by name. Omit
+  to audit every live Organization.
+- `limit` (optional, default 200, clamped to 1–1000): the maximum number of
+  findings returned. `truncated: true` means more existed than `limit` allowed
+  through.
+
+Every finding names a resource — a binding, a Role, a `GroupMembership`, a
+labelled resource, or an Organization — and is included only when the caller
+holds `list` on that resource, exactly like the `pending-deletion` listing.
+Findings the caller may not `list` are counted in `hiddenFindings` rather than
+named, so a partial view never reads as "nothing to see here". A finding whose
+subject's ancestry cannot be resolved is skipped and logged rather than
+failing the whole listing.
+
+```json
+{
+  "findings": [
+    {
+      "severity": "warning",
+      "category": "danglingRoleRef",
+      "subject": { "uid": "...", "kind": "RoleBinding", "name": "viewers", "organization": "acme" },
+      "related": [],
+      "detail": "roleRef names Role 'viewer' in Organization 'acme', which no longer exists; the binding grants nothing."
+    }
+  ],
+  "hiddenFindings": 3,
+  "truncated": false,
+  "scanned": {
+    "organizations": ["acme"],
+    "platformBindings": 6,
+    "organizationBindings": 4
+  }
+}
+```
+
+`shadowedBy` (`"deny"` or `"replacement"`) appears only on a `shadowedAllow`
+finding. `scanned` reports what the run actually looked at — every
+Organization it loaded bindings for, and how many platform and organization
+bindings it read — independent of what it found, so a report with zero
+findings reads as "scanned and healthy" rather than "scanned nothing".
+
+`OrganizationWithoutAdmin` on the configured default Organization
+(`default_organization.name` in settings) comes back as `info` rather than
+`warning`: that Organization is administered by operators through the seeded
+`system-admin` binding, not a per-organization admin, and giving it one is the
+multi-org direction rather than a gap to close today.
+
+| Category | Severity | What it means |
+|---|---|---|
+| `danglingRoleRef` | warning | `roleRef` names no live Role/PlatformRole; the binding grants nothing. |
+| `staleSubject` | warning | A literal subject names no live, active identity. |
+| `staleScope` | warning | A non-wildcard scope names a resource that no longer exists. |
+| `staleMembership` | info | A `GroupMembership` names a User with no live, active row. Markers deliberately outlive Users (ADR-0001 §1), so recreating the name makes the tie live again. |
+| `noOpMembershipConstraint` | warning | `subjectMembership: ResourceOrganization` can never bite — the subject already carries its own organization, or belongs to none. |
+| `recipientBoundaryNoOp` | warning or info | An org `RoleBinding`'s subject can never (warning) or does not currently (info) belong to that Organization. |
+| `inertOwnerLabel` | warning | `rise.dev/owner` resolves to nobody the seeded ownership binding reaches. |
+| `selectorMatchesNothing` | warning | A binding's `labelSelector` matches no resource in its scope. |
+| `shadowedAllow` | warning | A more specific binding drops this Allow, through a Deny (`shadowedBy: "deny"`) or wildcard replacement (`shadowedBy: "replacement"`). |
+| `organizationWithoutAdmin` | warning (info for the default Organization) | No qualifying binding gives this Organization a live, active admin. |
+| `nonQualifyingOrgAdminReference` | warning | A `PlatformRole/org-admin` reference that is not an exact org-root, scope-only binding — it grants the baseline statements without conferring admin standing or the Deny exemption. |
+
+### Explain subresource
+
+```http
+GET /api/v1/resources/rise.dev/v1alpha1/organizations/acme/explain?verb=delete
+Authorization: Bearer <user-jwt>
+```
+
+Explains the **caller's own** access to the addressed resource for one
+`(verb, subresource?)` tuple: every collected statement bearing on it (with
+its binding, placement tier, and whether it was retained, superseded by
+wildcard replacement, or an exempted Deny), plus every binding that matched
+but contributed nothing and why. Explaining another principal's access is not
+supported.
+
+`verb` is required; `subresource` is optional and explains access to that
+subresource instead of the main resource. The subresource is its own grant,
+authorized as `(get, Kind, explain)` — the same shape as
+`deletion-blockers` — so it is refused, not masked, for a caller who can see
+the resource but was not granted `explain` on it. The shipped
+`resource-owner` Role excludes subresources entirely (ADR-0001 §6.2), so an
+ordinary owner cannot explain their own access until granted `explain`
+separately.
+
+```json
+{
+  "decision": "deny",
+  "operatorOverride": false,
+  "ceilingAdmits": true,
+  "contributions": [
+    {
+      "binding": { "uid": "...", "kind": "RoleBinding", "name": "org-cap", "role": { "kind": "Role", "name": "org-cap" } },
+      "tier": { "organization": "acme" },
+      "statement": { "effect": "Deny", "kinds": ["rise.dev/Project"], "verbs": ["delete"] },
+      "retention": "exemptDeny:organizationAdmin"
+    }
+  ],
+  "inert": [
+    { "binding": { "uid": "...", "kind": "PlatformRoleBinding", "name": "...", "role": { "kind": "PlatformRole", "name": "..." } },
+      "tier": "platform", "reason": "resourceOrganization" }
+  ]
+}
+```
+
+`tier` is `"platform"` or `{"organization": "<name>"}`. `retention` is
+`"retained"`, `"supersededAllow"`, `"exemptDeny:operator"`, or
+`"exemptDeny:organizationAdmin"`. `inert[].reason` is one of
+`"unresolvedSubject"`, `"recipientBoundary"`, `"resourceOrganization"`, or
+`"danglingRoleRef"`.
 
 ### Token subresource (ServiceAccount and Controller)
 

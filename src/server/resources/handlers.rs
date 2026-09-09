@@ -25,8 +25,9 @@ use rise_authz::engine::{ListCandidate, ListDecision, ResourceTree};
 use rise_resource_api::NoOpValidator;
 use rise_resource_api::{
     CollectionInfo, CreateResourceParams, CreateResourceRequest, DeleteOutcome, PathSegment,
-    ResourceRow, ResourceStore, SubresourceName, UpdateResourceParams, UpdateResourceRequest, Verb,
-    CASCADE_DELETION_FINALIZER, MAX_PARENT_CHAIN_DEPTH,
+    ResourceRow, ResourceStore, RoleRefKind, SubresourceName, UpdateResourceParams,
+    UpdateResourceRequest, Verb, CASCADE_DELETION_FINALIZER, MAX_PARENT_CHAIN_DEPTH,
+    PLATFORM_ROLE_BINDING_KIND, ROLE_BINDING_KIND,
 };
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -75,6 +76,11 @@ pub(crate) struct ResourceApiCtx {
     /// What the `token` subresource needs: the signer, the JWKS source for
     /// external assertions, the trust-policy lookup, and the platform limits.
     tokens: Arc<TokenService>,
+    /// The bootstrapped default Organization's name, so the policy-audit
+    /// listing can downgrade its `OrganizationWithoutAdmin` finding to `info`
+    /// (operators administer it through the seeded `system-admin` binding,
+    /// not a per-organization admin — see decision D4 in the audit plan).
+    default_organization_name: String,
 }
 
 impl ResourceApiCtx {
@@ -90,6 +96,7 @@ impl ResourceApiCtx {
                 state.server_settings.auth_token_max_ttl_seconds,
                 Some(state.oauth_rate_limiter.clone()),
             )),
+            default_organization_name: state.default_organization_name.clone(),
         }
     }
 }
@@ -301,13 +308,29 @@ fn assert_body_matches(
 // Query types
 // -----------------------------------------------------------------------------
 
-/// Query parameters for `GET .../pending-deletion`.
+/// Query parameters for the sole-segment diagnostics paths: `pending-deletion`
+/// and `policy-audit`. One type serves both because they are dispatched from
+/// the same `GET` handler and axum extracts one `Query` per route.
 #[derive(Debug, Default, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PendingDeletionQuery {
-    /// Maximum number of tombstoned resources to return (default 100).
+    /// Maximum number of tombstoned resources or findings to return.
+    /// `pending-deletion` defaults to 100; `policy-audit` defaults to 200 and
+    /// clamps to 1..=1000.
     #[serde(default)]
     pub limit: Option<i64>,
+    /// `policy-audit` only: scope the audit to one Organization by name.
+    /// `None` audits every live Organization.
+    #[serde(default)]
+    pub organization: Option<String>,
+    /// `explain` only: the verb to explain the caller's own access for.
+    /// Required; a missing or unrecognized value is a 400.
+    #[serde(default)]
+    pub verb: Option<String>,
+    /// `explain` only: the subresource to explain access to, instead of the
+    /// main resource.
+    #[serde(default)]
+    pub subresource: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -336,6 +359,261 @@ struct DeletionBlockerResponse {
 }
 
 // -----------------------------------------------------------------------------
+// Policy-audit and explain wire types
+// -----------------------------------------------------------------------------
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct PolicyAuditResponse {
+    findings: Vec<AuditFindingResponse>,
+    /// Findings on resources the caller may not `list`. Counted, never named —
+    /// the same disclosure shape `deletion-blockers` uses — so a partial view
+    /// never reads as "nothing to see here".
+    hidden_findings: usize,
+    truncated: bool,
+    scanned: AuditScannedResponse,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct AuditScannedResponse {
+    organizations: Vec<String>,
+    platform_bindings: usize,
+    organization_bindings: usize,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct AuditFindingResponse {
+    severity: &'static str,
+    category: &'static str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    shadowed_by: Option<&'static str>,
+    subject: FindingSubjectResponse,
+    related: Vec<FindingSubjectResponse>,
+    detail: String,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct FindingSubjectResponse {
+    uid: Uuid,
+    kind: String,
+    name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    organization: Option<String>,
+}
+
+fn finding_subject_response(
+    subject: &rise_authz::engine::FindingSubject,
+) -> FindingSubjectResponse {
+    FindingSubjectResponse {
+        uid: subject.uid,
+        kind: subject.kind.clone(),
+        name: subject.name.clone(),
+        organization: subject.organization.clone(),
+    }
+}
+
+fn finding_category_name(category: &rise_authz::engine::FindingCategory) -> &'static str {
+    use rise_authz::engine::FindingCategory::*;
+    match category {
+        DanglingRoleRef => "danglingRoleRef",
+        StaleSubject => "staleSubject",
+        StaleScope => "staleScope",
+        StaleMembership => "staleMembership",
+        NoOpMembershipConstraint => "noOpMembershipConstraint",
+        RecipientBoundaryNoOp => "recipientBoundaryNoOp",
+        InertOwnerLabel => "inertOwnerLabel",
+        SelectorMatchesNothing => "selectorMatchesNothing",
+        ShadowedAllow { .. } => "shadowedAllow",
+        OrganizationWithoutAdmin => "organizationWithoutAdmin",
+        NonQualifyingOrgAdminReference => "nonQualifyingOrgAdminReference",
+    }
+}
+
+fn shadowed_by_name(category: &rise_authz::engine::FindingCategory) -> Option<&'static str> {
+    match category {
+        rise_authz::engine::FindingCategory::ShadowedAllow { by } => Some(match by {
+            rise_authz::engine::Shadow::Deny => "deny",
+            rise_authz::engine::Shadow::Replacement => "replacement",
+        }),
+        _ => None,
+    }
+}
+
+/// Project one engine finding to its wire shape. `severity_override` is how
+/// the handler downgrades `OrganizationWithoutAdmin` on the default
+/// Organization to `info` (decision D4) without the engine — which has no
+/// notion of "the default one" — knowing about it.
+fn audit_finding_response(
+    finding: rise_authz::engine::AuditFinding,
+    severity_override: Option<&'static str>,
+) -> AuditFindingResponse {
+    let severity = severity_override.unwrap_or(match finding.severity {
+        rise_authz::engine::Severity::Info => "info",
+        rise_authz::engine::Severity::Warning => "warning",
+    });
+    let category = finding_category_name(&finding.category);
+    let shadowed_by = shadowed_by_name(&finding.category);
+    AuditFindingResponse {
+        severity,
+        category,
+        shadowed_by,
+        subject: finding_subject_response(&finding.subject),
+        related: finding
+            .related
+            .iter()
+            .map(finding_subject_response)
+            .collect(),
+        detail: finding.detail,
+    }
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ExplainResponse {
+    decision: &'static str,
+    operator_override: bool,
+    ceiling_admits: bool,
+    contributions: Vec<ContributionResponse>,
+    inert: Vec<InertBindingResponse>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ContributionResponse {
+    binding: BindingRefResponse,
+    tier: serde_json::Value,
+    statement: serde_json::Value,
+    retention: &'static str,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct InertBindingResponse {
+    binding: BindingRefResponse,
+    tier: serde_json::Value,
+    reason: &'static str,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct BindingRefResponse {
+    uid: Uuid,
+    kind: &'static str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    name: Option<String>,
+    role: RoleRefResponse,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct RoleRefResponse {
+    kind: &'static str,
+    name: String,
+}
+
+/// `BindingTier` serializes as `"platform"` or `{"organization": "acme"}`
+/// rather than through a derived enum shape: it lives in `rise-authz`'s
+/// Tier-0 `policy` module, which derives no serde impls at all (this crate
+/// draws that boundary — see the `rise-authz` row in `CLAUDE.md`).
+fn tier_value(tier: &rise_authz::policy::BindingTier) -> serde_json::Value {
+    match tier {
+        rise_authz::policy::BindingTier::Platform => serde_json::json!("platform"),
+        rise_authz::policy::BindingTier::Organization(organization) => {
+            serde_json::json!({ "organization": organization })
+        }
+    }
+}
+
+fn retention_name(retention: rise_authz::engine::Retention) -> &'static str {
+    use rise_authz::engine::{DenyExemption, Retention::*};
+    match retention {
+        Retained => "retained",
+        SupersededAllow => "supersededAllow",
+        ExemptDeny(DenyExemption::Operator) => "exemptDeny:operator",
+        ExemptDeny(DenyExemption::OrganizationAdmin) => "exemptDeny:organizationAdmin",
+    }
+}
+
+fn inert_reason_name(reason: rise_authz::engine::InertReason) -> &'static str {
+    use rise_authz::engine::InertReason::*;
+    match reason {
+        UnresolvedSubject => "unresolvedSubject",
+        RecipientBoundary => "recipientBoundary",
+        ResourceOrganization => "resourceOrganization",
+        DanglingRoleRef => "danglingRoleRef",
+    }
+}
+
+fn decision_name(decision: rise_authz::policy::Decision) -> &'static str {
+    match decision {
+        rise_authz::policy::Decision::Allow => "allow",
+        rise_authz::policy::Decision::Deny => "deny",
+    }
+}
+
+fn binding_ref_response(provenance: &rise_authz::engine::BindingProvenance) -> BindingRefResponse {
+    let role_kind = match provenance.role.kind {
+        RoleRefKind::Role => "Role",
+        RoleRefKind::PlatformRole => "PlatformRole",
+    };
+    BindingRefResponse {
+        uid: provenance.uid,
+        kind: match provenance.kind {
+            rise_authz::engine::BindingKind::RoleBinding => "RoleBinding",
+            rise_authz::engine::BindingKind::PlatformRoleBinding => "PlatformRoleBinding",
+        },
+        name: provenance.name.clone(),
+        role: RoleRefResponse {
+            kind: role_kind,
+            name: provenance.role.name.clone(),
+        },
+    }
+}
+
+/// Project the engine's `Explanation` to its wire shape. The only fallible
+/// part is a `PolicyStatement` that somehow fails to serialize, which would
+/// be a bug in a type that otherwise always round-trips through JSON.
+fn explain_response(
+    explanation: rise_authz::engine::Explanation,
+) -> Result<ExplainResponse, ServerError> {
+    let contributions = explanation
+        .contributions
+        .into_iter()
+        .map(|contribution| {
+            Ok(ContributionResponse {
+                binding: binding_ref_response(&contribution.provenance),
+                tier: tier_value(&contribution.tier),
+                statement: serde_json::to_value(&contribution.statement).map_err(|error| {
+                    ServerError::internal(format!(
+                        "policy statement could not be serialized for an explain response: {error}"
+                    ))
+                })?,
+                retention: retention_name(contribution.retention),
+            })
+        })
+        .collect::<Result<Vec<_>, ServerError>>()?;
+    let inert = explanation
+        .inert
+        .into_iter()
+        .map(|inert| InertBindingResponse {
+            binding: binding_ref_response(&inert.provenance),
+            tier: tier_value(&inert.tier),
+            reason: inert_reason_name(inert.reason),
+        })
+        .collect();
+    Ok(ExplainResponse {
+        decision: decision_name(explanation.decision),
+        operator_override: explanation.operator_override,
+        ceiling_admits: explanation.ceiling_admits,
+        contributions,
+        inert,
+    })
+}
+
+// -----------------------------------------------------------------------------
 // Store-aware path classification
 // -----------------------------------------------------------------------------
 
@@ -354,6 +632,8 @@ pub(super) enum LeafRef {
 pub(super) enum ResolvedPath {
     /// `pending-deletion`: resources tombstoned and awaiting GC.
     PendingDeletion,
+    /// `policy-audit`: install-wide policy diagnostics.
+    PolicyAudit,
     /// A collection listing — `D` ancestor name segments, no leaf.
     List {
         resolved: ResolvedCollection,
@@ -405,6 +685,7 @@ pub(super) async fn classify_path(
 ) -> Result<ResolvedPath, ServerError> {
     let (collection, segments) = match raw {
         RawResourcePath::PendingDeletion => return Ok(ResolvedPath::PendingDeletion),
+        RawResourcePath::PolicyAudit => return Ok(ResolvedPath::PolicyAudit),
         RawResourcePath::Collection {
             collection,
             segments,
@@ -635,6 +916,74 @@ async fn dispatch_get_inner(
             );
             Ok(Json(serde_json::json!({ "items": items })).into_response())
         }
+        ResolvedPath::PolicyAudit => {
+            let limit = q.limit.unwrap_or(200).clamp(1, 1000);
+            let scope = rise_authz::engine::AuditScope {
+                organization: q.organization.clone(),
+                max_findings: limit as usize,
+            };
+            let report = authz.policy_audit(&scope).await?;
+            // Every finding names a resource (a binding, a Role, an
+            // Organization, ...); it is included only when the caller may
+            // `list` that resource, exactly as `pending-deletion` filters its
+            // rows. A finding whose subject's ancestry cannot be resolved is
+            // skipped and logged rather than failing the whole listing.
+            let mut findings = Vec::new();
+            let mut hidden = 0usize;
+            for finding in report.findings {
+                let target = match authz.tree(finding.subject.uid).await {
+                    Ok(target) => target,
+                    Err(error) => {
+                        tracing::warn!(
+                            uid = %finding.subject.uid,
+                            kind = %finding.subject.kind,
+                            "Skipping a policy-audit finding whose subject's ancestry could \
+                             not be resolved: {}",
+                            error.message
+                        );
+                        continue;
+                    }
+                };
+                if !authz.allows(&target, Verb::List, None).await? {
+                    hidden += 1;
+                    continue;
+                }
+                // The engine has no notion of "the default Organization" — it
+                // is a deployment setting, not a policy fact — so the
+                // downgrade happens here (decision D4): the default
+                // Organization is administered by operators through the
+                // seeded `system-admin` binding, and having no per-org admin
+                // binding of its own is expected, not a gap to close.
+                let severity_override = matches!(
+                    finding.category,
+                    rise_authz::engine::FindingCategory::OrganizationWithoutAdmin
+                ) && finding.subject.name == ctx.default_organization_name;
+                findings.push(audit_finding_response(
+                    finding,
+                    severity_override.then_some("info"),
+                ));
+            }
+            tracing::info!(
+                target: "rise::audit",
+                actor = %authz.actor(),
+                organization = ?scope.organization,
+                shown = findings.len(),
+                hidden,
+                truncated = report.truncated,
+                "resource.policy_audited"
+            );
+            Ok(Json(PolicyAuditResponse {
+                findings,
+                hidden_findings: hidden,
+                truncated: report.truncated,
+                scanned: AuditScannedResponse {
+                    organizations: report.scanned.organizations,
+                    platform_bindings: report.scanned.platform_bindings,
+                    organization_bindings: report.scanned.organization_bindings,
+                },
+            })
+            .into_response())
+        }
         ResolvedPath::List {
             resolved,
             ancestor_segs,
@@ -825,9 +1174,47 @@ async fn dispatch_get_inner(
             })
             .into_response())
         }
+        ResolvedPath::Subresource {
+            resolved,
+            leaf,
+            subresource: Subresource::Explain,
+        } => {
+            let row = resolve_leaf(&ctx.store, &resolved, &leaf).await?;
+            let target = authz.tree(row.uid).await.map_err(mask_not_found)?;
+            authz
+                .require_visible(
+                    &target,
+                    Verb::Get,
+                    Some(&subresource_name(Subresource::Explain)?),
+                )
+                .await?;
+            let verb = parse_verb(q.verb.as_deref().ok_or_else(|| {
+                ServerError::bad_request("explain requires a 'verb' query parameter")
+            })?)?;
+            let subresource = q
+                .subresource
+                .as_deref()
+                .map(|name| {
+                    name.parse::<SubresourceName>().map_err(|error| {
+                        ServerError::bad_request(format!("invalid subresource '{name}': {error}"))
+                    })
+                })
+                .transpose()?;
+            let explanation = authz.explain(&target, verb, subresource.as_ref()).await?;
+            tracing::info!(
+                target: "rise::audit",
+                actor = %authz.actor(),
+                uid = %row.uid,
+                verb = %verb_wire_name(verb),
+                subresource = subresource.as_ref().map(|s| s.as_ref()),
+                decision = %decision_name(explanation.decision),
+                "resource.explained"
+            );
+            Ok(Json(explain_response(explanation)?).into_response())
+        }
         ResolvedPath::Subresource { .. } => Err(ServerError::new(
             StatusCode::METHOD_NOT_ALLOWED,
-            "GET is only supported for the deletion-blockers subresource",
+            "GET is only supported for the deletion-blockers and explain subresources",
         )),
     }
 }
@@ -931,9 +1318,7 @@ async fn create_once(
                 .map_err(|e| ServerError::bad_request(format!("invalid request body: {e}")))?;
             // The parent is resolved inside, after the body-only validation:
             // reaching a 400 at all is itself an answer about the parent.
-            let (status, resource) =
-                create_resource(ctx, authz, &resolved, &ancestor_segs, body).await?;
-            Ok((status, resource).into_response())
+            create_resource(ctx, authz, &resolved, &ancestor_segs, body).await
         }
         _ => Err(ServerError::new(
             StatusCode::METHOD_NOT_ALLOWED,
@@ -988,8 +1373,7 @@ async fn update_once(
             let body: UpdateResourceRequest = serde_json::from_value(body)
                 .map_err(|e| ServerError::bad_request(format!("invalid request body: {e}")))?;
             let row = resolve_leaf(authz.store(), &resolved, &leaf).await?;
-            let resp = update_resource(ctx, authz, &resolved, &row, &leaf, body).await?;
-            Ok(resp.into_response())
+            update_resource(ctx, authz, &resolved, &row, &leaf, body).await
         }
         ResolvedPath::Subresource {
             resolved,
@@ -1028,6 +1412,10 @@ async fn update_once(
                 Subresource::DeletionBlockers => Err(ServerError::new(
                     StatusCode::METHOD_NOT_ALLOWED,
                     "deletion-blockers is a read-only subresource",
+                )),
+                Subresource::Explain => Err(ServerError::new(
+                    StatusCode::METHOD_NOT_ALLOWED,
+                    "explain is a read-only subresource",
                 )),
                 Subresource::Token => Err(token_is_create_only()),
             }
@@ -1203,10 +1591,71 @@ fn read_granularity(readable: bool) -> ReadGranularity {
     }
 }
 
+/// After a successful create or update of a `RoleBinding`/`PlatformRoleBinding`,
+/// attach one `Warning` header per write-time policy-audit finding scoped to
+/// the row just written (ADR-0001 §5: diagnostics never reject a write).
+///
+/// The audit runs on the same transaction-scoped store the write just used, so
+/// it sees the row exactly as written, before commit. A failure here is logged
+/// and treated as no findings — a diagnostic must never hold the response the
+/// caller already earned hostage, and the write itself has already succeeded
+/// by the time this runs.
+async fn attach_binding_write_warnings(
+    authz: &AuthorizationContext,
+    row: &ResourceRow,
+    response: &mut Response,
+) {
+    if row.kind != ROLE_BINDING_KIND && row.kind != PLATFORM_ROLE_BINDING_KIND {
+        return;
+    }
+    let findings = match authz.audit_binding(row.uid).await {
+        Ok(findings) => findings,
+        Err(error) => {
+            tracing::warn!(
+                uid = %row.uid,
+                kind = %row.kind,
+                "policy audit after a binding write failed; continuing without warnings: {error:?}"
+            );
+            return;
+        }
+    };
+    // RFC 7234's warn-code/warn-agent/warn-text form, as Kubernetes admission
+    // warnings use: `299 - "<text>"`. One header per finding, so a client that
+    // only reads the first still sees the single most actionable one — the
+    // detectors run in a fixed order (rows 1, 2, 3, 5, 6, 8, 12).
+    for finding in findings {
+        let text = finding.detail.replace(['\r', '\n'], " ").replace('"', "'");
+        if let Ok(value) = axum::http::HeaderValue::from_str(&format!("299 - \"{text}\"")) {
+            response
+                .headers_mut()
+                .append(axum::http::header::WARNING, value);
+        }
+    }
+}
+
 fn subresource_name(subresource: Subresource) -> Result<SubresourceName, ServerError> {
     subresource.keyword().parse().map_err(|error| {
         ServerError::internal(format!("subresource keyword is not a valid name: {error}"))
     })
+}
+
+/// Parse the `explain` subresource's required `verb` query parameter.
+///
+/// `Verb` derives `Deserialize` for the lowercase wire vocabulary policy
+/// statements use, so a plain string is round-tripped through one JSON value
+/// rather than hand-rolling a second parser for the same six names.
+fn parse_verb(raw: &str) -> Result<Verb, ServerError> {
+    serde_json::from_value(serde_json::Value::String(raw.to_owned())).map_err(|_| {
+        ServerError::bad_request(format!(
+            "invalid verb '{raw}'; expected one of get, list, create, update, delete, use"
+        ))
+    })
+}
+
+/// The lowercase wire name for a verb, for the `resource.explained` audit
+/// record — the same vocabulary `parse_verb` accepts and policy statements use.
+fn verb_wire_name(verb: Verb) -> String {
+    format!("{verb:?}").to_ascii_lowercase()
 }
 
 /// Authorize the owner references a write newly attaches.
@@ -1354,7 +1803,7 @@ async fn create_resource(
     resolved: &ResolvedCollection,
     ancestor_segs: &[PathSegment],
     body: CreateResourceRequest,
-) -> Result<(StatusCode, Json<serde_json::Value>), ServerError> {
+) -> Result<Response, ServerError> {
     // Everything down to `require_create` reads only the request and the
     // collection registry, never the parent — deliberately, because *reaching*
     // one of these answers is itself a fact about the parent. A 400 for a
@@ -1478,10 +1927,10 @@ async fn create_resource(
     // and the stored row carries more than the caller sent — the server-assigned
     // UID, and for a policy kind the contextual normalization admission applied
     // to the spec.
-    Ok((
-        StatusCode::CREATED,
-        Json(write_response(authz, &row, &resolved.info.api_version, &target).await?),
-    ))
+    let body = write_response(authz, &row, &resolved.info.api_version, &target).await?;
+    let mut response = (StatusCode::CREATED, Json(body)).into_response();
+    attach_binding_write_warnings(authz, &row, &mut response).await;
+    Ok(response)
 }
 
 async fn update_resource(
@@ -1491,7 +1940,7 @@ async fn update_resource(
     row: &ResourceRow,
     leaf: &LeafRef,
     body: UpdateResourceRequest,
-) -> Result<Json<serde_json::Value>, ServerError> {
+) -> Result<Response, ServerError> {
     // Authorization first, before a single word of the body is inspected.
     //
     // Everything below this line answers a question about the *stored* row —
@@ -1636,9 +2085,10 @@ async fn update_resource(
     // The written labels are the resource's own after this update, so the
     // response reports the value the next request will evaluate against.
     let updated_target = authz.tree(updated.uid).await.map_err(mask_not_found)?;
-    Ok(Json(
-        write_response(authz, &updated, &resolved.info.api_version, &updated_target).await?,
-    ))
+    let body = write_response(authz, &updated, &resolved.info.api_version, &updated_target).await?;
+    let mut response = Json(body).into_response();
+    attach_binding_write_warnings(authz, &updated, &mut response).await;
+    Ok(response)
 }
 
 async fn delete_resource(
@@ -1892,6 +2342,11 @@ mod dispatch_tests {
 
     const OPERATOR: &str = "operator@example.com";
     const PLAIN_USER: &str = "plain-user@example.com";
+    /// The configured default Organization's name, matching
+    /// `default_default_organization_name()` in `settings.rs`. Used to
+    /// exercise the policy-audit `OrganizationWithoutAdmin` severity downgrade
+    /// (decision D4), which turns on this exact name.
+    const DEFAULT_ORGANIZATION: &str = "default";
 
     /// Build a `ResourceApiCtx` over a real `PgResourceStore`, with `OPERATOR`
     /// on the operator email allowlist. The resource store schema is layered on
@@ -1927,6 +2382,7 @@ mod dispatch_tests {
                 },
             ),
             tokens: Arc::new(token::tests::service(pool)),
+            default_organization_name: DEFAULT_ORGANIZATION.to_string(),
         }
     }
 
@@ -2192,6 +2648,28 @@ mod dispatch_tests {
         let (status, body) = read(resp).await;
         assert_eq!(status, StatusCode::CREATED, "unexpected create status");
         body
+    }
+
+    /// A root-scoped Widget carrying `rise.dev/owner`, for policy-audit tests
+    /// that need the seeded `resource-owner` binding's `labelSelector` to
+    /// match *something* — otherwise every fresh install carries its own
+    /// `selectorMatchesNothing` finding for that binding, which would make
+    /// exact finding-count assertions depend on unrelated seed behavior. A
+    /// root-scoped setter is deliberate: naming a `user:` subject on one
+    /// produces no `inertOwnerLabel` finding of its own (the seeded binding's
+    /// `ResourceOrganization` clamp has no organization to compare against).
+    async fn create_widget_with_owner_label(ctx: &ResourceApiCtx, name: &str) -> Value {
+        create_at(
+            ctx,
+            "example.dev/v1/widgets",
+            json!({
+                "apiVersion": "example.dev/v1",
+                "kind": "Widget",
+                "metadata": {"name": name, "labels": {"rise.dev/owner": "user:nobody"}},
+                "spec": {"size": "large"},
+            }),
+        )
+        .await
     }
 
     // -------------------------------------------------------------------------
@@ -5301,6 +5779,434 @@ mod dispatch_tests {
         .await
         .expect_err("a caller holding neither the subresource nor `get` is masked");
         assert_eq!(err.status, StatusCode::NOT_FOUND, "{}", err.message);
+    }
+
+    // -------------------------------------------------------------------------
+    // Policy audit
+    // -------------------------------------------------------------------------
+
+    /// A binding whose Role existed at creation and was since removed is the
+    /// shape admission accepts (ADR-0001 §6.7) and evaluation treats as zero
+    /// statements; the audit reports it. The listing filters findings the same
+    /// way `pending-deletion` filters rows: per finding, on `list`.
+    #[sqlx::test]
+    async fn policy_audit_filters_findings_by_list_and_counts_hidden(pool: sqlx::PgPool) {
+        let ctx = ctx(pool).await;
+        register_widget_rd(&ctx).await;
+        // A live `rise.dev/owner` setter, so the seeded `resource-owner`
+        // binding's selector matches something — otherwise every fresh
+        // install would carry its own `selectorMatchesNothing` finding and
+        // this test's exact-count assertions below would be noise-dependent.
+        // Root-scoped, so it produces no `inertOwnerLabel` finding of its own
+        // (the seeded binding's `ResourceOrganization` clamp has nothing to
+        // compare a root-scoped resource's organization against).
+        create_widget_with_owner_label(&ctx, "owned").await;
+
+        create_at(
+            &ctx,
+            "rise.dev/v1alpha1/platformroles",
+            json!({
+                "apiVersion": "rise.dev/v1alpha1",
+                "kind": "PlatformRole",
+                "metadata": {"name": "temp-role"},
+                "spec": {"statements": []},
+            }),
+        )
+        .await;
+        let binding = create_at(
+            &ctx,
+            "rise.dev/v1alpha1/platformrolebindings",
+            json!({
+                "apiVersion": "rise.dev/v1alpha1",
+                "kind": "PlatformRoleBinding",
+                "metadata": {"name": "dangling"},
+                "spec": {
+                    "subject": "system:authenticated",
+                    "roleRef": {"kind": "PlatformRole", "name": "temp-role"},
+                },
+            }),
+        )
+        .await;
+        let binding_uid = uid_of(&binding);
+        dispatch_delete_inner(
+            &ctx,
+            "rise.dev/v1alpha1/platformroles/temp-role".to_string(),
+            auth(OPERATOR),
+        )
+        .await
+        .expect("an operator may delete a Role out from under a binding that names it");
+
+        // An operator sees the finding.
+        let resp = dispatch_get_inner(
+            &ctx,
+            "policy-audit".to_string(),
+            auth(OPERATOR),
+            PendingDeletionQuery::default(),
+        )
+        .await
+        .expect("policy audit");
+        let (status, body) = read(resp).await;
+        assert_eq!(status, StatusCode::OK);
+        let findings = body["findings"].as_array().expect("findings array");
+        assert_eq!(findings.len(), 1, "{body}");
+        assert_eq!(findings[0]["category"], "danglingRoleRef");
+        assert_eq!(findings[0]["severity"], "warning");
+        assert_eq!(findings[0]["subject"]["uid"], binding_uid.to_string());
+        assert_eq!(body["hiddenFindings"], 0);
+        assert_eq!(body["truncated"], false);
+        // No Organization exists in this fixture, but the platform tier was
+        // scanned: the block is what tells "healthy" apart from "skipped".
+        assert_eq!(
+            body["scanned"]["organizations"].as_array().unwrap().len(),
+            0
+        );
+        assert!(body["scanned"]["platformBindings"].as_u64().unwrap() >= 1);
+
+        // A caller granted `list` only on a different kind sees nothing, but
+        // the hidden count says something was withheld — never a bare 403
+        // that would confirm something is there.
+        grant_authenticated(
+            &ctx,
+            "widget-lister",
+            json!([{
+                "effect": "Allow",
+                "kinds": ["example.dev/Widget"],
+                "verbs": ["list"],
+            }]),
+        )
+        .await;
+        let resp = dispatch_get_inner(
+            &ctx,
+            "policy-audit".to_string(),
+            auth(PLAIN_USER),
+            PendingDeletionQuery::default(),
+        )
+        .await
+        .expect("a listing is never a 403");
+        let (status, body) = read(resp).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(
+            body["findings"].as_array().expect("findings array").len(),
+            0
+        );
+        assert_eq!(body["hiddenFindings"], 1);
+    }
+
+    /// `limit` bounds the findings returned and `truncated` says whether more
+    /// existed than the cap allowed through.
+    #[sqlx::test]
+    async fn policy_audit_limit_and_truncated(pool: sqlx::PgPool) {
+        let ctx = ctx(pool).await;
+        register_widget_rd(&ctx).await;
+        // Silence the seeded `resource-owner` binding's own
+        // `selectorMatchesNothing` finding — see the comment in
+        // `policy_audit_filters_findings_by_list_and_counts_hidden` — so the
+        // two dangling-role-ref findings below are the only ones counted.
+        create_widget_with_owner_label(&ctx, "owned").await;
+        for n in 0..2 {
+            let role_name = format!("temp-role-{n}");
+            create_at(
+                &ctx,
+                "rise.dev/v1alpha1/platformroles",
+                json!({
+                    "apiVersion": "rise.dev/v1alpha1",
+                    "kind": "PlatformRole",
+                    "metadata": {"name": role_name.clone()},
+                    "spec": {"statements": []},
+                }),
+            )
+            .await;
+            create_at(
+                &ctx,
+                "rise.dev/v1alpha1/platformrolebindings",
+                json!({
+                    "apiVersion": "rise.dev/v1alpha1",
+                    "kind": "PlatformRoleBinding",
+                    "metadata": {"name": format!("dangling-{n}")},
+                    "spec": {
+                        "subject": "system:authenticated",
+                        "roleRef": {"kind": "PlatformRole", "name": role_name.clone()},
+                    },
+                }),
+            )
+            .await;
+            dispatch_delete_inner(
+                &ctx,
+                format!("rise.dev/v1alpha1/platformroles/{role_name}"),
+                auth(OPERATOR),
+            )
+            .await
+            .expect("delete the role out from under its binding");
+        }
+
+        let resp = dispatch_get_inner(
+            &ctx,
+            "policy-audit".to_string(),
+            auth(OPERATOR),
+            PendingDeletionQuery {
+                limit: Some(1),
+                ..Default::default()
+            },
+        )
+        .await
+        .expect("policy audit");
+        let (status, body) = read(resp).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(
+            body["findings"].as_array().expect("findings array").len(),
+            1
+        );
+        assert_eq!(body["truncated"], true);
+
+        let resp = dispatch_get_inner(
+            &ctx,
+            "policy-audit".to_string(),
+            auth(OPERATOR),
+            PendingDeletionQuery::default(),
+        )
+        .await
+        .expect("policy audit");
+        let (status, body) = read(resp).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(
+            body["findings"].as_array().expect("findings array").len(),
+            2
+        );
+        assert_eq!(body["truncated"], false);
+    }
+
+    /// The default Organization is administered by operators through the
+    /// seeded `system-admin` binding, not a per-organization admin (decision
+    /// D4) — its `OrganizationWithoutAdmin` finding is real, but demoted to
+    /// `info` rather than `warning`.
+    #[sqlx::test]
+    async fn policy_audit_downgrades_the_default_organizations_missing_admin_to_info(
+        pool: sqlx::PgPool,
+    ) {
+        let ctx = ctx(pool).await;
+        create_org(&ctx, DEFAULT_ORGANIZATION).await;
+
+        let resp = dispatch_get_inner(
+            &ctx,
+            "policy-audit".to_string(),
+            auth(OPERATOR),
+            PendingDeletionQuery::default(),
+        )
+        .await
+        .expect("policy audit");
+        let (status, body) = read(resp).await;
+        assert_eq!(status, StatusCode::OK);
+        let findings = body["findings"].as_array().expect("findings array");
+        let default_org_finding = findings
+            .iter()
+            .find(|finding| finding["category"] == "organizationWithoutAdmin")
+            .expect("the default Organization has no admin binding of its own");
+        assert_eq!(default_org_finding["severity"], "info");
+        assert_eq!(default_org_finding["subject"]["name"], DEFAULT_ORGANIZATION);
+    }
+
+    // -------------------------------------------------------------------------
+    // Explain subresource
+    // -------------------------------------------------------------------------
+
+    /// The subresource is its own grant, refused rather than answered by
+    /// `(get, Kind)` alone; an org admin explaining their own access sees the
+    /// org-cap Deny recorded but exempted, and the admin grant deciding
+    /// (mirrors `explain_reports_ignored_denies_with_their_provenance` in
+    /// `crates/rise-authz/tests/engine.rs`, through the HTTP handlers).
+    #[sqlx::test]
+    async fn explain_requires_its_own_grant_and_reports_the_org_admins_exempted_deny(
+        pool: sqlx::PgPool,
+    ) {
+        let ctx = ctx(pool).await;
+        create_org(&ctx, "acme").await;
+        create_at(
+            &ctx,
+            "rise.dev/v1alpha1/roles/acme",
+            json!({
+                "apiVersion": "rise.dev/v1alpha1",
+                "kind": "Role",
+                "metadata": {"name": "org-cap"},
+                "spec": {"statements": [{
+                    "effect": "Deny",
+                    "kinds": ["rise.dev/Organization"],
+                    "verbs": ["delete"],
+                }]},
+            }),
+        )
+        .await;
+        create_at(
+            &ctx,
+            "rise.dev/v1alpha1/rolebindings/acme",
+            json!({
+                "apiVersion": "rise.dev/v1alpha1",
+                "kind": "RoleBinding",
+                "metadata": {"name": "org-cap"},
+                "spec": {
+                    "subject": "system:authenticated",
+                    "scope": "rise.dev/Organization/acme",
+                    "roleRef": {"kind": "Role", "name": "org-cap"},
+                },
+            }),
+        )
+        .await;
+
+        // A reader who may see the Organization but was not granted `explain`
+        // is refused, not masked — the subresource is a separate grant.
+        grant_authenticated(
+            &ctx,
+            "org-reader",
+            json!([{
+                "effect": "Allow",
+                "kinds": ["rise.dev/Organization"],
+                "verbs": ["get"],
+            }]),
+        )
+        .await;
+        let err = dispatch_get_inner(
+            &ctx,
+            "rise.dev/v1alpha1/organizations/acme/explain".to_string(),
+            auth(PLAIN_USER),
+            PendingDeletionQuery {
+                verb: Some("delete".to_string()),
+                ..Default::default()
+            },
+        )
+        .await
+        .expect_err("the subresource is its own grant");
+        assert_eq!(err.status, StatusCode::FORBIDDEN, "{}", err.message);
+        assert!(err.message.contains("explain"), "{}", err.message);
+
+        // An org admin explaining their own access: the admin binding decides,
+        // and the cap Deny is recorded but exempted. A `user:` subject must
+        // identify a live User resource named for the principal's own subject
+        // — the typed session's `user.id`, which is also what the
+        // authorization snapshot names as this caller's subject.
+        let alice = auth("alice@example.com");
+        let alice_uid = alice.user().unwrap().id;
+        create_at(
+            &ctx,
+            "rise.dev/v1alpha1/users",
+            json!({
+                "apiVersion": "rise.dev/v1alpha1",
+                "kind": "User",
+                "metadata": {"name": alice_uid.to_string()},
+                "spec": {},
+            }),
+        )
+        .await;
+        create_at(
+            &ctx,
+            "rise.dev/v1alpha1/rolebindings/acme",
+            json!({
+                "apiVersion": "rise.dev/v1alpha1",
+                "kind": "RoleBinding",
+                "metadata": {"name": "admin"},
+                "spec": {
+                    "subject": format!("user:{alice_uid}"),
+                    "scope": "rise.dev/Organization/acme",
+                    "roleRef": {"kind": "PlatformRole", "name": "org-admin"},
+                },
+            }),
+        )
+        .await;
+
+        let resp = dispatch_get_inner(
+            &ctx,
+            "rise.dev/v1alpha1/organizations/acme/explain".to_string(),
+            alice,
+            PendingDeletionQuery {
+                verb: Some("delete".to_string()),
+                ..Default::default()
+            },
+        )
+        .await
+        .expect("an org admin may explain their own access");
+        let (status, body) = read(resp).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(body["decision"], "allow");
+        assert_eq!(body["operatorOverride"], false);
+        let contributions = body["contributions"]
+            .as_array()
+            .expect("contributions array");
+        assert!(
+            contributions.iter().any(
+                |c| c["retention"] == "retained" && c["binding"]["role"]["name"] == "org-admin"
+            ),
+            "{body}"
+        );
+        assert!(
+            contributions
+                .iter()
+                .any(|c| c["retention"] == "exemptDeny:organizationAdmin"
+                    && c["binding"]["role"]["name"] == "org-cap"),
+            "{body}"
+        );
+    }
+
+    // -------------------------------------------------------------------------
+    // Write-time policy-audit warnings
+    // -------------------------------------------------------------------------
+
+    /// A create of a `PlatformRoleBinding` whose `subjectMembership:
+    /// ResourceOrganization` can never bite (its subject already carries its
+    /// own organization) still succeeds, and carries the no-op finding as a
+    /// `Warning` response header — diagnostics never reject a write
+    /// (ADR-0001 §5).
+    #[sqlx::test]
+    async fn creating_a_no_op_platform_binding_returns_a_warning_header(pool: sqlx::PgPool) {
+        let ctx = ctx(pool).await;
+        create_org(&ctx, "acme").await;
+        create_at(
+            &ctx,
+            "rise.dev/v1alpha1/groups/acme",
+            json!({
+                "apiVersion": "rise.dev/v1alpha1",
+                "kind": "Group",
+                "metadata": {"name": "platform"},
+                "spec": {},
+            }),
+        )
+        .await;
+        create_at(
+            &ctx,
+            "rise.dev/v1alpha1/platformroles",
+            json!({
+                "apiVersion": "rise.dev/v1alpha1",
+                "kind": "PlatformRole",
+                "metadata": {"name": "warn-role"},
+                "spec": {"statements": []},
+            }),
+        )
+        .await;
+
+        let resp = dispatch_post_inner(
+            &ctx,
+            "rise.dev/v1alpha1/platformrolebindings".to_string(),
+            auth(OPERATOR),
+            json!({
+                "apiVersion": "rise.dev/v1alpha1",
+                "kind": "PlatformRoleBinding",
+                "metadata": {"name": "no-op-binding"},
+                "spec": {
+                    "subject": "group:acme/platform",
+                    "subjectMembership": "ResourceOrganization",
+                    "roleRef": {"kind": "PlatformRole", "name": "warn-role"},
+                },
+            }),
+        )
+        .await
+        .expect("the write succeeds despite the no-op shape");
+        assert_eq!(resp.status(), StatusCode::CREATED);
+        let warnings: Vec<&axum::http::HeaderValue> = resp
+            .headers()
+            .get_all(axum::http::header::WARNING)
+            .iter()
+            .collect();
+        assert_eq!(warnings.len(), 1, "{warnings:?}");
+        let text = warnings[0].to_str().expect("ascii warning header");
+        assert!(text.starts_with("299 - \""), "{text}");
+        assert!(text.contains("can never bite"), "{text}");
     }
 
     /// A malformed body under a parent the caller cannot read is masked too.
