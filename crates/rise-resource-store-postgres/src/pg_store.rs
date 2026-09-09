@@ -6,9 +6,10 @@ use rise_resource_api::{
     is_immutable_policy_seed, validate_controller_id, validate_labels, validate_resource_name,
     CollectionInfo, CreateResourceParams, DeleteOutcome, DeletionBlocker,
     DeletionBlockerRelationship, DeletionBlockerReport, NoOpValidator, OwnerReference, PathSegment,
-    ResourceApi, ResourceDefinitionSpec, ResourceKind, ResourceRow, ResourceStore, SpecValidator,
-    StoreError, UpdateResourceParams, API_VERSION_V1ALPHA1, CASCADE_DELETION_FINALIZER,
-    MAX_PARENT_CHAIN_DEPTH, ORGANIZATION_KIND, RESOURCE_DEFINITION_KIND, SYSTEM_FINALIZER_PREFIX,
+    PathWalk, ResourceApi, ResourceDefinitionSpec, ResourceKind, ResourceRow, ResourceStore,
+    SpecValidator, StoreError, UpdateResourceParams, API_VERSION_V1ALPHA1,
+    CASCADE_DELETION_FINALIZER, MAX_PARENT_CHAIN_DEPTH, ORGANIZATION_KIND,
+    RESOURCE_DEFINITION_KIND, SYSTEM_FINALIZER_PREFIX,
 };
 use sqlx::{PgPool, Row};
 
@@ -1901,86 +1902,54 @@ impl ResourceStore for PgResourceStore {
     }
 
     async fn resolve_path(&self, segments: &[PathSegment]) -> Result<Vec<ResourceRow>, StoreError> {
-        if segments.is_empty() {
-            return Err(StoreError::EmptyPath);
-        }
-
+        // `PathWalk` owns the chain rules — root parent first, kind and
+        // parent checks on a `uid:` segment, leaf versus ancestor misses.
+        // This store only answers one row per segment, inside one
+        // transaction so the chain is read from a single snapshot.
+        let mut walk = PathWalk::new(segments)?;
         let mut connection = self.connection().await?;
         let mut tx = connection.begin().await.map_err(Self::db_error)?;
-        let mut chain: Vec<ResourceRow> = Vec::with_capacity(segments.len());
-        let mut current_parent: Option<Uuid> = None;
-
-        for (idx, segment) in segments.iter().enumerate() {
-            let row = match segment {
+        while let Some((segment, parent)) = walk.pending() {
+            let row: Option<PgResourceRow> = match segment {
                 PathSegment::Name {
                     api_versions,
                     kind,
                     name,
-                } => {
-                    let row: Option<PgResourceRow> = match current_parent {
-                        None => sqlx::query_as::<_, PgResourceRow>(
-                            "SELECT * FROM resource_store.resources WHERE api_version = ANY($1) AND kind = $2 AND name = $3 AND parent_uid IS NULL",
-                        )
-                        .bind(api_versions)
-                        .bind(kind)
-                        .bind(name)
-                        .fetch_optional(&mut *tx)
-                        .await
-                        .map_err(Self::db_error)?,
-                        Some(pid) => sqlx::query_as::<_, PgResourceRow>(
-                            "SELECT * FROM resource_store.resources WHERE api_version = ANY($1) AND kind = $2 AND name = $3 AND parent_uid = $4",
-                        )
-                        .bind(api_versions)
-                        .bind(kind)
-                        .bind(name)
-                        .bind(pid)
-                        .fetch_optional(&mut *tx)
-                        .await
-                        .map_err(Self::db_error)?,
-                    };
-                    match row {
-                        Some(r) => r,
-                        None if idx + 1 == segments.len() => return Err(StoreError::NotFound),
-                        None => return Err(StoreError::ParentNotFound),
-                    }
-                }
-                PathSegment::Uid {
-                    api_versions,
-                    kind,
-                    uid,
-                } => {
-                    let row: PgResourceRow = match sqlx::query_as::<_, PgResourceRow>(
+                } => match parent {
+                    None => sqlx::query_as::<_, PgResourceRow>(
+                        "SELECT * FROM resource_store.resources WHERE api_version = ANY($1) AND kind = $2 AND name = $3 AND parent_uid IS NULL",
+                    )
+                    .bind(api_versions)
+                    .bind(kind)
+                    .bind(name)
+                    .fetch_optional(&mut *tx)
+                    .await
+                    .map_err(Self::db_error)?,
+                    Some(parent) => sqlx::query_as::<_, PgResourceRow>(
+                        "SELECT * FROM resource_store.resources WHERE api_version = ANY($1) AND kind = $2 AND name = $3 AND parent_uid = $4",
+                    )
+                    .bind(api_versions)
+                    .bind(kind)
+                    .bind(name)
+                    .bind(parent)
+                    .fetch_optional(&mut *tx)
+                    .await
+                    .map_err(Self::db_error)?,
+                },
+                PathSegment::Uid { uid, .. } => {
+                    sqlx::query_as::<_, PgResourceRow>(
                         "SELECT * FROM resource_store.resources WHERE uid = $1",
                     )
                     .bind(uid)
                     .fetch_optional(&mut *tx)
                     .await
                     .map_err(Self::db_error)?
-                    {
-                        Some(r) => r,
-                        None if idx + 1 == segments.len() => return Err(StoreError::NotFound),
-                        None => return Err(StoreError::ParentNotFound),
-                    };
-                    if row.kind != *kind || !api_versions.iter().any(|v| v == &row.api_version) {
-                        return Err(StoreError::KindMismatch {
-                            expected: format!("kind {kind} in one of {api_versions:?}"),
-                            got: format!("{}/{}", row.api_version, row.kind),
-                        });
-                    }
-                    if row.parent_uid != current_parent {
-                        // UID is from a different subtree.
-                        return Err(StoreError::ParentNotFound);
-                    }
-                    row
                 }
             };
-
-            current_parent = Some(row.uid);
-            chain.push(row.into());
+            walk.advance(row.map(Into::into))?;
         }
-
         tx.commit().await.map_err(Self::db_error)?;
-        Ok(chain)
+        Ok(walk.finish())
     }
 
     async fn operator_update_status(
