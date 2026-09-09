@@ -196,6 +196,8 @@ Editing `org-admin` changes what administrators may do in every organization, ne
 
 An org `RoleBinding`'s subject must belong to the Organization the binding sits in. A subject that names its own organization — `group:`, `serviceaccount:`, `org:` — is checked at write time and refused on a mismatch: both organizations are fixed once the row exists, so such a binding would read as a cross-org grant while granting nothing, forever. `user:` and `system:authenticated` subjects are accepted, because their affiliation is a live membership question rather than a property of the identifier.
 
+A new Organization gets its first administrator through `bootstrap.admin` on the Organization create ([Organization bootstrap](#organization-bootstrap)) — the atomic alternative to authoring an org-root `RoleBinding` by hand afterward.
+
 Because the Organization is implied by placement, that subject also accepts the relative form `group:<name>`, expanded against the parent before the row is stored:
 
 ```json
@@ -307,6 +309,41 @@ Authorization: Bearer <operator-jwt>
 - Server-controlled fields (`uid`, `revision`, `discriminator`, `deletionTimestamp`) are rejected on create.
 - `status` is rejected on create.
 - Response: `201 Created` with the created resource (envelope projected to the URL's served version).
+
+#### Organization bootstrap
+
+An `Organization` create may carry a top-level `bootstrap` field to create its
+first administrator atomically, alongside the Organization itself:
+
+```http
+POST /api/v1/resources/rise.dev/v1alpha1/organizations
+Content-Type: application/json
+Authorization: Bearer <operator-jwt>
+
+{
+  "apiVersion": "rise.dev/v1alpha1",
+  "kind": "Organization",
+  "metadata": { "name": "acme" },
+  "spec": { "displayName": "Acme" },
+  "bootstrap": { "admin": "user:u-01j9z..." }
+}
+```
+
+`bootstrap` is rejected with `400` on any kind other than a `rise.dev/v1alpha1`
+`Organization`, and `bootstrap.admin` must be a `user:<name>` subject or the
+request is `400`. When present, the handler builds a `RoleBinding` named
+`org-admin-<user name>` under the new Organization — exact org-root scope, no
+selector, `roleRef: { kind: PlatformRole, name: org-admin }`, the structural
+shape ADR-0001 §5 requires for org-admin standing — in the *same* transaction
+as the Organization create: `require_create`, the grant gate, and admission
+all run against it exactly as they would for an ordinary `RoleBinding` create.
+A gate refusal, or admission finding no live User named by `admin` (`422`, the
+store's message), rolls the whole write back — the Organization is never
+persisted without the admin the caller asked to bootstrap alongside it. The
+response is the ordinary `201` Organization envelope; the binding is
+discoverable afterward by listing `rolebindings` under the org. `bootstrap` is
+a request parameter, never stored state — nothing about it appears in the
+Organization's `spec`.
 
 ### Update (PUT)
 

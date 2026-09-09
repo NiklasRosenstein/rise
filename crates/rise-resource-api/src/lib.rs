@@ -167,6 +167,13 @@ pub struct CreateResourceRequest<TSpec: Default = JsonObject> {
     pub metadata: CreateResourceMetadata,
     #[serde(default)]
     pub spec: TSpec,
+    /// Atomically bootstrap the resource's first administrator alongside the
+    /// resource itself. Only meaningful on an `Organization` create (ADR-0001
+    /// §5) — the handler rejects it on every other kind. Deliberately an
+    /// envelope-level request parameter rather than a `spec` field: it drives
+    /// a second write the request causes, not state the Organization stores.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bootstrap: Option<CreateBootstrap>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, Default)]
@@ -181,6 +188,19 @@ pub struct CreateResourceMetadata {
     pub finalizers: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub owner_references: Vec<OwnerReference>,
+}
+
+/// The admin to bootstrap alongside a newly created `Organization`.
+///
+/// The handler builds a `RoleBinding` for `admin` under the new Organization,
+/// naming `PlatformRole/org-admin` — the exact shape ADR-0001 §5 requires for
+/// org-admin standing — in the same transaction as the Organization create,
+/// so the two either both persist or neither does.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct CreateBootstrap {
+    /// Must be a `user:<name>` subject; the handler rejects any other kind.
+    pub admin: SubjectId,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
