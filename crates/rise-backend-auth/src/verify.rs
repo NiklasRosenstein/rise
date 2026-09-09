@@ -417,6 +417,8 @@ mod tests {
         }
     }
 
+    /// ADR-0001 scenario 7
+    /// ADR-0001 scenario 48
     #[test]
     fn test_verify_rise_jwt_identity_round_trip() {
         let signer = create_test_signer();

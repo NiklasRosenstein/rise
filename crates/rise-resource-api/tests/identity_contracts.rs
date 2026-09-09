@@ -63,6 +63,7 @@ fn user_and_user_identity_active_default_true_but_null_fails() {
     }
 }
 
+/// ADR-0001 scenario 9
 #[test]
 fn user_profile_is_optional_non_authoritative_and_closed() {
     let user: UserSpec = serde_json::from_value(json!({
@@ -205,6 +206,7 @@ fn external_subject_is_opaque_nonblank_and_bounded() {
     }
 }
 
+/// ADR-0001 scenario 16
 #[test]
 fn membership_is_an_empty_name_bound_marker() {
     let membership: GroupMembershipSpec = serde_json::from_value(json!({})).unwrap();
@@ -285,6 +287,7 @@ fn marker_specs_are_closed_empty_objects() {
     assert_rejected::<ServiceAccountSpec>(json!({"issuer": "https://issuer.example"}));
 }
 
+/// ADR-0001 scenario 8
 #[test]
 fn identity_kind_definitions_capture_fixed_adr_placement() {
     let definitions: Vec<_> = IDENTITY_KIND_DEFINITIONS
