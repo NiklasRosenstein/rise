@@ -12,9 +12,9 @@
 use std::collections::BTreeMap;
 
 use rise_resource_api::{
-    resource_owner_binding_spec, LabelKey, LabelSelector, PathSegment, ResourceRow, ResourceStore,
-    RoleRefKind, Scope, StoreError, SubjectId, SubjectMembership, UserSpec, API_GROUP,
-    API_VERSION_V1ALPHA1, CONTROLLER_KIND, GROUP_KIND, GROUP_MEMBERSHIP_KIND,
+    resource_owner_binding_spec, Effect, LabelKey, LabelSelector, PathSegment, PolicyStatement,
+    ResourceRow, ResourceStore, RoleRefKind, Scope, StoreError, SubjectId, SubjectMembership,
+    UserSpec, API_GROUP, API_VERSION_V1ALPHA1, CONTROLLER_KIND, GROUP_KIND, GROUP_MEMBERSHIP_KIND,
     MAX_PARENT_CHAIN_DEPTH, ORGANIZATION_KIND, ORG_ADMIN_PLATFORM_ROLE, OWNER_LABEL_KEY,
     SERVICE_ACCOUNT_KIND, USER_KIND,
 };
@@ -27,7 +27,10 @@ use crate::engine::{
     qualifies_as_org_admin, AuthorizationEngine, AuthorizationError, MembershipResolver,
     ResourceTree,
 };
-use crate::policy::{resolve_subject, BindingTier};
+use crate::policy::{
+    deny_covers_allow, domain_covers, replaces, resolve_subject, subject_covers, ApplicableBinding,
+    BindingTier, PolicyDomain,
+};
 
 /// What to audit, and how much work to do.
 ///
@@ -201,6 +204,18 @@ impl AuthorizationEngine {
             scope.max_findings,
             detect_selector_matches_nothing(store, &platform).await?,
         );
+        append_capped(
+            &mut findings,
+            &mut truncated,
+            scope.max_findings,
+            detect_shadowed_by_deny(&platform, &platform),
+        );
+        append_capped(
+            &mut findings,
+            &mut truncated,
+            scope.max_findings,
+            detect_shadowed_by_replacement(&platform, &platform),
+        );
 
         append_capped(
             &mut findings,
@@ -268,6 +283,18 @@ impl AuthorizationEngine {
                 &mut truncated,
                 scope.max_findings,
                 detect_selector_matches_nothing(store, &org_bindings).await?,
+            );
+            append_capped(
+                &mut findings,
+                &mut truncated,
+                scope.max_findings,
+                detect_shadowed_by_deny(&platform, &org_bindings),
+            );
+            append_capped(
+                &mut findings,
+                &mut truncated,
+                scope.max_findings,
+                detect_shadowed_by_replacement(&platform, &org_bindings),
             );
             append_capped(
                 &mut findings,
@@ -1041,6 +1068,166 @@ fn selector_matches_labels(labels: &BTreeMap<String, String>, selector: &LabelSe
             .is_none_or(|expected| expected == value),
         None => false,
     }
+}
+
+// ---------------------------------------------------------------------------
+// Row 9: ShadowedAllow { by: Deny }
+// ---------------------------------------------------------------------------
+
+/// A binding's `PolicyDomain`: the same `(scope, selector)` pair
+/// [`domain_covers`] and [`replaces`] compare over, borrowed straight from the
+/// binding facts the audit already loaded.
+fn binding_domain(binding: &BindingFact) -> PolicyDomain {
+    PolicyDomain {
+        scope: binding.scope.clone(),
+        selector: binding.selector.clone(),
+    }
+}
+
+/// A `binding`'s field values reduced to what [`replaces`] and
+/// [`wildcard_allows_suppressed`](crate::policy::wildcard_allows_suppressed)
+/// need — the subject, scope and selector its placement is judged by — without
+/// cloning its (possibly large) statement list.
+fn as_applicable(binding: &BindingFact) -> ApplicableBinding<()> {
+    ApplicableBinding {
+        provenance: (),
+        subject: binding.subject.clone(),
+        scope: binding.scope.clone(),
+        selector: binding.selector.clone(),
+        tier: binding.tier.clone(),
+        statements: Vec::new(),
+    }
+}
+
+/// An Allow statement in a live binding that a platform-tier Deny shadows.
+///
+/// Platform Denies only: an org Deny is escaped by that org's own admins
+/// (ADR-0001 §5's exemption), so it never shadows an Allow for every caller
+/// the way a platform Deny does. `Info`, not `Warning`: a platform ceiling
+/// sitting over a narrower Allow is usually deliberate defense in depth, not a
+/// mistake — unlike a dangling reference or a stale scope, nothing here is
+/// obviously wrong.
+pub fn detect_shadowed_by_deny(
+    platform: &[BindingFact],
+    bindings: &[BindingFact],
+) -> Vec<AuditFinding> {
+    let mut findings = Vec::new();
+    for binding in bindings {
+        let allows: Vec<&PolicyStatement> = binding
+            .statements
+            .iter()
+            .filter(|statement| statement.effect == Effect::Allow)
+            .collect();
+        if allows.is_empty() {
+            continue;
+        }
+        let domain = binding_domain(binding);
+        for deny_binding in platform {
+            if deny_binding.provenance.uid == binding.provenance.uid {
+                continue;
+            }
+            let denies: Vec<&PolicyStatement> = deny_binding
+                .statements
+                .iter()
+                .filter(|statement| statement.effect == Effect::Deny)
+                .collect();
+            if denies.is_empty() {
+                continue;
+            }
+            if !subject_covers(&deny_binding.subject, &binding.subject) {
+                continue;
+            }
+            if !domain_covers(&binding_domain(deny_binding), &domain) {
+                continue;
+            }
+            let covered = allows
+                .iter()
+                .filter(|allow| denies.iter().any(|deny| deny_covers_allow(deny, allow)))
+                .count();
+            if covered == 0 {
+                continue;
+            }
+            findings.push(AuditFinding {
+                subject: binding_subject(binding),
+                category: FindingCategory::ShadowedAllow { by: Shadow::Deny },
+                severity: Severity::Info,
+                related: vec![binding_subject(deny_binding)],
+                detail: format!(
+                    "{} '{}' denies {covered} of this binding's {} Allow statements; they grant nothing under it.",
+                    deny_binding.provenance.kind,
+                    deny_binding
+                        .provenance
+                        .name
+                        .clone()
+                        .unwrap_or_else(|| deny_binding.provenance.uid.to_string()),
+                    allows.len(),
+                ),
+            });
+        }
+    }
+    findings
+}
+
+// ---------------------------------------------------------------------------
+// Row 10: ShadowedAllow { by: Replacement }
+// ---------------------------------------------------------------------------
+
+/// An Allow statement a wildcard-scoped platform binding loses to a more
+/// specific binding through ADR-0001 §1's wildcard-replacement pairing.
+///
+/// Only platform bindings can carry `scope: "*"` at all — org containment
+/// keeps an org binding's scope inside its own parent's subtree — so the
+/// candidate that replaces it can be platform or org tier, but the wildcard
+/// side is always read from `platform`. Always `Warning`: unlike a platform
+/// Deny ceiling, this is a specific binding actively taking over from a
+/// broader one the moment both are applicable, which is worth surfacing even
+/// when intentional.
+pub fn detect_shadowed_by_replacement(
+    platform: &[BindingFact],
+    bindings: &[BindingFact],
+) -> Vec<AuditFinding> {
+    let mut findings = Vec::new();
+    for wildcard in platform
+        .iter()
+        .filter(|binding| binding.scope.is_wildcard())
+    {
+        if !wildcard
+            .statements
+            .iter()
+            .any(|statement| statement.effect == Effect::Allow)
+        {
+            // Nothing for a more specific binding to drop.
+            continue;
+        }
+        let wildcard_applicable = as_applicable(wildcard);
+        for candidate in bindings {
+            if candidate.provenance.uid == wildcard.provenance.uid {
+                continue;
+            }
+            if !replaces(&as_applicable(candidate), &wildcard_applicable) {
+                continue;
+            }
+            findings.push(AuditFinding {
+                subject: binding_subject(wildcard),
+                category: FindingCategory::ShadowedAllow {
+                    by: Shadow::Replacement,
+                },
+                severity: Severity::Warning,
+                related: vec![binding_subject(candidate)],
+                detail: format!(
+                    "on resources inside scope '{}', this binding's Allow statements are dropped by wildcard replacement; {} '{}' applies its own statements there instead.",
+                    candidate.scope,
+                    candidate.provenance.kind,
+                    candidate
+                        .provenance
+                        .name
+                        .clone()
+                        .unwrap_or_else(|| candidate.provenance.uid.to_string()),
+                ),
+            });
+        }
+    }
+    findings
 }
 
 // ---------------------------------------------------------------------------

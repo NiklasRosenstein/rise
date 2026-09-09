@@ -4,7 +4,7 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use rise_authz::engine::{
-    AuditScope, AuthorizationEngine, FindingCategory, Severity, ORG_ADMIN_PLATFORM_ROLE,
+    AuditScope, AuthorizationEngine, FindingCategory, Severity, Shadow, ORG_ADMIN_PLATFORM_ROLE,
 };
 use rise_resource_api::ResourceStore;
 use serde_json::json;
@@ -583,6 +583,269 @@ async fn selector_matches_nothing_positive_and_negative() {
     };
     assert_eq!(severity_of("outside-scope"), Severity::Warning);
     assert_eq!(severity_of("template-unmatched"), Severity::Info);
+}
+
+#[tokio::test]
+async fn shadowed_by_deny_positive_and_negative() {
+    fn deny_binding(name: &str, scope: &str) -> serde_json::Value {
+        json!({
+            "subject": "system:authenticated",
+            "subjectMembership": "Any",
+            "scope": scope,
+            "roleRef": { "kind": "PlatformRole", "name": format!("{name}-role") }
+        })
+    }
+
+    let mut builder = StoreBuilder::new();
+    let acme = builder.resource(ORGANIZATION, "acme", None);
+    let other_org = builder.resource(ORGANIZATION, "other-org", None);
+
+    // Three platform-tier Denies, each covering a different slice, so the
+    // positive and negative cases can be told apart by which one is (or is
+    // not) named in a finding's `related`.
+    builder.role(
+        PLATFORM_ROLE,
+        "covers-role",
+        None,
+        json!([{ "effect": "Deny", "kinds": "*", "verbs": ["get", "list"] }]),
+    );
+    builder.binding(
+        PLATFORM_ROLE_BINDING,
+        "covers",
+        None,
+        deny_binding("covers", "*"),
+    );
+    // Negative: narrower on verbs than any Allow it is tested against below.
+    builder.role(
+        PLATFORM_ROLE,
+        "narrow-role",
+        None,
+        json!([{ "effect": "Deny", "kinds": "*", "verbs": ["delete"] }]),
+    );
+    builder.binding(
+        PLATFORM_ROLE_BINDING,
+        "narrow",
+        None,
+        deny_binding("narrow", "*"),
+    );
+    // Negative: a concrete-scope Deny cannot cover a wildcard-scoped Allow,
+    // regardless of how permissive it otherwise is.
+    builder.role(
+        PLATFORM_ROLE,
+        "scoped-role",
+        None,
+        json!([{ "effect": "Deny", "kinds": "*", "verbs": "*" }]),
+    );
+    builder.binding(
+        PLATFORM_ROLE_BINDING,
+        "scoped",
+        None,
+        deny_binding("scoped", "rise.dev/Organization/acme"),
+    );
+
+    // Positive: an org Allow fully covered by both `covers` (identical verbs)
+    // and `scoped` (wildcard verbs, matching concrete scope); `narrow` misses
+    // it because "list" is not among the verbs it denies.
+    builder.role(
+        ROLE,
+        "reader",
+        Some(acme),
+        json!([{ "effect": "Allow", "kinds": "*", "verbs": ["get", "list"] }]),
+    );
+    builder.binding(
+        ROLE_BINDING,
+        "shadowed",
+        Some(acme),
+        json!({
+            "subject": "user:u-alice",
+            "scope": "rise.dev/Organization/acme",
+            "roleRef": { "kind": "Role", "name": "reader" }
+        }),
+    );
+
+    // Negative: a platform-tier Allow with a wildcard scope. `scoped`'s
+    // concrete scope can never cover it, and its verb ("update") is missed by
+    // both `covers` and `narrow`, so nothing shadows it.
+    builder.role(
+        PLATFORM_ROLE,
+        "wide-allow-role",
+        None,
+        json!([{ "effect": "Allow", "kinds": "*", "verbs": ["update"] }]),
+    );
+    builder.binding(
+        PLATFORM_ROLE_BINDING,
+        "wide-allow",
+        None,
+        json!({
+            "subject": "system:authenticated",
+            "subjectMembership": "Any",
+            "scope": "*",
+            "roleRef": { "kind": "PlatformRole", "name": "wide-allow-role" }
+        }),
+    );
+
+    // Negative: an org-tier Deny is never a shadowing candidate — only
+    // `platform` bindings are, because an org Deny is escaped by that org's
+    // own admins. Its Allow target's verb ("update") is also outside every
+    // platform Deny's reach, so this row only turns up empty-handed.
+    builder.role(
+        ROLE,
+        "org-ceiling",
+        Some(other_org),
+        json!([{ "effect": "Deny", "kinds": "*", "verbs": "*" }]),
+    );
+    builder.binding(
+        ROLE_BINDING,
+        "org-deny",
+        Some(other_org),
+        json!({
+            "subject": "system:authenticated",
+            "scope": "rise.dev/Organization/other-org",
+            "roleRef": { "kind": "Role", "name": "org-ceiling" }
+        }),
+    );
+    builder.role(
+        ROLE,
+        "updater",
+        Some(other_org),
+        json!([{ "effect": "Allow", "kinds": "*", "verbs": ["update"] }]),
+    );
+    builder.binding(
+        ROLE_BINDING,
+        "clean-target",
+        Some(other_org),
+        json!({
+            "subject": "user:u-dave",
+            "scope": "rise.dev/Organization/other-org",
+            "roleRef": { "kind": "Role", "name": "updater" }
+        }),
+    );
+
+    let store = builder.build();
+    let engine = engine(store, FakeMemberships::none());
+
+    let report = engine.audit(&every_org()).await.unwrap();
+    let mut flagged: Vec<(&str, &str)> = report
+        .findings
+        .iter()
+        .filter(|finding| finding.category == FindingCategory::ShadowedAllow { by: Shadow::Deny })
+        .map(|finding| {
+            (
+                finding.subject.name.as_str(),
+                finding.related[0].name.as_str(),
+            )
+        })
+        .collect();
+    flagged.sort_unstable();
+    assert_eq!(
+        flagged,
+        vec![("shadowed", "covers"), ("shadowed", "scoped")],
+        "{:#?}",
+        report.findings
+    );
+    assert!(report
+        .findings
+        .iter()
+        .filter(|finding| finding.category == FindingCategory::ShadowedAllow { by: Shadow::Deny })
+        .all(|finding| finding.severity == Severity::Info));
+}
+
+#[tokio::test]
+async fn shadowed_by_replacement_positive_and_negative() {
+    let mut builder = StoreBuilder::new();
+    let acme = builder.resource(ORGANIZATION, "acme", None);
+
+    // A platform wildcard binding with an Allow, selecting on `rise.dev/team`.
+    builder.role(PLATFORM_ROLE, "wildcard-role", None, allow_all());
+    builder.binding(
+        PLATFORM_ROLE_BINDING,
+        "wildcard",
+        None,
+        json!({
+            "subject": "user:u-alice",
+            "subjectMembership": "Any",
+            "scope": "*",
+            "labelSelector": { "key": "rise.dev/team" },
+            "roleRef": { "kind": "PlatformRole", "name": "wildcard-role" }
+        }),
+    );
+
+    // Positive: same subject, same selector key, a non-wildcard scope — this
+    // replaces the wildcard binding's Allows wherever both apply.
+    builder.role(ROLE, "reader", Some(acme), allow_all());
+    builder.binding(
+        ROLE_BINDING,
+        "specific",
+        Some(acme),
+        json!({
+            "subject": "user:u-alice",
+            "scope": "rise.dev/Organization/acme",
+            "labelSelector": { "key": "rise.dev/team" },
+            "roleRef": { "kind": "Role", "name": "reader" }
+        }),
+    );
+
+    // Negative: same subject, but a different selector key never pairs up.
+    builder.binding(
+        ROLE_BINDING,
+        "different-key",
+        Some(acme),
+        json!({
+            "subject": "user:u-alice",
+            "scope": "rise.dev/Organization/acme",
+            "labelSelector": { "key": "rise.dev/other" },
+            "roleRef": { "kind": "Role", "name": "reader" }
+        }),
+    );
+
+    // Negative: same selector key, but a different subject never pairs up.
+    builder.binding(
+        ROLE_BINDING,
+        "different-subject",
+        Some(acme),
+        json!({
+            "subject": "user:u-bob",
+            "scope": "rise.dev/Organization/acme",
+            "labelSelector": { "key": "rise.dev/team" },
+            "roleRef": { "kind": "Role", "name": "reader" }
+        }),
+    );
+
+    let store = builder.build();
+    let engine = engine(store, FakeMemberships::none());
+
+    let report = engine.audit(&every_org()).await.unwrap();
+    let flagged: Vec<(&str, &str)> = report
+        .findings
+        .iter()
+        .filter(|finding| {
+            finding.category
+                == FindingCategory::ShadowedAllow {
+                    by: Shadow::Replacement,
+                }
+        })
+        .map(|finding| {
+            (
+                finding.subject.name.as_str(),
+                finding.related[0].name.as_str(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        flagged,
+        vec![("wildcard", "specific")],
+        "{:#?}",
+        report.findings
+    );
+    assert_eq!(
+        report
+            .findings
+            .iter()
+            .find(|finding| finding.subject.name == "wildcard")
+            .unwrap()
+            .severity,
+        Severity::Warning
+    );
 }
 
 #[tokio::test]
