@@ -5,9 +5,9 @@ use uuid::Uuid;
 use rise_resource_api::{
     is_immutable_policy_seed, validate_controller_id, validate_labels, validate_resource_name,
     CollectionInfo, CreateResourceParams, DeleteOutcome, DeletionBlocker,
-    DeletionBlockerRelationship, DeletionBlockerReport, NoOpValidator, OwnerReference, PathSegment,
-    PathWalk, ResourceApi, ResourceDefinitionSpec, ResourceKind, ResourceRow, ResourceStore,
-    SpecValidator, StoreError, UpdateResourceParams, API_VERSION_V1ALPHA1,
+    DeletionBlockerRelationship, DeletionBlockerReport, LabelKey, NoOpValidator, OwnerReference,
+    PathSegment, PathWalk, ResourceApi, ResourceDefinitionSpec, ResourceKind, ResourceRow,
+    ResourceStore, SpecValidator, StoreError, UpdateResourceParams, API_VERSION_V1ALPHA1,
     CASCADE_DELETION_FINALIZER, MAX_PARENT_CHAIN_DEPTH, ORGANIZATION_KIND,
     RESOURCE_DEFINITION_KIND, SYSTEM_FINALIZER_PREFIX,
 };
@@ -1894,6 +1894,38 @@ impl ResourceStore for PgResourceStore {
         .bind(uid)
         .bind(label_key)
         .bind(MAX_PARENT_CHAIN_DEPTH as i32)
+        .fetch_all(&mut *connection)
+        .await
+        .map_err(Self::db_error)?;
+
+        Ok(rows.into_iter().map(Into::into).collect())
+    }
+
+    async fn list_label_setters(
+        &self,
+        key: &LabelKey,
+        limit: i64,
+    ) -> Result<Vec<ResourceRow>, StoreError> {
+        // `?` is JSONB key-existence, which the default `jsonb_ops` GIN class
+        // supports and `jsonb_path_ops` does not — the reason this index (and
+        // this query) does not follow the `owner_references` GIN's operator
+        // class. Ordered oldest-first so a capped caller sees the longest-lived
+        // setters first and a repeated call with a growing limit is stable.
+        let mut connection = self.connection().await?;
+        let rows = sqlx::query_as::<_, PgResourceRow>(
+            r#"
+            SELECT uid, api_version, kind, parent_uid, name, discriminator, labels, metadata,
+                   spec, status, revision, finalizers, owner_references, deletion_timestamp,
+                   created_at, updated_at
+            FROM resource_store.resources
+            WHERE deletion_timestamp IS NULL
+              AND labels ? $1
+            ORDER BY created_at, uid
+            LIMIT $2
+            "#,
+        )
+        .bind(key.as_ref())
+        .bind(limit)
         .fetch_all(&mut *connection)
         .await
         .map_err(Self::db_error)?;

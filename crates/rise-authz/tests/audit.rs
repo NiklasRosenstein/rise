@@ -367,6 +367,225 @@ async fn recipient_boundary_no_op_positive_and_negative() {
 }
 
 #[tokio::test]
+async fn inert_owner_label_positive_and_negative() {
+    let mut builder = StoreBuilder::new();
+    let acme = builder.resource(ORGANIZATION, "acme", None);
+    // A Group named `leads` exists, but under a *different* organization. The
+    // seeded template always substitutes the resource's own organization when
+    // resolving a relative `group:` value, so `group:leads` set on a resource
+    // in `acme` can never reach it.
+    let other_org = builder.resource(ORGANIZATION, "other-org", None);
+    let _foreign_leads = builder.resource(GROUP, "leads", Some(other_org));
+
+    builder.row(USER, "u-alice", None, BTreeMap::new(), user_spec(true));
+    builder.row(USER, "u-bob", None, BTreeMap::new(), user_spec(true));
+
+    builder.labeled(
+        PROJECT,
+        "malformed",
+        Some(acme),
+        &[("rise.dev/owner", "not-a-subject")],
+    );
+    builder.labeled(
+        PROJECT,
+        "foreign-group",
+        Some(acme),
+        &[("rise.dev/owner", "group:leads")],
+    );
+    builder.labeled(
+        PROJECT,
+        "unaffiliated",
+        Some(acme),
+        &[("rise.dev/owner", "user:u-bob")],
+    );
+    builder.labeled(
+        PROJECT,
+        "affiliated",
+        Some(acme),
+        &[("rise.dev/owner", "user:u-alice")],
+    );
+
+    let store = builder.build();
+    let memberships =
+        FakeMemberships::none().with_user_groups("user:u-alice", &["group:acme/platform"]);
+    let engine = engine(store, memberships);
+
+    let report = engine.audit(&one_org("acme")).await.unwrap();
+    let flagged: Vec<(&str, Severity)> = report
+        .findings
+        .iter()
+        .filter(|finding| finding.category == FindingCategory::InertOwnerLabel)
+        .map(|finding| (finding.subject.name.as_str(), finding.severity))
+        .collect();
+    assert!(flagged.contains(&("malformed", Severity::Warning)));
+    assert!(flagged.contains(&("foreign-group", Severity::Warning)));
+    assert!(flagged.contains(&("unaffiliated", Severity::Info)));
+    assert!(
+        !flagged.iter().any(|(name, _)| *name == "affiliated"),
+        "{flagged:#?}"
+    );
+    assert_eq!(flagged.len(), 3, "{flagged:#?}");
+}
+
+#[tokio::test]
+async fn selector_matches_nothing_positive_and_negative() {
+    fn selector_binding(
+        scope: &str,
+        role: &str,
+        key: &str,
+        value: Option<&str>,
+    ) -> serde_json::Value {
+        let mut label_selector = json!({ "key": key });
+        if let Some(value) = value {
+            label_selector["value"] = json!(value);
+        }
+        json!({
+            "subject": "user:u-alice",
+            "scope": scope,
+            "roleRef": { "kind": "Role", "name": role },
+            "labelSelector": label_selector
+        })
+    }
+
+    let mut builder = StoreBuilder::new();
+    // The Organization itself sets one key (ancestor-match) and one more
+    // (wildcard-match).
+    let acme = builder.labeled(
+        ORGANIZATION,
+        "acme",
+        None,
+        &[("rise.dev/team", "x"), ("rise.dev/anything", "v")],
+    );
+    builder.role(
+        ROLE,
+        "reader",
+        Some(acme),
+        json!([{ "effect": "Allow", "kinds": "*", "verbs": ["get"] }]),
+    );
+    builder.role(PLATFORM_ROLE, "everything", None, allow_all());
+
+    // Scenario A: the key is set on an ancestor of the scope root (the
+    // Organization), so nearest-wins inheritance answers it directly.
+    let app = builder.resource(PROJECT, "app", Some(acme));
+    builder.binding(
+        ROLE_BINDING,
+        "ancestor-match",
+        Some(acme),
+        selector_binding("rise.dev/Project/acme/app", "reader", "rise.dev/team", None),
+    );
+    let _ = app;
+
+    // Scenario B: the key is set on a descendant *inside* the scope, which the
+    // root's own effective labels do not carry, so the setter scan finds it.
+    let app2 = builder.resource(PROJECT, "app2", Some(acme));
+    builder.labeled(
+        "Environment",
+        "prod",
+        Some(app2),
+        &[("rise.dev/stage", "beta")],
+    );
+    builder.binding(
+        ROLE_BINDING,
+        "descendant-match",
+        Some(acme),
+        selector_binding(
+            "rise.dev/Project/acme/app2",
+            "reader",
+            "rise.dev/stage",
+            Some("beta"),
+        ),
+    );
+
+    // Scenario C: the only setter of the key lies outside the binding's scope
+    // (a sibling Project, not a descendant of the scope root).
+    let app3 = builder.resource(PROJECT, "app3", Some(acme));
+    builder.labeled(PROJECT, "far", Some(acme), &[("rise.dev/region", "us")]);
+    builder.binding(
+        ROLE_BINDING,
+        "outside-scope",
+        Some(acme),
+        selector_binding(
+            "rise.dev/Project/acme/app3",
+            "reader",
+            "rise.dev/region",
+            Some("us"),
+        ),
+    );
+    let _ = app3;
+
+    // Scenario D: the scope root sets the key, but with a different value than
+    // the selector requires.
+    let _app4 = builder.labeled(PROJECT, "app4", Some(acme), &[("rise.dev/env", "staging")]);
+    builder.binding(
+        ROLE_BINDING,
+        "value-mismatch",
+        Some(acme),
+        selector_binding(
+            "rise.dev/Project/acme/app4",
+            "reader",
+            "rise.dev/env",
+            Some("production"),
+        ),
+    );
+
+    // Scenario E: a wildcard-scoped binding, matched by a setter anywhere.
+    builder.binding(
+        PLATFORM_ROLE_BINDING,
+        "wildcard-match",
+        None,
+        json!({
+            "subject": "system:authenticated",
+            "subjectMembership": "Any",
+            "scope": "*",
+            "labelSelector": { "key": "rise.dev/anything" },
+            "roleRef": { "kind": "PlatformRole", "name": "everything" }
+        }),
+    );
+
+    // Scenario F: a dynamic-subject binding selecting on a key nobody sets.
+    // The seeded ownership binding has exactly this shape on a fresh install,
+    // so it is reported at `Info`, not `Warning`.
+    builder.binding(
+        PLATFORM_ROLE_BINDING,
+        "template-unmatched",
+        None,
+        json!({
+            "subject": "${ref.subject}",
+            "subjectMembership": "ResourceOrganization",
+            "scope": "*",
+            "labelSelector": { "key": "rise.dev/owner" },
+            "roleRef": { "kind": "PlatformRole", "name": "everything" }
+        }),
+    );
+
+    let store = builder.build();
+    let engine = engine(store, FakeMemberships::none());
+
+    let report = engine.audit(&every_org()).await.unwrap();
+    let mut flagged = category_names(&report.findings, FindingCategory::SelectorMatchesNothing);
+    flagged.sort_unstable();
+    assert_eq!(
+        flagged,
+        vec!["outside-scope", "template-unmatched", "value-mismatch"],
+        "{:#?}",
+        report.findings
+    );
+    let severity_of = |name: &str| {
+        report
+            .findings
+            .iter()
+            .find(|finding| {
+                finding.category == FindingCategory::SelectorMatchesNothing
+                    && finding.subject.name == name
+            })
+            .map(|finding| finding.severity)
+            .unwrap()
+    };
+    assert_eq!(severity_of("outside-scope"), Severity::Warning);
+    assert_eq!(severity_of("template-unmatched"), Severity::Info);
+}
+
+#[tokio::test]
 async fn organization_without_admin_positive_and_negative() {
     let mut builder = StoreBuilder::new();
     let no_admin = builder.resource(ORGANIZATION, "no-admin", None);
