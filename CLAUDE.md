@@ -366,6 +366,7 @@ cargo clippy --workspace --all-features --all-targets -- -D warnings  # Lint (us
 | What changed | Command | Why |
 |---|---|---|
 | Any `.rs` file | `cargo test --workspace --all-features` | Unit tests (requires `mise run db:migrate` once); `--workspace` covers the support crates but **not** `tests/e2e` |
+| ADR-0001 conformance test markers/scenarios (`/// ADR-0001 scenario N`) | `mise run adr:conformance:check` | Verifies scenarios 1-57 are each claimed by a test and 58-61 are not; see [testing.md](docs/engineering/src/content/docs/testing.md) |
 | `tests/e2e/**` | `cargo fmt --manifest-path tests/e2e/Cargo.toml`, then `cargo clippy --manifest-path tests/e2e/Cargo.toml --all-targets -- -D warnings` and `cargo test --manifest-path tests/e2e/Cargo.toml` | Standalone workspace, checked by CI in its own job |
 | SQLX queries in `rise-deploy` | `mise run sqlx:prepare` | Regenerate offline query cache (commit the result) |
 | SQLX queries in `rise-resource-store-postgres` | `mise run resource-store-postgres:sqlx:prepare` | Crate-local offline cache (commit the result) |

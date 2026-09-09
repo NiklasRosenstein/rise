@@ -151,6 +151,9 @@ jobs:
       - name: Verify CRDs are up to date
         run: mise crd:check
 
+      - name: Verify ADR-0001 conformance markers
+        run: mise adr:conformance:check
+
       - name: Check formatting
         run: cargo fmt --all -- --check
 
