@@ -70,9 +70,12 @@ scope and avoiding dead-end compatibility layers.
    engine's cap, UID-bound re-resolution on every request, and the bounded
    `act` chain. 10b (planned) is live User/UserIdentity resolution, operator
    selection, and JIT login.
-11. **Planned — full conformance and finalization.** Close every applicable
-   ADR-0001 acceptance scenario, update documentation/status, and audit the
-   implementation requirement by requirement.
+11. **Implemented — full conformance and finalization.** Close every
+   applicable ADR-0001 acceptance scenario (1-57) across three test tiers,
+   index them with a marker convention enforced in lint and CI, and update
+   documentation/status accordingly. Scenarios 58-60 (§9 deferred) and 61
+   (product-operation deferred) stay excluded; scenario 10's
+   operator-selector/JIT halves follow 10b.
 
 ## Increment 1 — dependency-light resource authorization foundation
 
@@ -1919,3 +1922,73 @@ idempotent when a read-modify-write client replays the stored spec.
     variants; a minted token authenticating as the target, gaining a live
     grant, and dying with its UID; a two-hop delegation chain; caps applied to
     `get` and `list`; create-only enforcement; the Rise-issuer guard.
+
+## Increment 11 — full conformance
+
+- State: implemented on branch `claude/adr-0001-conformance-suite-utm9mo`.
+- Acceptance criteria:
+  - Every applicable ADR-0001 appendix scenario (1-57) is claimed by at least
+    one test across three tiers: pure fakes
+    (`crates/rise-authz/tests/{policy,engine,gate}.rs`,
+    `crates/rise-resource-api/tests`), the pure signer
+    (`crates/rise-backend-auth/src/signer.rs`), and Postgres/HTTP
+    (`src/server/resources/handlers/conformance.rs`,
+    `crates/rise-resource-store-postgres/tests`). Scenarios 58-60 (§9
+    deferred) and 61 (product-operation deferred) are claimed by none; the
+    prior tiers already covered most scenarios, so this increment retrofits
+    markers there and adds new tests only for the gaps.
+  - Scenario 10 (operator selectors, JIT login, User tokens with `rise_uid`)
+    stays blocked on 10b: only its "inactive User loses access" half is
+    tested now, and the rest is documented as following live identity
+    resolution rather than faked.
+  - Multi-org admins, membership/admin removal taking effect on the next
+    request, and UID-bound token invalidation each get dedicated coverage in
+    the engine and Postgres/HTTP tiers, closing the gaps `ROADMAP.md`'s
+    milestone named.
+  - No per-subject token count cap and no revocation list exist (ADR
+    L1048-1050 accepts this), so neither is asserted; the two caps the ADR
+    does specify — the platform-global max TTL and the `MAX_DELEGATION_DEPTH`
+    delegation-chain limit — are.
+  - A deterministic test drives a grant and a revocation racing on stale
+    facts through the write-time grant gate's `begin_write`/`create_once`
+    seam directly, rather than two spawned tasks, so the serialization
+    conflict is reproducible; companion stochastic tests spawn concurrent
+    grant/revoke and membership/revoke pairs across several organizations and
+    assert no torn result and no server error, without pinning a fixed
+    outcome mix.
+  - `scripts/check-adr-conformance.sh` greps every `/// ADR-0001 scenario N`
+    doc-comment marker across the crates that hold conformance tests, fails
+    on any of 1-57 missing or any of 58-61 present, and is wired into `mise
+    run lint` and CI's Rust quality job as its own step.
+- Decisions:
+  - Markers are doc comments directly above each covering
+    `#[test]`/`#[tokio::test]`/`#[sqlx::test]`, one line per claimed scenario,
+    rather than a separate registry file — the claim sits next to the
+    assertions that back it, and a grep-based index is enough to keep it
+    honest without a bespoke test harness.
+  - `dispatch_tests`' shared helpers moved out of
+    `src/server/resources/handlers.rs` into sibling `test_support` and
+    `conformance` modules, so the new Postgres/HTTP scenarios reuse the
+    existing context/auth/resource-creation helpers instead of duplicating
+    them, and the new tests stay out of the pre-existing `dispatch_tests`
+    module.
+  - The check script uses `grep`, not `rg`, since CI runners are not
+    guaranteed to have ripgrep installed.
+- Finding — a lost write reported as success, caught by scenario 33's
+  stochastic race and fixed in the same increment:
+  - After a `RoleBinding`/`PlatformRoleBinding` write, the handler runs the
+    write-time policy audit on the same `SERIALIZABLE` transaction to attach
+    `Warning` headers, and treated any audit failure as "no findings". A
+    serialization conflict raised by one of the audit's reads is a statement
+    error inside the transaction, which PostgreSQL answers by aborting it; the
+    following `COMMIT` then silently rolls back and returns without error, so
+    the handler answered `201 Created` for a row that was never persisted.
+  - `attach_binding_write_warnings` now propagates a store error from the
+    audit — retryable when it is a serialization conflict, so the write loop
+    replays the whole attempt — and keeps the log-and-continue path only for
+    the pure diagnostic failures that leave the transaction intact.
+- Verification:
+  - `cargo test -p rise-authz`, `cargo test -p rise-backend-auth`.
+  - `cargo test --workspace --all-features conformance` and `dispatch_tests`
+    against Postgres, plus `cargo test -p rise-resource-store-postgres`.
+  - `mise run adr:conformance:check` and `mise run lint`.

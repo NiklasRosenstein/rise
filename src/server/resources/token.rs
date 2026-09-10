@@ -864,6 +864,13 @@ pub(super) mod tests {
         ));
     }
 
+    /// ADR-0001 scenario 52
+    /// ADR-0001 scenario 54
+    ///
+    /// Body validation depends on nothing about the target: a malformed
+    /// `authorization_details` set fails closed regardless, and `expires_in`
+    /// is clamped to the platform maximum here, at the route, before any
+    /// target is resolved.
     #[tokio::test]
     async fn validate_request_checks_only_the_body() {
         let service = TokenService::new(

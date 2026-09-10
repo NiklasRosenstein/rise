@@ -702,4 +702,57 @@ pub(crate) mod tests {
 
         assert!(result.is_err());
     }
+
+    /// A chain built to an exact depth, outermost delegator first.
+    fn chain(depth: usize) -> ActorClaim {
+        let mut act: Option<Box<ActorClaim>> = None;
+        for level in 0..depth {
+            act = Some(Box::new(ActorClaim {
+                sub: format!("controller:c{level}"),
+                rise_uid: Uuid::new_v4(),
+                act,
+            }));
+        }
+        *act.expect("depth is at least 1")
+    }
+
+    /// ADR-0001 scenario 48
+    #[test]
+    fn sign_identity_jwt_refuses_a_chain_past_the_depth_limit() {
+        let signer = create_test_signer();
+
+        let at_limit = chain(crate::MAX_DELEGATION_DEPTH);
+        assert_eq!(at_limit.depth(), crate::MAX_DELEGATION_DEPTH);
+        let (token, _) = signer
+            .sign_identity_jwt(IdentityTokenSpec {
+                subject: "controller:k8s",
+                rise_uid: Uuid::new_v4(),
+                audience: "https://rise.test",
+                ttl_secs: 600,
+                authorization_details: None,
+                act: Some(at_limit),
+            })
+            .expect("a chain at the platform limit is accepted");
+        match signer.verify_rise_jwt(&token).unwrap() {
+            RiseToken::Identity(claims) => assert_eq!(
+                claims.delegation_depth(),
+                crate::MAX_DELEGATION_DEPTH,
+                "the verified token reports the same depth it was signed with"
+            ),
+            other => panic!("expected Identity, got {other:?}"),
+        }
+
+        let too_long = chain(crate::MAX_DELEGATION_DEPTH + 1);
+        let err = signer
+            .sign_identity_jwt(IdentityTokenSpec {
+                subject: "controller:k8s",
+                rise_uid: Uuid::new_v4(),
+                audience: "https://rise.test",
+                ttl_secs: 600,
+                authorization_details: None,
+                act: Some(too_long),
+            })
+            .unwrap_err();
+        assert!(matches!(err, JwtSignerError::DelegationChainTooLong));
+    }
 }

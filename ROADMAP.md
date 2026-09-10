@@ -117,9 +117,12 @@ Status legend: `[x]` shipped · `[~]` in progress · `[ ]` planned.
   immutable through the store; atomic Organization-plus-admin-binding creation
   is available on an Organization create via `bootstrap.admin`, in the same
   transaction and rolled back together on failure.
-- [ ] Add conformance coverage for every applicable ADR-0001 acceptance
+- [x] Add conformance coverage for every applicable ADR-0001 acceptance
   scenario, including multi-org admins, membership removal, UID-bound token
-  invalidation, token caps, and grant/revocation races.
+  invalidation, token caps, and grant/revocation races. A `/// ADR-0001
+  scenario N` marker on each covering test is enforced by `mise run
+  adr:conformance:check`; scenario 10's operator-selector and JIT-login halves
+  remain deferred until the `operatorIdentities`/JIT-login item below lands.
 - [ ] Add the constrained Project ServiceAccount lifecycle operation. It uses
   fresh never-reused canonical names and atomically creates/deletes only its
   fixed Project-scoped policy and trust bundle, applying the effective-delta

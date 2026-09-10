@@ -3395,6 +3395,7 @@ async fn identity_admission_is_unbypassable_and_persists_canonical_defaults(
     Ok(())
 }
 
+/// ADR-0001 scenario 9
 #[sqlx::test]
 async fn user_identity_uniqueness_is_live_global_and_concurrency_authoritative(
     pool: sqlx::PgPool,
@@ -3503,6 +3504,7 @@ async fn user_identity_uniqueness_is_live_global_and_concurrency_authoritative(
     Ok(())
 }
 
+/// ADR-0001 scenario 16
 #[sqlx::test]
 async fn membership_owner_rules_and_name_bound_reactivation_are_enforced(
     pool: sqlx::PgPool,
@@ -6420,6 +6422,8 @@ async fn dropping_a_transaction_rolls_its_writes_back(pool: sqlx::PgPool) {
 /// arrives as `StoreError::Serialization` rather than an opaque backend error,
 /// because the caller's correct response is to replay the whole unit of work
 /// (ADR-0001 §5, scenario 33).
+///
+/// ADR-0001 scenario 33
 #[sqlx::test]
 async fn a_serialization_conflict_is_reported_as_retryable(pool: sqlx::PgPool) {
     let store = PgResourceStore::new(pool.clone());

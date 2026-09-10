@@ -116,6 +116,10 @@ description = "Verify the SQLX query cache for rise-runtime-sync is up to date."
 dir = "crates/rise-runtime-sync"
 run = "cargo sqlx prepare --check -- --all-targets"
 
+[tasks."adr:conformance:check"]
+description = "Verify every applicable ADR-0001 acceptance scenario (1-57) is claimed by a test marker and no deferred scenario (58-61) is."
+run = "bash scripts/check-adr-conformance.sh"
+
 [tasks.lint]
 description = "Run all linting checks (clippy, formatting, sqlx, helm)."
 run = """
@@ -132,6 +136,7 @@ cargo fmt --all -- --check
 mise sqlx:check
 mise deny
 mise resource:schema:check
+mise adr:conformance:check
 helm lint helm/rise
 mise terraform:check
 # Every crate whose tests need no database. Expressed as exclusions so a new
