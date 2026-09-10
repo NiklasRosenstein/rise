@@ -1974,6 +1974,19 @@ idempotent when a read-modify-write client replays the stored spec.
     module.
   - The check script uses `grep`, not `rg`, since CI runners are not
     guaranteed to have ripgrep installed.
+- Finding — a lost write reported as success, caught by scenario 33's
+  stochastic race and fixed in the same increment:
+  - After a `RoleBinding`/`PlatformRoleBinding` write, the handler runs the
+    write-time policy audit on the same `SERIALIZABLE` transaction to attach
+    `Warning` headers, and treated any audit failure as "no findings". A
+    serialization conflict raised by one of the audit's reads is a statement
+    error inside the transaction, which PostgreSQL answers by aborting it; the
+    following `COMMIT` then silently rolls back and returns without error, so
+    the handler answered `201 Created` for a row that was never persisted.
+  - `attach_binding_write_warnings` now propagates a store error from the
+    audit — retryable when it is a serialization conflict, so the write loop
+    replays the whole attempt — and keeps the log-and-continue path only for
+    the pure diagnostic failures that leave the transaction intact.
 - Verification:
   - `cargo test -p rise-authz`, `cargo test -p rise-backend-auth`.
   - `cargo test --workspace --all-features conformance` and `dispatch_tests`

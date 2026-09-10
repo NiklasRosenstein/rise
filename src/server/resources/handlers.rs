@@ -2442,6 +2442,11 @@ mod tests {
     }
 }
 
+#[cfg(test)]
+mod conformance;
+#[cfg(test)]
+mod test_support;
+
 /// DB-backed tests that drive the generic resource API through the
 /// `dispatch_*_inner` functions — the same code path the four Axum handlers
 /// run, minus only the `State`/`Path`/`Query`/`Json` extraction.
@@ -2454,374 +2459,10 @@ mod tests {
 /// auth tiers, versioning and error mapping end to end against Postgres.
 #[cfg(test)]
 mod dispatch_tests {
+    use super::test_support::*;
     use super::*;
-    use crate::db::models::User;
     use rise_resource_api::RESOURCE_DEFINITION_KIND;
-    use rise_resource_store_postgres::PgResourceStore;
-    use serde_json::{json, Value};
-
-    const OPERATOR: &str = "operator@example.com";
-    const PLAIN_USER: &str = "plain-user@example.com";
-    /// The configured default Organization's name, matching
-    /// `default_default_organization_name()` in `settings.rs`. Used to
-    /// exercise the policy-audit `OrganizationWithoutAdmin` severity downgrade
-    /// (decision D4), which turns on this exact name.
-    const DEFAULT_ORGANIZATION: &str = "default";
-
-    /// Build a `ResourceApiCtx` over a real `PgResourceStore`, with `OPERATOR`
-    /// on the operator email allowlist. The resource store schema is layered on
-    /// top of the root migrations `#[sqlx::test]` already ran, and the baseline
-    /// policy is seeded exactly as startup seeds it — without it an operator
-    /// would still reach everything (the evaluator hardcodes that), but nothing
-    /// else in the model would be present to reason about.
-    async fn ctx(pool: sqlx::PgPool) -> ResourceApiCtx {
-        ctx_with_operators(pool, vec![OPERATOR.into()], vec![]).await
-    }
-
-    async fn ctx_with_operators(
-        pool: sqlx::PgPool,
-        operator_users: Vec<String>,
-        operator_idp_groups: Vec<String>,
-    ) -> ResourceApiCtx {
-        rise_resource_store_postgres::run_migrations(&pool)
-            .await
-            .expect("resource store migrations");
-        let pg_store = Arc::new(PgResourceStore::new(pool.clone()));
-        let store: Arc<dyn ResourceStore> = pg_store.clone();
-        crate::server::policy_seed::run(store.as_ref())
-            .await
-            .expect("seed baseline policy");
-        ResourceApiCtx {
-            store,
-            authz: ResourceAuthorizer::new(
-                pg_store,
-                pool.clone(),
-                crate::server::authz::OperatorSelectors {
-                    users: Arc::new(operator_users),
-                    idp_groups: Arc::new(operator_idp_groups),
-                },
-            ),
-            tokens: Arc::new(token::tests::service(pool)),
-            default_organization_name: DEFAULT_ORGANIZATION.to_string(),
-        }
-    }
-
-    /// An `AnyAuth` carrying a User-backed `AuthContext`. `User` rows do not
-    /// need to exist in the DB — the resource API authorizes purely on the
-    /// email allowlists.
-    fn auth(email: &str) -> AnyAuth {
-        AnyAuth::User(AuthContext::User(User {
-            id: Uuid::new_v4(),
-            email: email.to_string(),
-            created_at: chrono::Utc::now(),
-            updated_at: chrono::Utc::now(),
-        }))
-    }
-
-    /// An `AnyAuth` carrying a controller token with the given controller id.
-    fn any_controller(id: &str) -> AnyAuth {
-        AnyAuth::Controller(ControllerAuthContext(
-            crate::server::auth::controller::ControllerPrincipal {
-                name: id.to_string(),
-                uid: Uuid::new_v4(),
-            },
-        ))
-    }
-
-    /// Create a live `Controller` resource named `name`, as the operator.
-    async fn create_controller(ctx: &ResourceApiCtx, name: &str) -> Value {
-        create_at(
-            ctx,
-            "rise.dev/v1alpha1/controllers",
-            json!({
-                "apiVersion": "rise.dev/v1alpha1",
-                "kind": "Controller",
-                "metadata": {"name": name},
-                "spec": {},
-            }),
-        )
-        .await
-    }
-
-    /// Create a live Controller named `name` and grant `controller:<name>` the
-    /// given statements via a seeded `PlatformRole` + `PlatformRoleBinding`,
-    /// mirroring `grant_authenticated` but naming the Controller subject
-    /// directly — a `PlatformRoleBinding`'s `controller:` subject must
-    /// identify a live Controller (admission-checked), and an org
-    /// `RoleBinding` never reaches a Controller anyway (ADR-0001 §3), so this
-    /// is always a platform grant.
-    async fn grant_controller(ctx: &ResourceApiCtx, name: &str, statements: Value) {
-        create_controller(ctx, name).await;
-        let role_name = format!("{name}-role");
-        create_at(
-            ctx,
-            "rise.dev/v1alpha1/platformroles",
-            json!({
-                "apiVersion": "rise.dev/v1alpha1",
-                "kind": "PlatformRole",
-                "metadata": {"name": role_name},
-                "spec": {"statements": statements},
-            }),
-        )
-        .await;
-        create_at(
-            ctx,
-            "rise.dev/v1alpha1/platformrolebindings",
-            json!({
-                "apiVersion": "rise.dev/v1alpha1",
-                "kind": "PlatformRoleBinding",
-                "metadata": {"name": format!("{name}-binding")},
-                "spec": {
-                    "subject": format!("controller:{name}"),
-                    "roleRef": {"kind": "PlatformRole", "name": role_name},
-                },
-            }),
-        )
-        .await;
-    }
-
-    /// Read a `Response` into `(status, json_body)`.
-    async fn read(resp: Response) -> (StatusCode, Value) {
-        let status = resp.status();
-        let bytes = axum::body::to_bytes(resp.into_body(), usize::MAX)
-            .await
-            .expect("response body");
-        let body = if bytes.is_empty() {
-            Value::Null
-        } else {
-            serde_json::from_slice(&bytes).unwrap_or(Value::Null)
-        };
-        (status, body)
-    }
-
-    /// Register a root-scoped `widgets` collection (group `example.dev`) served
-    /// at both `v1` and `v2`, with `v1` as the storage version.
-    async fn register_widget_rd(ctx: &ResourceApiCtx) {
-        let spec = json!({
-            "group": "example.dev",
-            "kind": "Widget",
-            "plural": "widgets",
-            "versions": [
-                {"name": "v1", "served": true, "storage": true},
-                {"name": "v2", "served": true, "storage": false},
-            ],
-        });
-        ctx.store
-            .register_resource_definition(CreateResourceParams {
-                labels: Default::default(),
-                api_version: rise_resource_api::API_VERSION_V1ALPHA1.to_string(),
-                kind: RESOURCE_DEFINITION_KIND.to_string(),
-                name: "widgets.example.dev".to_string(),
-                parent_uid: None,
-                annotations: BTreeMap::new(),
-                finalizers: vec![],
-                owner_references: vec![],
-                spec,
-                validator: None,
-            })
-            .await
-            .expect("register widgets RD");
-    }
-
-    /// Register an Organization-scoped `gadgets` collection whose declared
-    /// parent is the built-in `rise.dev/v1alpha1` `Organization` (depth 1).
-    async fn register_gadget_rd(ctx: &ResourceApiCtx) {
-        let spec = json!({
-            "group": "example.dev",
-            "kind": "Gadget",
-            "plural": "gadgets",
-            "parent": {"apiVersion": "rise.dev/v1alpha1", "kind": "Organization"},
-            "versions": [{"name": "v1", "served": true, "storage": true}],
-        });
-        ctx.store
-            .register_resource_definition(CreateResourceParams {
-                labels: Default::default(),
-                api_version: rise_resource_api::API_VERSION_V1ALPHA1.to_string(),
-                kind: RESOURCE_DEFINITION_KIND.to_string(),
-                name: "gadgets.example.dev".to_string(),
-                parent_uid: None,
-                annotations: BTreeMap::new(),
-                finalizers: vec![],
-                owner_references: vec![],
-                spec,
-                validator: None,
-            })
-            .await
-            .expect("register gadgets RD");
-    }
-
-    /// Register a `gizmos` collection whose declared parent is the `Gadget`
-    /// collection — a depth-2 chain (`Gizmo` → `Gadget` → `Organization`).
-    async fn register_gizmo_rd(ctx: &ResourceApiCtx) {
-        let spec = json!({
-            "group": "example.dev",
-            "kind": "Gizmo",
-            "plural": "gizmos",
-            "parent": {"apiVersion": "example.dev/v1", "kind": "Gadget"},
-            "versions": [{"name": "v1", "served": true, "storage": true}],
-        });
-        ctx.store
-            .register_resource_definition(CreateResourceParams {
-                labels: Default::default(),
-                api_version: rise_resource_api::API_VERSION_V1ALPHA1.to_string(),
-                kind: RESOURCE_DEFINITION_KIND.to_string(),
-                name: "gizmos.example.dev".to_string(),
-                parent_uid: None,
-                annotations: BTreeMap::new(),
-                finalizers: vec![],
-                owner_references: vec![],
-                spec,
-                validator: None,
-            })
-            .await
-            .expect("register gizmos RD");
-    }
-
-    /// POST `body` to `path`, asserting a 201, and return the created JSON.
-    async fn create_at(ctx: &ResourceApiCtx, path: &str, body: Value) -> Value {
-        let resp = dispatch_post_inner(ctx, path.to_string(), auth(OPERATOR), body)
-            .await
-            .expect("create resource");
-        let (status, created) = read(resp).await;
-        assert_eq!(status, StatusCode::CREATED, "unexpected create status");
-        created
-    }
-
-    /// Parse `metadata.uid` from a resource JSON body.
-    fn uid_of(resource: &Value) -> Uuid {
-        resource["metadata"]["uid"]
-            .as_str()
-            .expect("uid")
-            .parse()
-            .expect("parse uid")
-    }
-
-    /// Create an Organization through the generic API.
-    async fn create_org(ctx: &ResourceApiCtx, name: &str) {
-        create_at(
-            ctx,
-            "rise.dev/v1alpha1/organizations",
-            json!({
-                "apiVersion": "rise.dev/v1alpha1",
-                "kind": "Organization",
-                "metadata": {"name": name},
-                "spec": {"displayName": name},
-            }),
-        )
-        .await;
-    }
-
-    /// Create a live root `User` resource whose name is a fresh UUID, and an
-    /// `AnyAuth` for a session that authenticates as that same identity.
-    ///
-    /// `AnyAuth::User` derives its subject as `user:<db user id>` (see
-    /// `ResourceAuthorizer::principal`), so the resource-store `User`'s name
-    /// has to be that same UUID for the two to name one subject — the shape a
-    /// real login would produce once Users are JIT-provisioned by UID.
-    /// Returns the subject string (`user:<uuid>`) alongside the auth.
-    async fn create_user_principal(ctx: &ResourceApiCtx) -> (String, AnyAuth) {
-        let id = Uuid::new_v4();
-        let name = id.to_string();
-        create_at(
-            ctx,
-            "rise.dev/v1alpha1/users",
-            json!({
-                "apiVersion": "rise.dev/v1alpha1",
-                "kind": "User",
-                "metadata": {"name": name},
-                "spec": {},
-            }),
-        )
-        .await;
-        let auth = AnyAuth::User(AuthContext::User(User {
-            id,
-            email: format!("{name}@example.com"),
-            created_at: chrono::Utc::now(),
-            updated_at: chrono::Utc::now(),
-        }));
-        (format!("user:{name}"), auth)
-    }
-
-    /// Grant every authenticated caller `statements`, platform-wide.
-    ///
-    /// One `PlatformRole` plus one `PlatformRoleBinding` on
-    /// `system:authenticated` at wildcard scope — the only shape that reaches an
-    /// ordinary principal today, since a binding naming a `user:` subject needs
-    /// a `User` resource and those go live with identity resolution.
-    async fn grant_authenticated(ctx: &ResourceApiCtx, name: &str, statements: Value) {
-        create_at(
-            ctx,
-            "rise.dev/v1alpha1/platformroles",
-            json!({
-                "apiVersion": "rise.dev/v1alpha1",
-                "kind": "PlatformRole",
-                "metadata": {"name": name},
-                "spec": {"statements": statements},
-            }),
-        )
-        .await;
-        create_at(
-            ctx,
-            "rise.dev/v1alpha1/platformrolebindings",
-            json!({
-                "apiVersion": "rise.dev/v1alpha1",
-                "kind": "PlatformRoleBinding",
-                "metadata": {"name": name},
-                "spec": {
-                    "subject": "system:authenticated",
-                    "roleRef": {"kind": "PlatformRole", "name": name},
-                },
-            }),
-        )
-        .await;
-    }
-
-    /// JSON body for creating a widget at the given served apiVersion.
-    fn widget_body(api_version: &str, name: &str) -> Value {
-        json!({
-            "apiVersion": api_version,
-            "kind": "Widget",
-            "metadata": {"name": name},
-            "spec": {"size": "large"},
-        })
-    }
-
-    /// POST a widget and return the created resource JSON.
-    async fn create_widget(ctx: &ResourceApiCtx, api_version: &str, name: &str) -> Value {
-        let resp = dispatch_post_inner(
-            ctx,
-            "example.dev/v1/widgets".to_string(),
-            auth(OPERATOR),
-            widget_body(api_version, name),
-        )
-        .await
-        .expect("create widget");
-        let (status, body) = read(resp).await;
-        assert_eq!(status, StatusCode::CREATED, "unexpected create status");
-        body
-    }
-
-    /// A root-scoped Widget carrying `rise.dev/owner`, for policy-audit tests
-    /// that need the seeded `resource-owner` binding's `labelSelector` to
-    /// match *something* — otherwise every fresh install carries its own
-    /// `selectorMatchesNothing` finding for that binding, which would make
-    /// exact finding-count assertions depend on unrelated seed behavior. A
-    /// root-scoped setter is deliberate: naming a `user:` subject on one
-    /// produces no `inertOwnerLabel` finding of its own (the seeded binding's
-    /// `ResourceOrganization` clamp has no organization to compare against).
-    async fn create_widget_with_owner_label(ctx: &ResourceApiCtx, name: &str) -> Value {
-        create_at(
-            ctx,
-            "example.dev/v1/widgets",
-            json!({
-                "apiVersion": "example.dev/v1",
-                "kind": "Widget",
-                "metadata": {"name": name, "labels": {"rise.dev/owner": "user:nobody"}},
-                "spec": {"size": "large"},
-            }),
-        )
-        .await
-    }
+    use serde_json::json;
 
     // -------------------------------------------------------------------------
     // Labels
@@ -2921,6 +2562,8 @@ mod dispatch_tests {
     // Authorization: what stored policy grants, per resource
     // -------------------------------------------------------------------------
 
+    /// ADR-0001 scenario 38
+    ///
     /// A caller with no applicable `list` grant gets a masked-empty collection,
     /// not a 403 that would confirm the scope is populated (ADR-0001 §4).
     #[sqlx::test]
@@ -2942,6 +2585,8 @@ mod dispatch_tests {
         assert_eq!(body["items"].as_array().expect("items").len(), 0);
     }
 
+    /// ADR-0001 scenario 38
+    ///
     /// An item the caller holds no `get` on answers exactly as a name that does
     /// not exist does. A 403 here would hand back, one name at a time, every
     /// name the masked listing above it withholds.
@@ -3201,10 +2846,12 @@ mod dispatch_tests {
         assert_eq!(body["items"].as_array().expect("items").len(), 0);
     }
 
+    /// ADR-0001 scenario 37
+    /// ADR-0001 scenario 38
+    ///
     /// `list` without `get` returns the allowlisted projection: `apiVersion`,
     /// `kind`, and the documented `metadata` fields — never `spec` (ADR-0001
-    /// §4, scenario 37). Adding `get` expands the same item to the full stored
-    /// object (scenario 38).
+    /// §4). Adding `get` expands the same item to the full stored object.
     #[sqlx::test]
     async fn list_grant_projects_metadata_and_get_expands_it(pool: sqlx::PgPool) {
         let ctx = ctx(pool).await;
@@ -3337,11 +2984,13 @@ mod dispatch_tests {
     // Subresource boundaries a main write must not cross
     // -------------------------------------------------------------------------
 
-    /// ADR-0001 §2: main writes preserve finalizers, and only
-    /// `(update, Kind, finalizers)` may change them. Permissions never flow
-    /// implicitly between the main resource and a subresource, so plain
-    /// `update` — which every editor holds — must not be able to clear a
-    /// finalizer another controller is holding a deletion with.
+    /// ADR-0001 scenario 56
+    ///
+    /// Main writes preserve finalizers, and only `(update, Kind, finalizers)`
+    /// may change them. Permissions never flow implicitly between the main
+    /// resource and a subresource, so plain `update` — which every editor
+    /// holds — must not be able to clear a finalizer another controller is
+    /// holding a deletion with.
     #[sqlx::test]
     async fn a_main_write_cannot_change_finalizers(pool: sqlx::PgPool) {
         let ctx = ctx(pool).await;
@@ -3412,6 +3061,8 @@ mod dispatch_tests {
         assert_eq!(resp.status(), StatusCode::OK);
     }
 
+    /// ADR-0001 scenario 56
+    ///
     /// A reserved `system.rise.dev/*` finalizer is lifecycle bookkeeping the
     /// store owns. Planting one through a create would make the resource
     /// undeletable through every route the API offers — the `finalizers`
@@ -3441,6 +3092,8 @@ mod dispatch_tests {
         assert!(err.message.contains("reserved"), "{}", err.message);
     }
 
+    /// ADR-0001 scenario 55
+    ///
     /// A write verb is not a read grant (ADR-0001 §2). A caller who may set
     /// `status` has not been given the `spec`, so the response comes back at the
     /// granularity they may read.
@@ -3939,6 +3592,8 @@ mod dispatch_tests {
     // The write-time grant gate
     // -------------------------------------------------------------------------
 
+    /// ADR-0001 scenario 42
+    ///
     /// §6.6's creation exception: a genuinely new resource may name its creator
     /// as owner without the general gate, because there is no prior owner to
     /// displace and nothing is delegated to anyone else.
@@ -3987,9 +3642,11 @@ mod dispatch_tests {
         assert_eq!(resp.status(), StatusCode::OK);
     }
 
-    /// Scenario 41: an editor who would not hold the resulting grant cannot
-    /// relabel ownership — to themselves or to anyone else. The refusal is the
-    /// gate's and happens before the store resolves the named subject, so it is
+    /// ADR-0001 scenario 41
+    ///
+    /// An editor who would not hold the resulting grant cannot relabel
+    /// ownership — to themselves or to anyone else. The refusal is the gate's
+    /// and happens before the store resolves the named subject, so it is
     /// not an existence oracle for that subject either.
     #[sqlx::test]
     async fn relabelling_ownership_without_holding_it_is_refused(pool: sqlx::PgPool) {
@@ -4061,6 +3718,8 @@ mod dispatch_tests {
         assert!(body["metadata"].get("labels").is_none());
     }
 
+    /// ADR-0001 scenario 41
+    ///
     /// The other half of §6.6: the resource's *current* owner may hand ownership
     /// on, even though their own access arrives through the very label they are
     /// replacing. The writer's side of the comparison is pinned to the old
@@ -4124,6 +3783,8 @@ mod dispatch_tests {
         );
     }
 
+    /// ADR-0001 scenario 31
+    ///
     /// A writer who may create bindings still cannot hand out more than they
     /// hold: the delta the binding would confer is compared against their own
     /// effective policy over the same domain (ADR-0001 §5).
@@ -4284,6 +3945,8 @@ mod dispatch_tests {
         );
     }
 
+    /// ADR-0001 scenario 21
+    ///
     /// An operator bootstrapping an Organization gets both rows atomically: the
     /// Organization, and an exact org-root, scope-only `RoleBinding` naming
     /// `PlatformRole/org-admin` for the requested admin — the structural shape
@@ -4351,6 +4014,8 @@ mod dispatch_tests {
         );
     }
 
+    /// ADR-0001 scenario 21
+    ///
     /// `bootstrap.admin` naming no live User fails admission inside the same
     /// transaction as the Organization create, so the Organization itself
     /// never persists either.
@@ -4393,6 +4058,8 @@ mod dispatch_tests {
         );
     }
 
+    /// ADR-0001 scenario 21
+    ///
     /// `bootstrap` is an Organization-only feature; naming it on any other
     /// kind is rejected before anything is written.
     #[sqlx::test]
@@ -4431,6 +4098,8 @@ mod dispatch_tests {
         );
     }
 
+    /// ADR-0001 scenario 21
+    ///
     /// A caller who may create both an Organization and a RoleBinding, but
     /// holds nothing like the org-admin baseline, still cannot bootstrap one
     /// in: the grant gate refuses to let the binding delegate authority the
@@ -4491,6 +4160,8 @@ mod dispatch_tests {
         );
     }
 
+    /// ADR-0001 scenario 21
+    ///
     /// A name conflict on the Organization itself is reported before the
     /// admin binding is ever attempted, and leaves the existing Organization
     /// (and its lack of a second binding) untouched.
@@ -4610,6 +4281,8 @@ mod dispatch_tests {
         assert!(resp.status().is_success(), "{:?}", resp.status());
     }
 
+    /// ADR-0001 scenario 16
+    ///
     /// A `User` create is an activation: ADR-0001 §1 binds memberships and
     /// `user:` subjects to the *name*, so recreating a name stale policy still
     /// refers to makes that policy reachable again. Gating only the
@@ -4712,6 +4385,8 @@ mod dispatch_tests {
         assert_eq!(resp.status(), StatusCode::CREATED);
     }
 
+    /// ADR-0001 scenario 17
+    ///
     /// The activation gate has to measure the name's *Group ties*, not just the
     /// bindings that name it directly. A `GroupMembership` is a name-bound
     /// marker that outlives the User, so at the moment of the gate the row it
@@ -4858,6 +4533,8 @@ mod dispatch_tests {
         assert_eq!(resp.status(), StatusCode::OK);
     }
 
+    /// ADR-0001 scenario 30
+    ///
     /// The same writer may delegate authority they *do* hold: the delta is a
     /// subset of their own effective policy, so the gate passes.
     #[sqlx::test]
@@ -7152,122 +6829,13 @@ mod dispatch_tests {
     // -------------------------------------------------------------------------
 
     use crate::server::auth::identity::{resolve_identity, IdentityRejection};
-    use rise_backend_auth::{IdentityClaims, RiseToken};
 
-    const IP: &str = "203.0.113.7";
-
-    fn identity_body(name: &str, kind: &str) -> Value {
-        json!({
-            "apiVersion": "rise.dev/v1alpha1",
-            "kind": kind,
-            "metadata": {"name": name},
-            "spec": {},
-        })
-    }
-
-    async fn create_service_account(ctx: &ResourceApiCtx, org: &str, name: &str) -> Value {
-        create_at(
-            ctx,
-            &format!("rise.dev/v1alpha1/serviceaccounts/{org}"),
-            identity_body(name, "ServiceAccount"),
-        )
-        .await
-    }
-
-    fn trust_policy_body(kind: &str, name: &str, issuer: &str, claims: Value) -> Value {
-        json!({
-            "apiVersion": "rise.dev/v1alpha1",
-            "kind": kind,
-            "metadata": {"name": name},
-            "spec": {"issuer": issuer, "claims": claims},
-        })
-    }
-
-    async fn trust_service_account(
-        ctx: &ResourceApiCtx,
-        org: &str,
-        sa: &str,
-        name: &str,
-        issuer: &str,
-        claims: Value,
-    ) {
-        create_at(
-            ctx,
-            &format!("rise.dev/v1alpha1/serviceaccounttrustpolicies/{org}/{sa}"),
-            trust_policy_body("ServiceAccountTrustPolicy", name, issuer, claims),
-        )
-        .await;
-    }
-
-    async fn trust_controller(
-        ctx: &ResourceApiCtx,
-        controller: &str,
-        name: &str,
-        issuer: &str,
-        claims: Value,
-    ) {
-        create_at(
-            ctx,
-            &format!("rise.dev/v1alpha1/controllertrustpolicies/{controller}"),
-            trust_policy_body("ControllerTrustPolicy", name, issuer, claims),
-        )
-        .await;
-    }
-
-    fn exchange_body(assertion: &str) -> Value {
-        json!({
-            "grant_type": "urn:ietf:params:oauth:grant-type:token-exchange",
-            "subject_token": assertion,
-            "subject_token_type": "urn:ietf:params:oauth:token-type:jwt",
-        })
-    }
-
-    /// A credential-less POST: the workload exchange path.
-    async fn exchange(
-        ctx: &ResourceApiCtx,
-        path: &str,
-        body: Value,
-    ) -> Result<Response, ServerError> {
-        dispatch_post_any(ctx, path.to_string(), MaybeAuth(None), body, IP).await
-    }
-
-    /// An authenticated POST: the delegated path, or an ordinary create.
-    async fn post_as(
-        ctx: &ResourceApiCtx,
-        path: &str,
-        auth: AnyAuth,
-        body: Value,
-    ) -> Result<Response, ServerError> {
-        dispatch_post_any(ctx, path.to_string(), MaybeAuth(Some(auth)), body, IP).await
-    }
-
-    /// Decode a minted token through the service's own verifier.
-    fn decode(ctx: &ResourceApiCtx, body: &Value) -> IdentityClaims {
-        let token = body["access_token"].as_str().expect("access_token");
-        match ctx
-            .tokens
-            .signer()
-            .verify_rise_jwt(token)
-            .expect("verifies")
-        {
-            RiseToken::Identity(claims) => claims,
-            other => panic!("expected an identity token, got {other:?}"),
-        }
-    }
-
-    /// Authenticate a minted token exactly as the middleware does.
-    async fn identity_auth(ctx: &ResourceApiCtx, body: &Value) -> AnyAuth {
-        let claims = decode(ctx, body);
-        AnyAuth::User(AuthContext::Identity(
-            resolve_identity(ctx.store.as_ref(), &claims, token::tests::RISE_URL)
-                .await
-                .expect("the minted token resolves to a live principal"),
-        ))
-    }
-
-    const SA_TOKEN: &str = "rise.dev/v1alpha1/serviceaccounts/acme/ci/token";
-    const CI_CLAIMS: &str = "repo:acme/app:ref:main";
-
+    /// ADR-0001 scenario 44
+    ///
+    /// An external assertion presented to a ServiceAccount's `/token` considers
+    /// only that target's live trust policies and, on one match, mints a token
+    /// naming exactly its subject and UID — no RBAC token-create check applies
+    /// to workload exchange.
     #[sqlx::test]
     async fn workload_exchange_mints_a_target_bound_identity_token(pool: sqlx::PgPool) {
         let ctx = ctx(pool).await;
@@ -7346,8 +6914,13 @@ mod dispatch_tests {
         assert_eq!(claims.rise_uid, uid_of(&controller));
     }
 
-    /// Scenarios 44, 45 and 47: after the route is entered, every failure is
-    /// the same 401 body, and only a registered token route is entered at all.
+    /// ADR-0001 scenario 45
+    /// ADR-0001 scenario 47
+    ///
+    /// After the route is entered, every failure is the same 401 body, and
+    /// only a registered token route is entered at all; mixing an external
+    /// assertion with a Rise credential is a malformed request, not an
+    /// authentication failure.
     #[sqlx::test]
     async fn workload_exchange_failures_are_one_coarse_401(pool: sqlx::PgPool) {
         let ctx = ctx(pool).await;
@@ -7522,8 +7095,14 @@ mod dispatch_tests {
         assert_eq!(err.status, StatusCode::BAD_REQUEST, "{}", err.message);
     }
 
-    /// Scenarios 46, 48 and 57: delegated issuance is RBAC only, needs `create`
-    /// on the `token` subresource of the exact target, and records the caller.
+    /// ADR-0001 scenario 46
+    /// ADR-0001 scenario 48
+    /// ADR-0001 scenario 57
+    ///
+    /// Delegated issuance is RBAC only, needs `create` on the `token`
+    /// subresource of the exact target — `get` on the parent, `create` on the
+    /// main resource, and `get` on the subresource each grant nothing here —
+    /// and records the caller as the chain's delegator.
     #[sqlx::test]
     async fn delegated_issuance_requires_create_on_the_token_subresource(pool: sqlx::PgPool) {
         let ctx = ctx(pool).await;
@@ -7613,9 +7192,13 @@ mod dispatch_tests {
         assert!(err.message.contains("no such route"), "{}", err.message);
     }
 
-    /// Scenario 54 and §1's UID binding: a minted token is a principal of the
-    /// generic API, exercises the target's live policy, and dies with the
-    /// target's UID.
+    /// ADR-0001 scenario 7
+    /// ADR-0001 scenario 54
+    ///
+    /// A minted token is a principal of the generic API, exercises the
+    /// target's live policy on every request rather than a snapshot, and dies
+    /// with the target's UID: a recreated name reactivates its policy but
+    /// never revives a token minted for the retired incarnation.
     #[sqlx::test]
     async fn a_minted_token_authenticates_as_the_target_until_its_uid_dies(pool: sqlx::PgPool) {
         let ctx = ctx(pool).await;
@@ -7711,8 +7294,10 @@ mod dispatch_tests {
         ));
     }
 
-    /// Scenario 48: a minted identity may mint the next only through its own
-    /// live token-create grant, and the chain records every delegator.
+    /// ADR-0001 scenario 48
+    ///
+    /// A minted identity may mint the next only through its own live
+    /// token-create grant, and the chain records every delegator.
     #[sqlx::test]
     async fn delegation_chains_only_across_explicit_grants(pool: sqlx::PgPool) {
         let ctx = ctx(pool).await;
@@ -7800,8 +7385,13 @@ mod dispatch_tests {
         assert_eq!(err.status, StatusCode::NOT_FOUND, "{}", err.message);
     }
 
-    /// Scenarios 52 and 53: `authorization_details` narrow the issued token,
-    /// the ceiling applies on every request, and a malformed set is refused.
+    /// ADR-0001 scenario 52
+    /// ADR-0001 scenario 53
+    ///
+    /// `authorization_details` narrow the issued token, the ceiling applies
+    /// on every request — main-resource `get`, `list` and item projection
+    /// alike — and a malformed set is refused rather than falling back to
+    /// full policy.
     #[sqlx::test]
     async fn authorization_details_narrow_the_issued_token(pool: sqlx::PgPool) {
         let ctx = ctx(pool).await;
@@ -7965,8 +7555,11 @@ mod dispatch_tests {
         assert_eq!(err.status, StatusCode::BAD_REQUEST, "{}", err.message);
     }
 
-    /// `token` is create-only (ADR-0001 §2), and a trust policy may never name
-    /// Rise's own issuer (scenario 47).
+    /// ADR-0001 scenario 47
+    /// ADR-0001 scenario 57
+    ///
+    /// `token` is create-only — PUT, GET, and a Controller's own credential
+    /// each answer 405 — and a trust policy may never name Rise's own issuer.
     #[sqlx::test]
     async fn token_is_create_only_and_rise_is_never_an_external_issuer(pool: sqlx::PgPool) {
         let ctx = ctx(pool).await;
