@@ -48,9 +48,10 @@ use crate::server::auth::context::{AnyAuth, MaybeAuth};
 #[cfg(test)]
 use crate::server::auth::controller::ControllerAuthContext;
 use crate::server::authz::{
-    change_for_create, change_for_delete, change_for_scheduled_deletion, change_for_update,
-    label_changes, node_for, node_for_new, project_list_item, AuthorizationChangeSet,
-    AuthorizationContext, ReadGranularity, ResourceAuthorizer,
+    authorization_error_to_server_error, change_for_create, change_for_delete,
+    change_for_scheduled_deletion, change_for_update, label_changes, node_for, node_for_new,
+    project_list_item, AuthorizationChangeSet, AuthorizationContext, ReadGranularity,
+    ResourceAuthorizer,
 };
 use crate::server::error::ServerError;
 use crate::server::state::AppState;
@@ -1597,27 +1598,34 @@ fn read_granularity(readable: bool) -> ReadGranularity {
 /// the row just written (ADR-0001 §5: diagnostics never reject a write).
 ///
 /// The audit runs on the same transaction-scoped store the write just used, so
-/// it sees the row exactly as written, before commit. A failure here is logged
-/// and treated as no findings — a diagnostic must never hold the response the
-/// caller already earned hostage, and the write itself has already succeeded
-/// by the time this runs.
+/// it sees the row exactly as written, before commit. A diagnostic failure is
+/// logged and treated as no findings — it must never hold the response the
+/// caller already earned hostage. A *store* failure is different: an error
+/// raised by a statement inside a PostgreSQL transaction aborts that
+/// transaction, after which `COMMIT` silently rolls back instead of failing.
+/// Swallowing it would report a write that never persisted, so it propagates
+/// — as retryable when it is a serialization conflict, so the write loop
+/// replays the whole attempt — and the caller learns the truth.
 async fn attach_binding_write_warnings(
     authz: &AuthorizationContext,
     row: &ResourceRow,
     response: &mut Response,
-) {
+) -> Result<(), ServerError> {
     if row.kind != ROLE_BINDING_KIND && row.kind != PLATFORM_ROLE_BINDING_KIND {
-        return;
+        return Ok(());
     }
     let findings = match authz.audit_binding(row.uid).await {
         Ok(findings) => findings,
+        Err(error @ rise_authz::engine::AuthorizationError::Store(_)) => {
+            return Err(authorization_error_to_server_error(error));
+        }
         Err(error) => {
             tracing::warn!(
                 uid = %row.uid,
                 kind = %row.kind,
                 "policy audit after a binding write failed; continuing without warnings: {error:?}"
             );
-            return;
+            return Ok(());
         }
     };
     // RFC 7234's warn-code/warn-agent/warn-text form, as Kubernetes admission
@@ -1632,6 +1640,7 @@ async fn attach_binding_write_warnings(
                 .append(axum::http::header::WARNING, value);
         }
     }
+    Ok(())
 }
 
 fn subresource_name(subresource: Subresource) -> Result<SubresourceName, ServerError> {
@@ -1953,7 +1962,7 @@ async fn create_resource(
     // to the spec.
     let body = write_response(authz, &row, &resolved.info.api_version, &target).await?;
     let mut response = (StatusCode::CREATED, Json(body)).into_response();
-    attach_binding_write_warnings(authz, &row, &mut response).await;
+    attach_binding_write_warnings(authz, &row, &mut response).await?;
     Ok(response)
 }
 
@@ -2198,7 +2207,7 @@ async fn update_resource(
     let updated_target = authz.tree(updated.uid).await.map_err(mask_not_found)?;
     let body = write_response(authz, &updated, &resolved.info.api_version, &updated_target).await?;
     let mut response = Json(body).into_response();
-    attach_binding_write_warnings(authz, &updated, &mut response).await;
+    attach_binding_write_warnings(authz, &updated, &mut response).await?;
     Ok(response)
 }
 
